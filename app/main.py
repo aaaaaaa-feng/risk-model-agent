@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -17,7 +18,7 @@ from .agent import ProviderGateway
 from .config import MAX_UPLOAD_BYTES, ensure_runtime, load_config, new_id, public_config, save_config
 from .orchestrator import resume_after_confirmation, start_run
 from .storage import sha256_file, store
-from .worker import read_table, segment_analysis
+from .worker import list_sheets, profile_table, read_table, segment_analysis, target_summary
 
 ensure_runtime()
 app = FastAPI(title="风控建模 Agent", version=__version__)
@@ -49,6 +50,7 @@ class ConfigPayload(BaseModel):
     base_url: str = ""
     model: str = ""
     reviewer_model: str = ""
+    llm_enabled: bool = False
     api_key: str = ""
     clear_api_key: bool = False
     proxy: str = ""
@@ -56,6 +58,14 @@ class ConfigPayload(BaseModel):
     run_token_budget: int = Field(default=0, ge=0, le=10_000_000)
     monthly_token_budget: int = Field(default=0, ge=0, le=100_000_000)
     mode: str = Field(default="auto", pattern="^(auto|semi_trust)$")
+
+
+ALLOWED_MODELS = {
+    "logistic_regression",
+    "random_forest",
+    "hist_gradient_boosting",
+    "xgboost",
+}
 
 
 def public_dataset(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -93,6 +103,17 @@ def get_config() -> Dict[str, Any]:
 @app.put("/api/config")
 def put_config(payload: ConfigPayload) -> Dict[str, Any]:
     return {"config": save_config(payload.model_dump()), "provider": ProviderGateway().status()}
+
+
+@app.post("/api/config/test")
+def test_provider_config() -> Dict[str, Any]:
+    result = ProviderGateway().connectivity_check()
+    return {
+        "ok": result.ok,
+        "error_code": result.error_code,
+        "message": result.error_message or "Provider 连通性检查成功。",
+        "model": result.model,
+    }
 
 
 @app.get("/api/projects")
@@ -181,6 +202,11 @@ async def upload_dataset(project_id: str, file: UploadFile = File(...), sheet: O
                 if size > MAX_UPLOAD_BYTES:
                     raise HTTPException(413, "文件超过本地导入上限")
                 handle.write(chunk)
+        available_sheets = list_sheets(destination)
+        if len(available_sheets) > 1 and not sheet:
+            raise HTTPException(400, {"code": "SHEET_REQUIRED", "message": "XLSX 包含多个 Sheet，请明确选择。", "sheets": available_sheets})
+        if sheet and available_sheets and sheet not in available_sheets:
+            raise HTTPException(400, {"code": "SHEET_NOT_FOUND", "message": "指定 Sheet 不存在。", "sheets": available_sheets})
         frame = read_table(destination, sheet)
     except HTTPException:
         destination.unlink(missing_ok=True)
@@ -190,6 +216,41 @@ async def upload_dataset(project_id: str, file: UploadFile = File(...), sheet: O
         raise HTTPException(400, f"文件预检失败：{exc}")
     dataset = store.create_dataset(project_id, destination.name, destination, sha256_file(destination), size, len(frame), len(frame.columns), sheet, is_demo=False)
     return {"dataset": public_dataset(dataset), "is_demo": False, "message": "文件已留在本机，尚未上传任何外部服务。"}
+
+
+@app.post("/api/projects/{project_id}/datasets/inspect")
+async def inspect_dataset(project_id: str, file: UploadFile = File(...)) -> Dict[str, Any]:
+    if not store.get_project(project_id):
+        raise HTTPException(404, "项目不存在")
+    filename = Path(file.filename or "inspect.csv").name
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".csv", ".xlsx"}:
+        raise HTTPException(400, "只支持 CSV 和 XLSX")
+    temporary = store.project_dir(project_id) / "temp" / f"{new_id('inspect')}{suffix}"
+    temporary.parent.mkdir(parents=True, exist_ok=True)
+    size = 0
+    try:
+        with temporary.open("wb") as handle:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, "文件超过本地导入上限")
+                handle.write(chunk)
+        sheets = list_sheets(temporary)
+        if len(sheets) > 1:
+            return {"filename": filename, "bytes": size, "sheets": sheets, "requires_sheet": True}
+        frame = read_table(temporary)
+        profile = {"rows": len(frame), "columns": len(frame.columns), "target_candidates": profile_table(frame).get("target_candidates", [])}
+        return {"filename": filename, "bytes": size, "sheets": sheets, "requires_sheet": False, "preflight": profile}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, f"文件预检失败：{exc}")
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 @app.post("/api/projects/{project_id}/runs")
@@ -221,11 +282,51 @@ def confirm_decision(run_id: str, payload: DecisionPayload) -> Dict[str, Any]:
         raise HTTPException(404, "Run 不存在")
     if run["status"] != "awaiting_confirmation":
         raise HTTPException(409, "当前 Run 不在等待确认状态")
-    store.add_decision(run_id, payload.kind, payload.values)
     state = dict(run.get("state") or {})
+    plan = dict(state.get("plan") or {})
+    values = dict(payload.values or {})
+    target = values.get("target") or plan.get("target")
+    candidates = set((state.get("profile") or {}).get("target_candidates") or [])
+    if target not in candidates:
+        raise HTTPException(400, "确认的 Y 必须来自通过 0/1 契约检查的候选字段")
+    if target != (state.get("target") or {}).get("target"):
+        dataset = store.get_dataset(run["dataset_id"])
+        if not dataset:
+            raise HTTPException(404, "数据集不存在")
+        candidate_target = target_summary(read_table(Path(dataset["path"]), dataset.get("sheet")), target)
+        if not candidate_target.get("contract_ok"):
+            raise HTTPException(400, "确认的 Y 未通过 0/1 契约检查")
+        state["target"] = candidate_target
+    requested_models = values.get("models")
+    if requested_models is not None:
+        if not isinstance(requested_models, list):
+            raise HTTPException(400, "候选模型必须是列表")
+        requested_models = list(dict.fromkeys(str(item) for item in requested_models))
+        if not requested_models or any(item not in ALLOWED_MODELS for item in requested_models):
+            raise HTTPException(400, "候选模型列表为空或包含不支持的模型")
+        plan["models"] = requested_models
+    split_method = values.get("split_method")
+    if split_method:
+        if split_method not in {"time_holdout", "stratified_holdout"}:
+            raise HTTPException(400, "不支持的样本切分方式")
+        if split_method == "time_holdout" and not plan.get("time_column_suggestion"):
+            raise HTTPException(400, "当前数据没有可用时间字段，不能选择时间切分")
+        plan["split"] = {**(plan.get("split") or {}), "method": split_method}
+    excluded = values.get("excluded_features")
+    if excluded is not None:
+        if not isinstance(excluded, list) or any(not isinstance(item, str) for item in excluded):
+            raise HTTPException(400, "手动排除字段必须是字符串列表")
+        known_columns = {item.get("name") for item in (state.get("profile") or {}).get("columns_detail", [])}
+        unknown = [item for item in excluded if item not in known_columns]
+        if unknown:
+            raise HTTPException(400, f"手动排除字段不存在：{unknown[:5]}")
+        plan["screening"] = {**(plan.get("screening") or {}), "excluded_columns": list(dict.fromkeys(excluded))}
+    plan["target"] = target
+    state["plan"] = plan
     state["confirmed"] = True
+    store.add_decision(run_id, payload.kind, {**values, "target": target, "models": plan.get("models"), "split_method": plan.get("split", {}).get("method"), "excluded_features": plan.get("screening", {}).get("excluded_columns", [])})
     store.update_run(run_id, status="queued", phase="screening", state=state)
-    store.append_event(run_id, "decision_confirmed", {"node": "planning", "status": "queued", "kind": payload.kind, "message": "用户已确认关键建模决定，继续本地筛选与训练。"})
+    store.append_event(run_id, "decision_confirmed", {"node": "cleaning", "status": "queued", "kind": payload.kind, "message": "用户已确认关键建模决定，继续本地筛选与训练。"})
     resume_after_confirmation(store.get_run(run_id))
     return {"run": public_run(store.get_run(run_id))}
 
@@ -291,6 +392,33 @@ def report_html(run_id: str) -> FileResponse:
     if not path.exists():
         raise HTTPException(404, "报告尚未生成")
     return FileResponse(path, media_type="text/html")
+
+
+@app.get("/api/runs/{run_id}/report.xlsx")
+def report_xlsx(run_id: str) -> FileResponse:
+    run = store.get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run 不存在")
+    path = store.run_dir(run["project_id"], run_id) / "report.xlsx"
+    if not path.exists():
+        raise HTTPException(404, "XLSX 报告尚未生成")
+    return FileResponse(path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename="risk-model-report.xlsx")
+
+
+@app.get("/api/runs/{run_id}/artifacts.zip")
+def artifacts_zip(run_id: str) -> FileResponse:
+    run = store.get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run 不存在")
+    run_dir = store.run_dir(run["project_id"], run_id)
+    files = [path for path in run_dir.rglob("*") if path.is_file() and path.name != "artifacts.zip"]
+    if not files:
+        raise HTTPException(404, "交付物尚未生成")
+    archive = run_dir / "artifacts.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as handle:
+        for path in files:
+            handle.write(path, path.relative_to(run_dir))
+    return FileResponse(archive, media_type="application/zip", filename="risk-model-artifacts.zip")
 
 
 @app.post("/api/projects/{project_id}/analysis")

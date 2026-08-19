@@ -99,7 +99,7 @@ Worker 能力通过本地 Tool Registry 暴露给 Orchestrator。执行模型按
 | `check_stability` | 稳定性分析 | 时间/样本分区 | PSI、分布变化和提示 |
 | `analyze_association` | 相关性与冗余分析 | 候选变量、方法 | 相关簇、保留建议证据 |
 | `select_features` | 应用筛选策略 | 策略版本、统计产物 | 入选/排除/原因 |
-| `train_candidate` | 训练一个候选模型 | 冻结计划、算法配置 | 模型、OOF/验证结果 |
+| `train_candidate` | 训练一个候选模型 | 冻结计划、算法配置 | 模型、验证/OOT 结果 |
 | `compare_models` | 公平比较候选模型 | 候选结果、指标规则 | 排名、冠军建议和风险 |
 | `generate_scorecard` | 生成逻辑回归评分卡 | WOE/LR 模型、PDO 等 | 分数映射和校验 |
 | `explain_model` | 树模型解释 | 模型、允许样本 | 重要性/解释产物 |

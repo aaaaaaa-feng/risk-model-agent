@@ -99,6 +99,13 @@
             </section>
           </div>
 
+          <section class="panel analysis-panel">
+            <div class="panel-heading"><div><span class="section-kicker">本地探索</span><h3>多维画像分析</h3></div><span class="muted">最多 4 个维度 · 小样本自动隐藏</span></div>
+            <div id="analysis-controls" class="analysis-controls"><span class="muted">完成一次画像后，可选择 1—4 个字段查看样本量和坏样本率。</span></div>
+            <button id="run-analysis" class="secondary-button small" disabled>运行本地分析</button>
+            <div id="analysis-result" class="analysis-result"></div>
+          </section>
+
           <section class="panel timeline-panel">
             <div class="panel-heading"><div><span class="section-kicker">可观察过程</span><h3>Agent 时间线</h3></div><span id="timeline-count" class="muted">0 条事件</span></div>
             <div id="timeline" class="timeline empty-timeline"><div class="timeline-placeholder">运行开始后，这里会显示节点、工具、审核和产物事件。</div></div>
@@ -147,9 +154,10 @@
         <div class="form-two"><label>Base URL<input name="base_url" placeholder="https://api.example.com/v1" /></label><label>主模型<input name="model" placeholder="model-name" /></label></div>
         <div class="form-two"><label>Reviewer 模型<input name="reviewer_model" placeholder="reviewer-model" /></label><label>HTTP 代理<input name="proxy" placeholder="可选" /></label></div>
         <label>API Key<input name="api_key" type="password" placeholder="留空表示不修改" autocomplete="off" /></label>
+        <label class="toggle-line"><input name="llm_enabled" type="checkbox" />启用外部 LLM（仅发送本地 SafeEvidence）</label>
         <div class="form-two"><label>单次 Token 预算<input name="run_token_budget" type="number" min="0" placeholder="0 = 不启用" /></label><label>单月 Token 预算<input name="monthly_token_budget" type="number" min="0" placeholder="0 = 不启用" /></label></div>
         <div id="settings-status" class="form-status"></div>
-        <div class="modal-actions"><button type="button" id="cancel-settings" class="secondary-button">取消</button><button type="submit" class="primary-button">保存到本机</button></div>
+        <div class="modal-actions"><button type="button" id="provider-test" class="secondary-button">测试连接</button><button type="button" id="cancel-settings" class="secondary-button">取消</button><button type="submit" class="primary-button">保存到本机</button></div>
       </form>
     </section>
   </div>

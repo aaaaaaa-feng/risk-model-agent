@@ -6,7 +6,7 @@ const escapeHtml = function (value) { return String(value == null ? '' : value).
 async function api(path, options) {
   const response = await fetch(path, options || {});
   const payload = await response.json().catch(function () { return {}; });
-  if (!response.ok) throw new Error(payload.detail || payload.message || '请求失败');
+  if (!response.ok) { const detail = payload.detail; throw new Error(typeof detail === 'string' ? detail : detail && detail.message ? detail.message + (detail.sheets ? ' 可选 Sheet：' + detail.sheets.join('、') : '') : payload.message || '请求失败'); }
   return payload;
 }
 function showNotice(message, kind) {
@@ -47,7 +47,7 @@ function renderProject() {
   $('#project-title').textContent = state.project.name;
   $('#dataset-version').textContent = state.datasets.length ? 'v' + state.datasets.length : '—';
   $('#run-version').textContent = state.run ? state.run.id.slice(-6) : '—';
-  renderDataset(); renderRun(); renderStages();
+  renderDataset(); renderRun(); renderStages(); renderAnalysisControls();
   $('#start-run').disabled = !state.datasets.length || ['queued', 'running', 'awaiting_confirmation'].includes(state.run && state.run.status);
 }
 function renderDataset() {
@@ -78,11 +78,34 @@ function statusText(status) { return ({ idle: '先选择自己的文件，或者
 function statusLabel(status) { return ({ idle: '等待', queued: '排队', running: '运行中', awaiting_confirmation: '待确认', succeeded: '已完成', failed: '失败', blocked: '已阻断' })[status] || status; }
 function statusClass(status) { return ({ running: 'running', queued: 'running', awaiting_confirmation: 'warn', failed: 'block', blocked: 'block', succeeded: 'safe' })[status] || 'neutral'; }
 function renderStages() {
-  const current = state.run && state.run.phase; const phases = [['profiling', '数据画像'], ['planning', 'Y 与计划'], ['screening', '变量筛选'], ['training', '模型训练'], ['reporting', '报告与产物']]; const order = phases.map(function (item) { return item[0]; }); const currentIndex = order.indexOf(current);
+  const current = state.run && state.run.phase; const phases = [['profiling', '数据画像'], ['planning', 'Y 与计划'], ['eda', '探索分析'], ['cleaning', '数据清洗'], ['screening', '变量筛选'], ['training', '模型训练'], ['reporting', '报告与产物']]; const order = phases.map(function (item) { return item[0]; }); const currentIndex = order.indexOf(current);
   $('#stage-list').innerHTML = phases.map(function (item, index) {
     const done = state.run && (state.run.status === 'succeeded' || (currentIndex >= 0 && index < currentIndex)); const active = current === item[0]; const blocked = state.run && state.run.status === 'blocked' && active;
     return '<div class="stage-item ' + (done ? 'done' : '') + ' ' + (active ? 'active' : '') + ' ' + (blocked ? 'blocked' : '') + '">' + (done ? '✓ ' : '') + item[1] + '</div>';
   }).join('');
+}
+function renderAnalysisControls() {
+  const control = $('#analysis-controls'); const button = $('#run-analysis');
+  if (!control || !button) return;
+  const profile = state.run && state.run.state && state.run.state.profile || (state.datasets[0] && state.datasets[0].profile) || {};
+  const columns = profile.columns_detail || [];
+  if (!columns.length) { control.innerHTML = '<span class="muted">开始一次分析后，这里会出现可选字段。</span>'; button.disabled = true; return; }
+  const options = columns.map(function (item) { return '<option value="' + escapeHtml(item.name) + '">' + escapeHtml(item.name) + ' · ' + escapeHtml(item.type || '') + '</option>'; }).join('');
+  control.innerHTML = [0, 1, 2, 3].map(function (index) { return '<select class="analysis-select" data-analysis-index="' + index + '"><option value="">维度 ' + (index + 1) + '（可选）</option>' + options + '</select>'; }).join('');
+  control.querySelectorAll('.analysis-select').forEach(function (select) { select.addEventListener('change', function () { button.disabled = !Array.from(control.querySelectorAll('.analysis-select')).some(function (item) { return item.value; }); }); });
+  button.disabled = true;
+}
+async function runAnalysis() {
+  if (!state.project || !state.datasets[0]) return;
+  const selects = Array.from(document.querySelectorAll('.analysis-select')).map(function (select) { return select.value; }).filter(Boolean);
+  if (!selects.length) return;
+  const profile = state.run && state.run.state && state.run.state.profile || {};
+  const details = Object.fromEntries((profile.columns_detail || []).map(function (item) { return [item.name, item]; }));
+  try {
+    const result = await api('/api/projects/' + state.project.id + '/analysis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: state.datasets[0].id, spec: { dimensions: selects.map(function (column) { return { column: column, transform: details[column] && details[column].type === 'numeric' ? 'quantile_bins' : 'category', bins: 10 }; }), target: { column: state.run && state.run.state && state.run.state.plan && state.run.state.plan.target }, min_group_size: 50, max_groups: 1000 } }) });
+    const rows = (result.analysis && result.analysis.rows) || [];
+    $('#analysis-result').innerHTML = rows.length ? '<div class="analysis-meta">返回 ' + rows.length + ' 个组合，隐藏 ' + (result.analysis.suppressed_groups || 0) + ' 个小样本组合</div><div class="analysis-table-wrap"><table><thead><tr>' + selects.map(function (column) { return '<th>' + escapeHtml(column) + '</th>'; }).join('') + '<th>样本</th><th>坏样本率</th></tr></thead><tbody>' + rows.slice(0, 30).map(function (row) { return '<tr>' + selects.map(function (column) { return '<td>' + escapeHtml(row['__dim_' + column] || row[column] || '') + '</td>'; }).join('') + '<td>' + escapeHtml(row.row_count) + '</td><td>' + escapeHtml(row.bad_rate == null ? '—' : (row.bad_rate * 100).toFixed(2) + '%') + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<span class="muted">没有达到最小样本量的组合。</span>';
+  } catch (error) { showNotice(error.message, 'block'); }
 }
 function renderTimeline() {
   const timeline = $('#timeline'); $('#timeline-count').textContent = state.events.length + ' 条事件';
@@ -99,15 +122,24 @@ function renderActionCard() {
   if (!state.datasets.length) { card.innerHTML = '<h3>先导入一个数据集</h3><p>支持 CSV / XLSX。文件留在本机，上传后会先做预检。</p><button class="secondary-button action-button" id="panel-choose">选择文件</button>'; $('#panel-choose').addEventListener('click', function () { $('#file-input').click(); }); return; }
   if (!run) { card.innerHTML = '<h3>准备好了</h3><p>点击右上角“开始分析”，本地 Worker 会先建立画像。</p>'; return; }
   if (run.status === 'awaiting_confirmation') {
-    const runState = run.state || {}; const plan = runState.plan || {}; const target = runState.target || {}; const review = runState.plan_review || {};
+    const runState = run.state || {}; const plan = runState.plan || {}; const target = runState.target || {}; const review = runState.plan_review || {}; const cleaning = runState.cleaning || {};
     const split = plan.split || {}; const models = (plan.models || []).map(escapeHtml).join('、') || '待定';
+    const targetCandidates = (runState.profile && runState.profile.target_candidates) || [];
+    const targetOptions = targetCandidates.map(function (candidate) { return '<option value="' + escapeHtml(candidate) + '" ' + (candidate === (plan.target || target.target) ? 'selected' : '') + '>' + escapeHtml(candidate) + '</option>'; }).join('');
+    const splitOptions = ['time_holdout', 'stratified_holdout'].map(function (method) { return '<option value="' + method + '" ' + (method === (split.method || 'stratified_holdout') ? 'selected' : '') + '>' + (method === 'time_holdout' ? '时间留出' : '分层留出') + '</option>'; }).join('');
+    const modelOptions = ['logistic_regression', 'random_forest', 'hist_gradient_boosting', 'xgboost'].map(function (model) { return '<label class="model-option"><input type="checkbox" data-confirm-model="' + model + '" ' + ((plan.models || []).includes(model) ? 'checked' : '') + ' />' + model + '</label>'; }).join('');
     const findings = (review.findings || []).map(function (item) { return '<li>' + escapeHtml(item.message || item.code || '需关注') + '</li>'; }).join('');
+    const cleaningFindings = (cleaning.requires_confirmation || []).map(function (item) { return '<li>' + escapeHtml(item.message || item.code || '需关注') + '</li>'; }).join('');
     card.innerHTML = '<h3>需要你的确认</h3><p>Reviewer 已完成计划审核。确认的是业务方案，不需要阅读生成代码。</p>' +
       '<div class="decision-summary"><div><span>Y 字段</span><strong>' + escapeHtml(plan.target || target.target || '待确定') + '</strong></div>' +
       '<div><span>正类比例</span><strong>' + (target.positive_rate == null ? '—' : escapeHtml((target.positive_rate * 100).toFixed(2) + '%')) + '</strong></div>' +
       '<div><span>样本切分</span><strong>' + escapeHtml(split.method || '待定') + ' · ' + escapeHtml(String(split.train || '—')) + '/' + escapeHtml(String(split.validation || '—')) + '/' + escapeHtml(String(split.oot || '—')) + '</strong></div>' +
       '<div><span>候选模型</span><strong>' + models + '</strong></div></div>' +
       (findings ? '<div class="review-findings"><span>Reviewer 提示</span><ul>' + findings + '</ul></div>' : '') +
+      (cleaningFindings ? '<div class="review-findings"><span>清洗提示</span><ul>' + cleaningFindings + '</ul></div>' : '') +
+      '<div class="decision-controls"><label>确认 Y 字段<select id="confirm-target">' + targetOptions + '</select></label>' +
+      '<label>确认样本切分<select id="confirm-split">' + splitOptions + '</select></label>' +
+      '<div><span class="control-label">本次候选模型</span><div class="model-options">' + modelOptions + '</div></div></div>' +
       '<button class="primary-button action-button" id="confirm-plan">确认并继续</button>';
     $('#confirm-plan').addEventListener('click', confirmPlan);
   }
@@ -150,7 +182,12 @@ async function createDemo() {
 }
 async function uploadFile(file) {
   if (!state.project || !file) return; const form = new FormData(); form.append('file', file);
-  try { const data = await api('/api/projects/' + state.project.id + '/datasets', { method: 'POST', body: form }); showNotice(data.message); await selectProject(state.project.id); }
+  try {
+    const inspectionForm = new FormData(); inspectionForm.append('file', file);
+    const inspection = await api('/api/projects/' + state.project.id + '/datasets/inspect', { method: 'POST', body: inspectionForm });
+    if (inspection.requires_sheet) { const sheet = window.prompt('请选择 Sheet：' + inspection.sheets.join('、'), inspection.sheets[0]); if (!sheet) return; form.append('sheet', sheet); }
+    const data = await api('/api/projects/' + state.project.id + '/datasets', { method: 'POST', body: form }); showNotice(data.message); await selectProject(state.project.id);
+  }
   catch (error) { showNotice(error.message, 'block'); }
 }
 async function startRun() {
@@ -162,17 +199,21 @@ async function startRun() {
 }
 async function confirmPlan() {
   if (!state.run) return;
+  const target = $('#confirm-target') && $('#confirm-target').value;
+  const splitMethod = $('#confirm-split') && $('#confirm-split').value;
+  const models = Array.from(document.querySelectorAll('[data-confirm-model]:checked')).map(function (input) { return input.dataset.confirmModel; });
+  if (!target || !splitMethod || !models.length) { showNotice('请先确认 Y、样本切分，并至少选择一个候选模型。', 'block'); return; }
   try {
-    await api('/api/runs/' + state.run.id + '/decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'plan_confirmation', values: { reviewed_without_code_reading: true } }) });
+    await api('/api/runs/' + state.run.id + '/decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'plan_confirmation', values: { target: target, split_method: splitMethod, models: models, reviewed_without_code_reading: true } }) });
     showNotice('已记录正式确认，继续本地筛选与训练。'); await syncRun(); connectStream();
   } catch (error) { showNotice(error.message, 'block'); }
 }
 async function loadSettings() {
-  const data = await api('/api/config'); state.config = data.config; $('#provider-chip').textContent = data.provider.configured ? 'API 已配置 · 确定性' : '未配置 LLM'; $('#provider-chip').className = 'chip ' + (data.provider.configured ? 'safe' : 'neutral'); $('#evidence-provider').textContent = data.provider.configured ? '已配置 · 当前仍确定性' : '确定性降级';
-  const form = $('#settings-form'); Object.entries(data.config || {}).forEach(function (entry) { if (form.elements[entry[0]] && entry[0] !== 'api_key') form.elements[entry[0]].value = entry[1] == null ? '' : entry[1]; });
+  const data = await api('/api/config'); state.config = data.config; $('#provider-chip').textContent = data.provider.enabled ? 'LLM 已启用' : data.provider.configured ? 'API 已配置 · 确定性' : '未配置 LLM'; $('#provider-chip').className = 'chip ' + (data.provider.enabled ? 'safe' : 'neutral'); $('#evidence-provider').textContent = data.provider.enabled ? '外部 API · 仅 SafeEvidence' : data.provider.configured ? '已配置 · 当前仍确定性' : '确定性降级';
+  const form = $('#settings-form'); Object.entries(data.config || {}).forEach(function (entry) { if (form.elements[entry[0]] && entry[0] !== 'api_key') { if (form.elements[entry[0]].type === 'checkbox') form.elements[entry[0]].checked = Boolean(entry[1]); else form.elements[entry[0]].value = entry[1] == null ? '' : entry[1]; } });
 }
 async function saveSettings(event) {
-  event.preventDefault(); const form = new FormData(event.target); const payload = Object.fromEntries(form.entries()); payload.run_token_budget = Number(payload.run_token_budget || 0); payload.monthly_token_budget = Number(payload.monthly_token_budget || 0);
+  event.preventDefault(); const formElement = event.target; const form = new FormData(formElement); const payload = Object.fromEntries(form.entries()); payload.llm_enabled = formElement.elements.llm_enabled.checked; payload.run_token_budget = Number(payload.run_token_budget || 0); payload.monthly_token_budget = Number(payload.monthly_token_budget || 0);
   try { await api('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); $('#settings-status').textContent = '已保存到本机安全目录。'; await loadSettings(); setTimeout(function () { $('#settings-modal').classList.add('hidden'); }, 700); }
   catch (error) { $('#settings-status').textContent = error.message; }
 }
@@ -182,7 +223,12 @@ async function sendFeedback(reaction) {
 }
 
 $('#new-project').addEventListener('click', createProject); $('#empty-new-project').addEventListener('click', createProject); $('#empty-demo').addEventListener('click', createDemo); $('#start-run').addEventListener('click', startRun); $('#choose-file').addEventListener('click', function () { $('#file-input').click(); }); $('#file-input').addEventListener('change', function (event) { uploadFile(event.target.files[0]); });
+$('#run-analysis').addEventListener('click', runAnalysis);
+$('#dataset-card').addEventListener('dragover', function (event) { event.preventDefault(); $('#dataset-card').classList.add('dragging'); });
+$('#dataset-card').addEventListener('dragleave', function () { $('#dataset-card').classList.remove('dragging'); });
+$('#dataset-card').addEventListener('drop', function (event) { event.preventDefault(); $('#dataset-card').classList.remove('dragging'); uploadFile(event.dataTransfer.files[0]); });
 $('#mode-toggle').addEventListener('click', function () { state.mode = state.mode === 'auto' ? 'semi_trust' : 'auto'; $('#mode-toggle').textContent = state.mode === 'auto' ? '自动运行模式' : '半信任模式'; renderRun(); });
 $('#open-settings').addEventListener('click', async function () { $('#settings-modal').classList.remove('hidden'); await loadSettings(); }); $('#close-settings').addEventListener('click', function () { $('#settings-modal').classList.add('hidden'); }); $('#cancel-settings').addEventListener('click', function () { $('#settings-modal').classList.add('hidden'); }); $('#settings-form').addEventListener('submit', saveSettings);
 document.querySelectorAll('.feedback-button').forEach(function (button) { button.addEventListener('click', function () { sendFeedback(button.dataset.reaction); }); });
+$('#provider-test').addEventListener('click', async function () { $('#settings-status').textContent = '正在测试…'; try { const result = await api('/api/config/test', { method: 'POST' }); $('#settings-status').textContent = result.ok ? '连接成功。' : (result.error_code || '连接未成功') + '：' + result.message; } catch (error) { $('#settings-status').textContent = error.message; } });
 loadSettings().catch(function () {}); loadProjects().catch(function (error) { showNotice(error.message, 'block'); });

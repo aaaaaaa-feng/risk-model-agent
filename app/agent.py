@@ -1,31 +1,195 @@
 from __future__ import annotations
 
+import json
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+
+import httpx
 
 from .config import load_config, provider_key
 
 
-class ProviderGateway:
-    """Safe boundary for a future external LLM call.
+SENSITIVE_EVIDENCE_KEYS = {
+    "raw_rows",
+    "raw_data",
+    "customer_records",
+    "customer_level_records",
+    "original_column_names",
+    "local_path",
+    "dataset_path",
+    "model_path",
+}
 
-    The MVP intentionally uses a deterministic fallback when no provider is configured.
-    If a provider is configured, the gateway still only accepts SafeEvidence-shaped payloads;
-    wiring a real call can be enabled later without moving raw data into the Agent layer.
+
+@dataclass
+class ProviderResult:
+    ok: bool
+    content: str = ""
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    model: str = ""
+    usage: Optional[Dict[str, Any]] = None
+
+
+def _assert_safe_payload(value: Any, key_path: str = "payload") -> None:
+    """Fail closed before any payload can cross the Provider boundary."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized = str(key).lower()
+            if normalized in SENSITIVE_EVIDENCE_KEYS:
+                raise ValueError(f"DLP_BLOCK: forbidden evidence key at {key_path}.{key}")
+            _assert_safe_payload(item, f"{key_path}.{key}")
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _assert_safe_payload(item, f"{key_path}[{index}]")
+
+
+def _extract_message_content(payload: Dict[str, Any]) -> str:
+    choices = payload.get("choices") or []
+    if not choices:
+        raise ValueError("PROVIDER_EMPTY_RESPONSE: missing choices")
+    message = choices[0].get("message") or {}
+    content = message.get("content", "")
+    if isinstance(content, list):
+        content = "".join(str(item.get("text", "")) for item in content if isinstance(item, dict))
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("PROVIDER_EMPTY_RESPONSE: missing message content")
+    return content.strip()
+
+
+def _parse_json_content(content: str) -> Dict[str, Any]:
+    cleaned = content.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.I)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    parsed = json.loads(cleaned)
+    if not isinstance(parsed, dict):
+        raise ValueError("PROVIDER_SCHEMA_INVALID: expected a JSON object")
+    return parsed
+
+
+class ProviderGateway:
+    """OpenAI-compatible Provider boundary with an explicit opt-in switch.
+
+    The domain layer never receives the API key and never sends a DataFrame. A
+    configured key alone does not enable network calls; the user must explicitly
+    turn on ``llm_enabled`` in the local settings page.
     """
 
+    def __init__(self, config: Optional[Dict[str, Any]] = None, client_factory: Any = None):
+        self.config = config or load_config()
+        self._client_factory = client_factory or httpx.Client
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.config.get("llm_enabled"))
+
+    @property
+    def configured(self) -> bool:
+        return bool(provider_key() and self.config.get("base_url") and self.config.get("model"))
+
+    def _endpoint(self) -> str:
+        base_url = str(self.config.get("base_url") or "").strip().rstrip("/")
+        return base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
+
     def status(self) -> Dict[str, Any]:
-        config = load_config()
-        configured = bool(provider_key() and config.get("base_url") and config.get("model"))
+        configured = self.configured
+        active = configured and self.enabled
+        if active:
+            mode = "external-enabled"
+            message = "外部 API 已启用；请求只允许携带 SafeEvidence。"
+        elif configured:
+            mode = "deterministic-fallback"
+            message = "API 参数已保存但未启用网络调用，当前仍使用本地确定性流程。"
+        else:
+            mode = "deterministic-fallback"
+            message = "未配置外部 API，Agent 使用本地确定性建议。"
         return {
             "configured": configured,
-            "provider": config.get("provider", "OpenAI-compatible"),
-            "model": config.get("model", ""),
-            "reviewer_model": config.get("reviewer_model", ""),
-            "mode": "external-ready" if configured else "deterministic-fallback",
-            "message": "已配置外部 API，但当前运行仍以本地确定性流程为事实源。" if configured else "未配置外部 API，Agent 使用本地确定性建议。",
+            "enabled": active,
+            "provider": self.config.get("provider", "OpenAI-compatible"),
+            "model": self.config.get("model", ""),
+            "reviewer_model": self.config.get("reviewer_model", ""),
+            "mode": mode,
+            "message": message,
         }
 
+    def complete(
+        self,
+        system_prompt: str,
+        user_payload: Dict[str, Any],
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+    ) -> ProviderResult:
+        if not self.enabled or not self.configured:
+            return ProviderResult(ok=False, error_code="PROVIDER_DISABLED", error_message="Provider 未启用或配置不完整")
+        try:
+            _assert_safe_payload(user_payload)
+            _assert_safe_payload({"system_prompt": system_prompt})
+        except ValueError as exc:
+            return ProviderResult(ok=False, error_code="DLP_BLOCK", error_message=str(exc))
+
+        token_budget = int(self.config.get("run_token_budget") or 0)
+        selected_max_tokens = max_tokens or (min(token_budget, 4096) if token_budget else 2048)
+        body = {
+            "model": model or self.config.get("model"),
+            "temperature": 0,
+            "max_tokens": selected_max_tokens,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False, sort_keys=True)},
+            ],
+        }
+        headers = {"Authorization": f"Bearer {provider_key()}", "Content-Type": "application/json"}
+        timeout = httpx.Timeout(30.0, connect=10.0)
+        client_kwargs: Dict[str, Any] = {"timeout": timeout}
+        proxy = str(self.config.get("proxy") or "").strip()
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        ca_cert = str(self.config.get("ca_cert") or "").strip()
+        if ca_cert:
+            client_kwargs["verify"] = ca_cert
+        try:
+            with self._client_factory(**client_kwargs) as client:
+                response = client.post(self._endpoint(), headers=headers, json=body)
+                response.raise_for_status()
+                response_payload = response.json()
+                content = _extract_message_content(response_payload)
+                return ProviderResult(
+                    ok=True,
+                    content=content,
+                    model=str(body["model"]),
+                    usage=response_payload.get("usage") if isinstance(response_payload, dict) else None,
+                )
+        except httpx.HTTPStatusError as exc:
+            return ProviderResult(ok=False, error_code="PROVIDER_HTTP_ERROR", error_message=f"HTTP {exc.response.status_code}")
+        except (httpx.HTTPError, OSError, ValueError) as exc:
+            return ProviderResult(ok=False, error_code="PROVIDER_REQUEST_FAILED", error_message=str(exc)[:300])
+
+    def complete_json(
+        self,
+        system_prompt: str,
+        user_payload: Dict[str, Any],
+        model: Optional[str] = None,
+    ) -> tuple[Optional[Dict[str, Any]], ProviderResult]:
+        result = self.complete(system_prompt, user_payload, model=model)
+        if not result.ok:
+            return None, result
+        try:
+            return _parse_json_content(result.content), result
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            result.ok = False
+            result.error_code = "PROVIDER_SCHEMA_INVALID"
+            result.error_message = str(exc)[:300]
+            return None, result
+
+    def connectivity_check(self) -> ProviderResult:
+        return self.complete(
+            "Return exactly a JSON object with one key, status, whose value is ok.",
+            {"health_check": True, "schema_version": "provider-health/v1"},
+            max_tokens=32,
+        )
 
 def alias_fields(profile: Dict[str, Any]) -> Dict[str, str]:
     return {item["name"]: f"f_{index:04d}" for index, item in enumerate(profile.get("columns_detail", []), start=1)}
@@ -67,6 +231,27 @@ def build_safe_evidence(profile: Dict[str, Any], target: Dict[str, Any], selecti
     return evidence
 
 
+def _safe_plan_payload(plan: Dict[str, Any], profile: Dict[str, Any], target: Dict[str, Any]) -> Dict[str, Any]:
+    aliases = alias_fields(profile)
+    return {
+        "schema_version": "risk-safe-plan/v1",
+        "target_alias": aliases.get(plan.get("target"), "target"),
+        "time_column_alias": aliases.get(plan.get("time_column_suggestion")) if plan.get("time_column_suggestion") else None,
+        "positive_value": plan.get("positive_value"),
+        "negative_value": plan.get("negative_value"),
+        "split": plan.get("split"),
+        "models": plan.get("models"),
+        "screening": plan.get("screening"),
+        "mode": plan.get("mode"),
+        "target_contract": {
+            "positive_count": target.get("positive_count"),
+            "negative_count": target.get("negative_count"),
+            "positive_rate": target.get("positive_rate"),
+            "contract_ok": target.get("contract_ok"),
+        },
+    }
+
+
 def propose_plan(profile: Dict[str, Any], target: Dict[str, Any], mode: str, gateway: ProviderGateway) -> Dict[str, Any]:
     candidates = profile.get("target_candidates", [])
     selected_target = target.get("target") or (candidates[0] if candidates else None)
@@ -84,19 +269,42 @@ def propose_plan(profile: Dict[str, Any], target: Dict[str, Any], mode: str, gat
         "mode": mode,
         "provider": gateway.status(),
     }
+    if getattr(gateway, "enabled", False) and getattr(gateway, "configured", False):
+        advisory, provider_result = gateway.complete_json(
+            """你是风控分析 Agent。只根据匿名 SafeEvidence 提供结构化建议。
+不要发明字段原名、客户记录或业务结论。返回 JSON：
+{\"risk_flags\":[{\"code\":\"...\",\"message\":\"...\"}],\"questions\":[\"...\"]}""",
+            {"evidence": build_safe_evidence(profile, target), "plan": _safe_plan_payload(plan, profile, target)},
+            model=getattr(gateway, "config", {}).get("model"),
+        )
+        plan["agent_advisory"] = advisory or {"risk_flags": [], "questions": []}
+        plan["provider_call"] = {
+            "attempted": True,
+            "ok": provider_result.ok,
+            "error_code": provider_result.error_code,
+            "model": provider_result.model,
+        }
+    else:
+        plan["agent_advisory"] = {"risk_flags": [], "questions": []}
+        plan["provider_call"] = {"attempted": False, "ok": False, "error_code": "PROVIDER_DISABLED"}
     return plan
 
 
-def review_plan(plan: Dict[str, Any], profile: Dict[str, Any], target: Dict[str, Any]) -> Dict[str, Any]:
+def review_plan(
+    plan: Dict[str, Any],
+    profile: Dict[str, Any],
+    target: Dict[str, Any],
+    gateway: Optional[ProviderGateway] = None,
+) -> Dict[str, Any]:
     findings: List[Dict[str, Any]] = []
     if not target.get("contract_ok"):
         findings.append({"code": "TARGET_CONTRACT_FAILED", "severity": "block", "message": "Y 尚未满足明确 0/1 双类别契约。"})
-    elif min(int(target.get("positive_count", 0)), int(target.get("negative_count", 0))) < 2:
+    elif min(int(target.get("positive_count", 0)), int(target.get("negative_count", 0))) < 5:
         findings.append(
             {
                 "code": "TARGET_CLASS_TOO_SMALL",
                 "severity": "block",
-                "message": "Y 的某一类别少于 2 个样本，无法可靠完成分层切分。",
+                "message": "Y 的某一类别少于 5 个样本，无法可靠完成分层切分。",
                 "details": {"positive_count": target.get("positive_count"), "negative_count": target.get("negative_count")},
             }
         )
@@ -112,10 +320,50 @@ def review_plan(plan: Dict[str, Any], profile: Dict[str, Any], target: Dict[str,
         findings.extend(item for item in profile["warnings"] if item.get("severity") == "block")
     if not plan.get("target"):
         findings.append({"code": "TARGET_NOT_SELECTED", "severity": "block", "message": "没有可用于建模的 Y。"})
-    return {"verdict": "block" if findings else "pass", "findings": findings, "reviewer": "deterministic-reviewer-v1", "message": "未发现阻断问题" if not findings else "需要先处理结构化阻断问题"}
+    result: Dict[str, Any] = {
+        "verdict": "block" if findings else "pass",
+        "findings": findings,
+        "reviewer": "deterministic-reviewer-v1",
+        "message": "未发现阻断问题" if not findings else "需要先处理结构化阻断问题",
+    }
+    if gateway and getattr(gateway, "enabled", False) and getattr(gateway, "configured", False):
+        external, provider_result = gateway.complete_json(
+            """你是独立 Reviewer Agent。审核匿名的建模方案是否存在目标契约、切分污染、泄漏或资源风险。
+只返回 JSON：{\"verdict\":\"pass|warn|block\",\"findings\":[{\"code\":\"...\",\"severity\":\"warn|block\",\"message\":\"...\"}]}。
+不要输出字段原名或客户数据。""",
+            {"evidence": build_safe_evidence(profile, target), "plan": _safe_plan_payload(plan, profile, target)},
+            model=getattr(gateway, "config", {}).get("reviewer_model") or getattr(gateway, "config", {}).get("model"),
+        )
+        if external:
+            external_verdict = external.get("verdict") if external.get("verdict") in {"pass", "warn", "block"} else "warn"
+            external_findings = external.get("findings") if isinstance(external.get("findings"), list) else []
+            result["external_review"] = {"verdict": external_verdict, "findings": external_findings[:20]}
+            if external_verdict == "block":
+                result["verdict"] = "block"
+                result["findings"].extend(external_findings[:20])
+        result["provider_call"] = {
+            "attempted": True,
+            "ok": provider_result.ok,
+            "error_code": provider_result.error_code,
+            "model": provider_result.model,
+        }
+    return result
 
 
-def review_generated_code(code: str) -> Dict[str, Any]:
+def _alias_code(code: str, profile: Optional[Dict[str, Any]]) -> str:
+    if not profile:
+        return code
+    aliased = code
+    for original, alias in sorted(alias_fields(profile).items(), key=lambda item: len(item[0]), reverse=True):
+        aliased = re.sub(re.escape(original), alias, aliased)
+    return aliased
+
+
+def review_generated_code(
+    code: str,
+    gateway: Optional[ProviderGateway] = None,
+    profile: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     dangerous = [
         ("DANGEROUS_EXEC", r"\b(eval|exec|compile)\s*\("),
         ("DANGEROUS_SHELL", r"\b(os\.system|subprocess|Popen|shell=True)\b"),
@@ -126,7 +374,31 @@ def review_generated_code(code: str) -> Dict[str, Any]:
     for code_name, pattern in dangerous:
         if re.search(pattern, code, flags=re.I):
             findings.append({"code": code_name, "severity": "block", "message": "生成代码包含 V1 禁止模式。"})
-    return {"verdict": "block" if findings else "pass", "findings": findings, "checks": ["ast_pattern_scan", "dependency_policy", "generated_code_not_executed"]}
+    result: Dict[str, Any] = {
+        "verdict": "block" if findings else "pass",
+        "findings": findings,
+        "checks": ["ast_pattern_scan", "dependency_policy", "generated_code_not_executed"],
+        "review_round": 1,
+        "reviewer": "deterministic-reviewer-v1",
+    }
+    if gateway and getattr(gateway, "enabled", False) and getattr(gateway, "configured", False):
+        external, provider_result = gateway.complete_json(
+            """你是独立代码 Reviewer。检查匿名化后的 Python 复现代码是否有网络、Shell、动态执行、凭据读取、数据泄漏或验证污染。
+只返回 JSON：{\"verdict\":\"pass|warn|block\",\"findings\":[{\"code\":\"...\",\"severity\":\"warn|block\",\"message\":\"...\"}]}。""",
+            {"code": _alias_code(code, profile), "policy": "generated_code_not_executed"},
+            model=getattr(gateway, "config", {}).get("reviewer_model") or getattr(gateway, "config", {}).get("model"),
+        )
+        result["provider_call"] = {"attempted": True, "ok": provider_result.ok, "error_code": provider_result.error_code, "model": provider_result.model}
+        if external:
+            external_verdict = external.get("verdict") if external.get("verdict") in {"pass", "warn", "block"} else "warn"
+            external_findings = external.get("findings") if isinstance(external.get("findings"), list) else []
+            result["external_review"] = {"verdict": external_verdict, "findings": external_findings[:20]}
+            if external_verdict == "block":
+                result["verdict"] = "block"
+                result["findings"].extend(external_findings[:20])
+    else:
+        result["provider_call"] = {"attempted": False, "ok": False, "error_code": "PROVIDER_DISABLED"}
+    return result
 
 
 def generate_reproducible_code(plan: Dict[str, Any], selected: List[str], profile: Optional[Dict[str, Any]] = None) -> str:

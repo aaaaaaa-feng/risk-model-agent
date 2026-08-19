@@ -39,9 +39,10 @@
 
 ## 当前已实现与边界
 
-- 已实现：本地 FastAPI Web 服务、CSV/XLSX 导入、数据画像、Y 契约检查、半信任确认卡、LangGraph 状态编排、变量筛选、Logistic/Random Forest/HistGradientBoosting/XGBoost 候选比较、评分卡代理产物、HTML/JSON/Python 交付物、SSE 进度与 Trace、点赞/点踩、API 配置入口。
-- 已验证：本地单元、集成和端到端测试；生成代码只作为交付物，不在产品内执行；Reviewer 阻断不会被标成成功。
-- 尚未宣称：真实 LLM Provider 调用、macOS/Windows 安装包、跨平台安装验收、完整清洗回路、Baseline/what-if、XLSX 大文件低内存实测和独立评测 Harness。这些需要下一阶段单独实现和验证。
+- 已实现：本地 FastAPI Web 服务、CSV/XLSX 导入（多 Sheet 需明确选择）、数据画像与本地 EDA、Y 契约检查、半信任确认卡、LangGraph 状态编排、训练集范围内 IV/缺失/ID/泄漏筛选、Logistic/Random Forest/HistGradientBoosting/XGBoost 候选比较、评分卡代理产物、HTML/JSON/XLSX/Python/哈希清单交付物、SSE 进度与 Trace、点赞/点踩、API 配置入口、多维 1—4 维本地分析。
+- 已实现：Provider Gateway 的 OpenAI-compatible 接口和显式 `llm_enabled` 开关。外部请求只允许别名化 SafeEvidence；计划、代码审核失败会保留结构化原因并阻断。没有 Provider 时仍走确定性本地流程。
+- 已验证：本地单元、集成和端到端测试；变量筛选的 IV 只从训练分区拟合；生成代码只作为交付物，不在产品内执行；Reviewer 阻断不会被标成成功；JSON、HTML、XLSX 由同一次 Run 产物生成并写入 checksums。
+- 尚未宣称：真实供应商 API 的生产连通性/费用验证、自动修复 Reviewer 三轮闭环、训练集内交叉验证/超参搜索、macOS/Windows 安装包、跨平台安装验收、删除/截断类清洗执行回路、Baseline/what-if、XLSX 大文件低内存实测和独立评测 Harness。这些需要下一阶段单独实现和验证。
 
 ## 本机运行
 

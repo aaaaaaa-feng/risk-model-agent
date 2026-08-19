@@ -34,6 +34,13 @@ LEAKAGE_RE = re.compile(r"(?:post|after|repay|collection|writeoff|settle).*(?:ov
 ID_RE = re.compile(r"(?:^id$|_id$|uuid|phone|mobile|card|identity|身份证|手机号)", re.I)
 
 
+def _parse_datetime(series: pd.Series) -> pd.Series:
+    try:
+        return pd.to_datetime(series, format="mixed", errors="coerce")
+    except (TypeError, ValueError):
+        return pd.to_datetime(series, errors="coerce")
+
+
 def read_table(path: Path, sheet: Optional[str] = None) -> pd.DataFrame:
     if path.stat().st_size > MAX_UPLOAD_BYTES:
         raise ValueError("FILE_TOO_LARGE: 文件超过本地配置的导入上限")
@@ -41,7 +48,16 @@ def read_table(path: Path, sheet: Optional[str] = None) -> pd.DataFrame:
     if suffix == ".xlsx":
         frame = pd.read_excel(path, sheet_name=sheet or 0, engine="openpyxl")
     elif suffix == ".csv":
-        frame = pd.read_csv(path, nrows=MAX_ROWS, low_memory=True)
+        frame = None
+        decode_errors: List[str] = []
+        for encoding in ("utf-8-sig", "utf-8", "gb18030"):
+            try:
+                frame = pd.read_csv(path, nrows=MAX_ROWS, low_memory=True, encoding=encoding)
+                break
+            except UnicodeDecodeError as exc:
+                decode_errors.append(f"{encoding}: {exc}")
+        if frame is None:
+            raise ValueError(f"CSV_ENCODING_UNSUPPORTED: 无法按 UTF-8/GB18030 解码（{decode_errors[-1] if decode_errors else 'unknown'}）")
     else:
         raise ValueError("UNSUPPORTED_FILE: 仅支持 CSV 和 XLSX")
     if len(frame) > MAX_ROWS:
@@ -54,11 +70,34 @@ def read_table(path: Path, sheet: Optional[str] = None) -> pd.DataFrame:
     # Safe, reversible normalization: whitespace-only cells and surrounding
     # whitespace are standardized before profiling. No rows are silently removed.
     object_columns = frame.select_dtypes(include=["object", "string"]).columns
+    trimmed_cells = 0
+    blank_cells = 0
     for column in object_columns:
-        frame[column] = frame[column].map(lambda value: value.strip() if isinstance(value, str) else value)
+        before = frame[column]
+        trimmed_cells += int(before.map(lambda value: isinstance(value, str) and value != value.strip()).sum())
+        frame[column] = before.map(lambda value: value.strip() if isinstance(value, str) else value)
     if len(object_columns):
+        blank_cells = int(frame[object_columns].apply(lambda column: column.astype("string").str.fullmatch(r"\s*")).sum().sum())
         frame[object_columns] = frame[object_columns].replace(r"^\s*$", pd.NA, regex=True)
+    frame.attrs["cleaning_audit"] = {
+        "trimmed_cells": trimmed_cells,
+        "blank_cells_standardized": blank_cells,
+        "rows_removed": 0,
+        "columns_removed": 0,
+    }
     return frame
+
+
+def list_sheets(path: Path) -> List[str]:
+    if path.suffix.lower() != ".xlsx":
+        return []
+    if path.stat().st_size > MAX_UPLOAD_BYTES:
+        raise ValueError("FILE_TOO_LARGE: 文件超过本地配置的导入上限")
+    try:
+        with pd.ExcelFile(path, engine="openpyxl") as workbook:
+            return [str(name) for name in workbook.sheet_names]
+    except Exception as exc:
+        raise ValueError(f"XLSX_SHEET_READ_FAILED: {exc}") from exc
 
 
 def infer_type(series: pd.Series) -> str:
@@ -68,7 +107,7 @@ def infer_type(series: pd.Series) -> str:
         return "numeric"
     if pd.api.types.is_datetime64_any_dtype(series):
         return "datetime"
-    parsed = pd.to_datetime(series.dropna().head(100), errors="coerce")
+    parsed = _parse_datetime(series.dropna().head(100))
     if len(parsed) and parsed.notna().mean() > 0.8:
         return "datetime"
     return "categorical" if series.nunique(dropna=True) < min(100, max(10, len(series) // 20)) else "text"
@@ -107,8 +146,113 @@ def profile_table(frame: pd.DataFrame) -> Dict[str, Any]:
             "status": "safe_normalization_only",
             "automatic_actions": ["trim_text_whitespace", "standardize_blank_cells_as_missing"],
             "destructive_actions": [],
+            "audit": frame.attrs.get("cleaning_audit", {}),
             "note": "未自动删除样本、截断异常值或改写 Y；训练期填补只在训练分区拟合。",
         },
+    }
+
+
+def quality_analysis(frame: pd.DataFrame, target: Optional[str] = None, time_column: Optional[str] = None) -> Dict[str, Any]:
+    """Produce local EDA evidence without emitting customer-level values."""
+    numeric: List[Dict[str, Any]] = []
+    categorical: List[Dict[str, Any]] = []
+    for column in frame.columns:
+        series = frame[column]
+        missing = int(series.isna().sum())
+        if pd.api.types.is_numeric_dtype(series):
+            values = series.dropna().astype(float)
+            if len(values):
+                q1, q3 = values.quantile([0.25, 0.75]).tolist()
+                iqr = float(q3 - q1)
+                outliers = int(((values < q1 - 1.5 * iqr) | (values > q3 + 1.5 * iqr)).sum()) if iqr else 0
+                numeric.append(
+                    {
+                        "column": str(column),
+                        "count": int(len(values)),
+                        "missing": missing,
+                        "mean": round(float(values.mean()), 6),
+                        "median": round(float(values.median()), 6),
+                        "min": round(float(values.min()), 6),
+                        "max": round(float(values.max()), 6),
+                        "p01": round(float(values.quantile(0.01)), 6),
+                        "p99": round(float(values.quantile(0.99)), 6),
+                        "iqr_outliers": outliers,
+                    }
+                )
+        else:
+            categorical.append(
+                {
+                    "column": str(column),
+                    "count": int(series.notna().sum()),
+                    "missing": missing,
+                    "unique_count": int(series.nunique(dropna=True)),
+                    "high_cardinality": bool(series.nunique(dropna=True) / max(len(series), 1) > 0.995),
+                }
+            )
+    time_summary: Dict[str, Any] = {"column": time_column, "valid": False}
+    if time_column and time_column in frame.columns:
+        parsed = _parse_datetime(frame[time_column])
+        if parsed.notna().any():
+            time_summary = {
+                "column": time_column,
+                "valid": bool(parsed.notna().mean() > 0.8),
+                "parse_rate": round(float(parsed.notna().mean()), 6),
+                "min": str(parsed.min()),
+                "max": str(parsed.max()),
+            }
+    return {
+        "schema_version": "risk-eda/v1",
+        "rows": int(len(frame)),
+        "columns": int(len(frame.columns)),
+        "duplicate_rows": int(frame.duplicated().sum()),
+        "numeric": numeric,
+        "categorical": categorical,
+        "target": target_summary(frame, target) if target and target in frame.columns else None,
+        "time": time_summary,
+        "cleaning_audit": frame.attrs.get("cleaning_audit", {}),
+    }
+
+
+def build_cleaning_plan(frame: pd.DataFrame, profile: Dict[str, Any], quality: Dict[str, Any]) -> Dict[str, Any]:
+    actions: List[Dict[str, Any]] = [
+        {
+            "code": "TRIM_TEXT_AND_BLANKS",
+            "category": "safe_auto",
+            "status": "applied_on_read",
+            "message": "去除文本两端空格，并把空白单元格标准化为缺失。",
+        }
+    ]
+    requires_confirmation: List[Dict[str, Any]] = []
+    duplicate_rows = int(quality.get("duplicate_rows", 0))
+    if duplicate_rows:
+        requires_confirmation.append(
+            {
+                "code": "DUPLICATE_ROWS_REVIEW",
+                "message": f"发现 {duplicate_rows:,} 行完全重复记录；是否去重不能由 Agent 静默决定。",
+                "rows": duplicate_rows,
+            }
+        )
+    outlier_columns = [item for item in quality.get("numeric", []) if item.get("iqr_outliers", 0) > 0]
+    if outlier_columns:
+        requires_confirmation.append(
+            {
+                "code": "OUTLIER_REVIEW",
+                "message": "数值字段存在 IQR 异常值，仅提供证据，不自动截断。",
+                "columns": [item["column"] for item in outlier_columns[:100]],
+            }
+        )
+    actions.extend(requires_confirmation)
+    return {
+        "schema_version": "risk-cleaning-plan/v1",
+        "status": "review_required" if requires_confirmation else "safe_normalization_complete",
+        "actions": actions,
+        "requires_confirmation": requires_confirmation,
+        "rows_before": int(len(frame)),
+        "rows_after": int(len(frame)),
+        "columns_before": int(len(frame.columns)),
+        "columns_after": int(len(frame.columns)),
+        "rule_version": "cleaning-rules/v1",
+        "note": "没有自动删除样本、截断异常值、合并稀有类别或改写 Y。",
     }
 
 
@@ -181,18 +325,36 @@ def calculate_iv(frame: pd.DataFrame, target: str, feature: str) -> float:
     return float(max(iv, 0.0))
 
 
-def select_features(frame: pd.DataFrame, target: str, max_features: int = 50) -> Dict[str, Any]:
+def select_features(
+    frame: pd.DataFrame,
+    target: str,
+    max_features: int = 50,
+    min_iv: float = 0.005,
+    fit_positions: Optional[Sequence[int]] = None,
+    excluded_columns: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """Select variables using only the declared fit rows.
+
+    ``fit_positions`` is deliberately explicit: callers cannot accidentally
+    compute IV/WOE on validation or OOT rows while still returning decisions
+    for the full schema. This is the main train-only leakage guard in V1.
+    """
+    fit_frame = frame.iloc[list(fit_positions)] if fit_positions is not None else frame
+    excluded = set(excluded_columns or [])
     decisions: List[Dict[str, Any]] = []
     candidates: List[Tuple[str, float]] = []
     for column in frame.columns:
         if column == target:
             continue
-        series = frame[column]
+        series = fit_frame[column]
         missing = float(series.isna().mean())
         unique_ratio = float(series.nunique(dropna=True) / max(len(series), 1))
         reasons: List[str] = []
         status = "included"
-        if series.nunique(dropna=True) <= 1:
+        iv_value: Optional[float] = None
+        if column in excluded:
+            status, reasons = "excluded", ["USER_EXCLUDED"]
+        elif series.nunique(dropna=True) <= 1:
             status, reasons = "excluded", ["CONSTANT"]
         elif missing >= 0.95:
             status, reasons = "excluded", ["HIGH_MISSING"]
@@ -203,18 +365,23 @@ def select_features(frame: pd.DataFrame, target: str, max_features: int = 50) ->
         elif LEAKAGE_RE.search(str(column)):
             status, reasons = "blocked", ["SUSPECTED_POST_OUTCOME_FEATURE"]
         else:
-            iv = calculate_iv(frame, target, column)
-            candidates.append((column, iv))
+            iv_value = calculate_iv(fit_frame, target, column)
+            candidates.append((column, iv_value))
         decisions.append(
             {
                 "column": str(column),
                 "status": status,
                 "missing_rate": round(missing, 6),
                 "unique_ratio": round(unique_ratio, 6),
-                "iv": None if status != "included" else round(candidates[-1][1], 6),
+                "iv": round(iv_value, 6) if iv_value is not None else None,
                 "reasons": reasons,
             }
         )
+    for decision in decisions:
+        if decision["status"] == "included" and decision["iv"] is not None and decision["iv"] < min_iv:
+            decision["status"] = "excluded"
+            decision["reasons"] = ["IV_BELOW_THRESHOLD"]
+    candidates = [(column, iv) for column, iv in candidates if iv >= min_iv]
     candidates.sort(key=lambda item: item[1], reverse=True)
     selected = {column for column, _ in candidates[:max_features]}
     for decision in decisions:
@@ -229,6 +396,9 @@ def select_features(frame: pd.DataFrame, target: str, max_features: int = 50) ->
             "included_after_rules": len(candidates),
             "final": len(selected),
             "blocked": sum(item["status"] == "blocked" for item in decisions),
+            "min_iv": min_iv,
+            "fit_scope": "train" if fit_positions is not None else "caller_supplied_frame",
+            "fit_rows": len(fit_frame),
         },
     }
 
@@ -239,15 +409,19 @@ def split_frame(frame: pd.DataFrame, target: str, time_column: Optional[str] = N
     work = frame.iloc[valid_positions].copy()
     y = y.iloc[valid_positions].astype(int).to_numpy()
     if time_column and time_column in work.columns:
-        parsed = pd.to_datetime(work[time_column], errors="coerce")
+        parsed = _parse_datetime(work[time_column])
         if parsed.notna().mean() > 0.8:
             order = np.argsort(parsed.fillna(parsed.min()).to_numpy())
             ordered = np.arange(len(work))[order]
             train_end = max(1, int(len(ordered) * 0.6))
             valid_end = max(train_end + 1, int(len(ordered) * 0.8))
             train, valid, oot = ordered[:train_end], ordered[train_end:valid_end], ordered[valid_end:]
+            if len(train) < 2 or len(valid) < 2 or len(oot) < 2 or len(np.unique(y[train])) < 2:
+                raise ValueError("TIME_SPLIT_CLASS_CONTRACT_FAILED: 时间切分训练集必须包含 0/1 两类且各分区不可为空")
             return {"positions": valid_positions.tolist(), "train": train.tolist(), "valid": valid.tolist(), "oot": oot.tolist(), "method": "time_holdout", "time_column": time_column}
     positions = np.arange(len(work))
+    if len(y) < 10 or min(int(np.sum(y == 0)), int(np.sum(y == 1))) < 5:
+        raise ValueError("STRATIFIED_SPLIT_CLASS_CONTRACT_FAILED: 分层切分至少需要每类 5 个样本")
     train, remaining = train_test_split(positions, test_size=0.4, random_state=42, stratify=y)
     valid, oot = train_test_split(remaining, test_size=0.5, random_state=42, stratify=y[remaining])
     return {"positions": valid_positions.tolist(), "train": train.tolist(), "valid": valid.tolist(), "oot": oot.tolist(), "method": "stratified_holdout", "time_column": None}
@@ -319,6 +493,7 @@ def train_candidates(
     features: Sequence[str],
     split: Dict[str, Any],
     output_dir: Path,
+    model_names: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     valid_frame = frame.iloc[split["positions"]].reset_index(drop=True)
@@ -327,17 +502,30 @@ def train_candidates(
     train_idx = np.asarray(split["train"], dtype=int)
     valid_idx = np.asarray(split["valid"], dtype=int)
     oot_idx = np.asarray(split["oot"], dtype=int)
-    models: List[Tuple[str, Any, bool]] = [
+    all_models: List[Tuple[str, Any, bool]] = [
         ("logistic_regression", LogisticRegression(max_iter=500, class_weight="balanced", random_state=42), False),
         ("random_forest", RandomForestClassifier(n_estimators=120, max_depth=8, min_samples_leaf=3, class_weight="balanced_subsample", n_jobs=1, random_state=42), True),
         ("hist_gradient_boosting", HistGradientBoostingClassifier(max_iter=120, learning_rate=0.06, max_leaf_nodes=15, random_state=42), True),
     ]
-    if XGBClassifier is not None:
-        models.append(("xgboost", XGBClassifier(n_estimators=140, max_depth=4, learning_rate=0.07, subsample=0.85, colsample_bytree=0.85, n_jobs=1, eval_metric="logloss", random_state=42), True))
+    all_models.append(
+        (
+            "xgboost",
+            XGBClassifier(n_estimators=140, max_depth=4, learning_rate=0.07, subsample=0.85, colsample_bytree=0.85, n_jobs=1, eval_metric="logloss", random_state=42) if XGBClassifier is not None else None,
+            True,
+        )
+    )
+    requested = list(dict.fromkeys(model_names or [name for name, _, _ in all_models]))
+    allowed = {name for name, _, _ in all_models}
+    unknown = [name for name in requested if name not in allowed]
+    if unknown:
+        raise ValueError(f"UNKNOWN_MODEL: 不支持的候选模型 {unknown}")
+    models = [(name, estimator, dense) for name, estimator, dense in all_models if name in requested]
     candidates: List[Dict[str, Any]] = []
     scorecard: Optional[Dict[str, Any]] = None
     for name, estimator, dense in models:
         try:
+            if estimator is None:
+                raise RuntimeError("XGBOOST_UNAVAILABLE: 当前 Python 环境未安装可用的 XGBoost")
             pipeline = Pipeline([("preprocess", _preprocessor(X, features, dense=dense)), ("model", estimator)])
             pipeline.fit(X.iloc[train_idx], y[train_idx])
             valid_probability = pipeline.predict_proba(X.iloc[valid_idx])[:, 1]
@@ -350,8 +538,9 @@ def train_candidates(
                 "status": "succeeded",
                 "features": len(features),
                 "validation_protocol": {
-                    "version": "risk-validation/v1",
+                    "version": "risk-validation/holdout-v1",
                     "fit_scope": "train",
+                    "tuning_scope": "none",
                     "validation_eval_scope": "validation",
                     "oot_eval_scope": "oot",
                     "oot_used_for_selection": False,
@@ -376,7 +565,13 @@ def train_candidates(
             candidates.append({"name": name, "status": "failed", "error": f"{type(exc).__name__}: {exc}", "features": len(features)})
     succeeded = [item for item in candidates if item["status"] == "succeeded"]
     champion = max(succeeded, key=lambda item: (item["validation"]["roc_auc"] or -1, item["validation"]["ks"] or -1), default=None)
-    return {"split": {key: value for key, value in split.items() if key != "positions"}, "candidates": candidates, "champion": champion, "scorecard": scorecard}
+    return {
+        "split": {key: value for key, value in split.items() if key != "positions"},
+        "models_requested": requested,
+        "candidates": candidates,
+        "champion": champion,
+        "scorecard": scorecard,
+    }
 
 
 def _scorecard_from_pipeline(pipeline: Pipeline, frame: pd.DataFrame, features: Sequence[str]) -> Dict[str, Any]:
