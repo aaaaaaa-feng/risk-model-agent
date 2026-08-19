@@ -1,4 +1,4 @@
-const state = { projects: [], project: null, datasets: [], dictionaries: [], runs: [], run: null, events: [], conversation: null, messages: [], mode: 'auto', eventSource: null, config: null, confirmationRunId: null, confirmationFeatures: [], confirmationExcluded: new Set() };
+const state = { projects: [], project: null, datasets: [], dictionaries: [], runs: [], run: null, events: [], conversation: null, messages: [], mode: 'auto', eventSource: null, config: null, providerRequests: [], confirmationRunId: null, confirmationFeatures: [], confirmationExcluded: new Set(), selectionExcluded: new Set() };
 const $ = function (selector) { return document.querySelector(selector); };
 const projectList = $('#project-list');
 const escapeHtml = function (value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]; }); };
@@ -30,16 +30,39 @@ async function loadProjects() {
 }
 async function selectProject(projectId) {
   const data = await api('/api/projects/' + projectId);
-  state.project = data.project; state.datasets = data.datasets || []; state.dictionaries = data.dictionaries || []; state.runs = data.runs || []; state.run = state.runs[0] || null; state.mode = state.run ? state.run.mode : state.mode; state.events = [];
+  state.project = data.project; state.datasets = data.datasets || []; state.dictionaries = data.dictionaries || []; state.runs = data.runs || []; state.run = state.runs[0] || null; state.mode = state.run ? state.run.mode : state.mode; state.events = []; state.providerRequests = []; state.selectionExcluded = new Set();
   await loadConversation();
   renderProjects(); renderProject();
   if (state.run) {
+    await loadProviderRequests();
     const eventData = await api('/api/runs/' + state.run.id + '/events');
     state.events = eventData.events || []; renderTimeline(); connectStream();
     if (state.run.status === 'succeeded') {
       try { renderReport(await api('/api/runs/' + state.run.id + '/report')); } catch (error) { /* report may still be flushing */ }
     }
   }
+}
+async function loadProviderRequests() {
+  const block = $('#provider-audit-block');
+  if (!block) return;
+  if (!state.run) { block.classList.add('hidden'); return; }
+  block.classList.remove('hidden');
+  try {
+    const data = await api('/api/runs/' + state.run.id + '/provider-requests');
+    state.providerRequests = data.requests || [];
+  } catch (error) { state.providerRequests = []; }
+  renderProviderRequests();
+}
+function renderProviderRequests() {
+  const count = $('#provider-request-count'); const list = $('#provider-request-list');
+  if (!count || !list) return;
+  count.textContent = state.providerRequests.length + ' 次';
+  if (!state.providerRequests.length) { list.innerHTML = '<span class="muted">当前 Run 尚无外部请求。</span>'; return; }
+  list.innerHTML = state.providerRequests.slice().reverse().slice(0, 12).map(function (item) {
+    const summary = item.payload_summary || item.payload || {};
+    const safe = JSON.stringify(summary, null, 2);
+    return '<details class="provider-request"><summary><strong>' + escapeHtml(item.purpose || 'provider') + '</strong><span>' + escapeHtml(item.model || '—') + '</span><small>' + escapeHtml((item.created_at || '').slice(11, 19)) + '</small></summary><pre>' + escapeHtml(safe) + '</pre></details>';
+  }).join('');
 }
 async function loadConversation() {
   if (!state.project) return;
@@ -241,7 +264,32 @@ function renderReport(report) {
   const calibrationGap = calibration.length ? Math.max.apply(null, calibration.map(function (item) { return Number(item.absolute_gap || 0); })).toFixed(4) : '—';
   const highPsi = stability.filter(function (item) { return ['review', 'high'].includes(item.validation && item.validation.review_flag) || ['review', 'high'].includes(item.oot && item.oot.review_flag); }).length;
   $('#report-details').innerHTML = '<div class="report-facts"><span>校准最大绝对差</span><strong>' + calibrationGap + '</strong><span>需稳定性复核变量</span><strong>' + highPsi + '</strong></div>' + (excluded.length ? '<strong>字段处理摘要</strong><ul>' + excluded.map(function (item) { return '<li><code>' + escapeHtml(item.column) + '</code> · ' + escapeHtml(item.status) + ' · ' + escapeHtml((item.reasons || []).join('、') || '规则排除') + '</li>'; }).join('') + '</ul>' : '<strong>字段处理摘要</strong><span>没有字段被规则排除。</span>');
+  renderSelectionTable(report);
   renderNarrativeEditor(report);
+}
+function renderSelectionTable(report) {
+  const panel = $('#selection-table-panel'); if (!panel) return;
+  const rows = (report.selection && report.selection.decisions) || [];
+  if (!rows.length) { panel.innerHTML = ''; return; }
+  const planExcluded = new Set(((state.run && state.run.state && state.run.state.plan && state.run.state.plan.screening) || {}).excluded_columns || []);
+  if (!state.selectionExcluded.size) state.selectionExcluded = new Set(planExcluded);
+  panel.innerHTML = '<div class="selection-table-heading"><div><strong>变量筛选明细</strong><small>训练分区拟合的 IV/缺失/规则结果；勾选后可派生隔离 what-if。</small></div><span id="selection-count" class="chip neutral">' + rows.length + ' 个字段</span></div><div class="selection-table-controls"><input id="selection-search" class="feature-search" type="search" placeholder="搜索字段名" autocomplete="off" /><select id="selection-status"><option value="all">全部状态</option><option value="included">入选</option><option value="excluded">排除</option><option value="blocked">阻断</option></select><select id="selection-sort"><option value="iv">按 IV 降序</option><option value="missing">按缺失率降序</option><option value="column">按字段名</option></select></div><div id="selection-table-list" class="selection-table-list"></div><div class="selection-table-actions"><small class="muted">当前仅展示匹配结果前 200 个；正式 Run 不会被直接修改。</small><button type="button" id="selection-what-if" class="secondary-button small">用勾选字段派生 what-if</button></div>';
+  function redraw() {
+    const query = ($('#selection-search').value || '').trim().toLowerCase();
+    const status = $('#selection-status').value;
+    const sort = $('#selection-sort').value;
+    const filtered = rows.filter(function (item) { return (!query || String(item.column || '').toLowerCase().includes(query)) && (status === 'all' || item.status === status); }).sort(function (a, b) {
+      if (sort === 'column') return String(a.column || '').localeCompare(String(b.column || ''));
+      const key = sort === 'missing' ? 'missing_rate' : 'iv';
+      return Number(b[key] == null ? -1 : b[key]) - Number(a[key] == null ? -1 : a[key]);
+    });
+    const visible = filtered.slice(0, 200);
+    $('#selection-count').textContent = (query || status !== 'all' ? '匹配 ' + filtered.length : rows.length) + ' 个字段';
+    $('#selection-table-list').innerHTML = visible.length ? '<table class="selection-table"><thead><tr><th>what-if</th><th>字段</th><th>状态</th><th>缺失率</th><th>IV</th><th>原因</th></tr></thead><tbody>' + visible.map(function (item) { return '<tr><td><input type="checkbox" data-selection-column="' + escapeHtml(item.column) + '" ' + (state.selectionExcluded.has(item.column) ? 'checked' : '') + ' ' + (item.status === 'blocked' ? 'disabled' : '') + ' /></td><td><code>' + escapeHtml(item.column) + '</code></td><td><span class="selection-status ' + escapeHtml(item.status) + '">' + escapeHtml(item.status) + '</span></td><td>' + (item.missing_rate == null ? '—' : escapeHtml((Number(item.missing_rate) * 100).toFixed(1) + '%')) + '</td><td>' + (item.iv == null ? '—' : escapeHtml(Number(item.iv).toFixed(4))) + '</td><td>' + escapeHtml((item.reasons || []).join('、') || '—') + '</td></tr>'; }).join('') + '</tbody></table>' : '<span class="muted">没有匹配变量。</span>';
+    $('#selection-table-list').querySelectorAll('[data-selection-column]').forEach(function (input) { input.addEventListener('change', function () { if (input.checked) state.selectionExcluded.add(input.dataset.selectionColumn); else state.selectionExcluded.delete(input.dataset.selectionColumn); }); });
+  }
+  $('#selection-search').addEventListener('input', redraw); $('#selection-status').addEventListener('change', redraw); $('#selection-sort').addEventListener('change', redraw); redraw();
+  $('#selection-what-if').addEventListener('click', function () { createWhatIf({ excluded_features: Array.from(state.selectionExcluded) }); });
 }
 function renderNarrativeEditor(report) {
   const panel = $('#report-narrative-editor'); if (!panel) return;
@@ -276,6 +324,7 @@ function connectStream() {
 }
 async function syncRun() {
   if (!state.run) return; const data = await api('/api/runs/' + state.run.id); state.run = data.run; renderRun(); renderStages();
+  await loadProviderRequests();
   if (state.run.status === 'succeeded') { const report = await api('/api/runs/' + state.run.id + '/report'); renderReport(report); }
 }
 async function createProject() {
@@ -310,7 +359,7 @@ async function startRun() {
   if (!state.project || !state.datasets[0]) return;
   try {
     const data = await api('/api/projects/' + state.project.id + '/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: state.datasets[0].id, mode: state.mode }) });
-    state.run = data.run; state.events = []; await loadConversation(); renderProject(); connectStream();
+    state.run = data.run; state.events = []; state.providerRequests = []; await loadConversation(); renderProject(); await loadProviderRequests(); connectStream();
   } catch (error) { showNotice(error.message, 'block'); }
 }
 async function confirmPlan() {
@@ -339,18 +388,21 @@ async function skipCleaning() {
     await syncRun();
   } catch (error) { showNotice(error.message, 'block'); }
 }
-async function createWhatIf() {
+async function createWhatIf(changes) {
   if (!state.project || !state.run) return;
-  const currentPlan = state.run.state && state.run.state.plan || {};
-  const currentScreening = currentPlan.screening || {};
-  const rawIv = window.prompt('what-if：新的最小 IV 阈值（留空表示沿用当前值）', String(currentScreening.min_iv == null ? 0.005 : currentScreening.min_iv));
-  if (rawIv === null) return;
-  const minIv = Number(rawIv);
-  if (!Number.isFinite(minIv) || minIv < 0 || minIv > 10) { showNotice('IV 阈值必须是 0—10 的数值。', 'block'); return; }
+  if (!changes) {
+    const currentPlan = state.run.state && state.run.state.plan || {};
+    const currentScreening = currentPlan.screening || {};
+    const rawIv = window.prompt('what-if：新的最小 IV 阈值（留空表示沿用当前值）', String(currentScreening.min_iv == null ? 0.005 : currentScreening.min_iv));
+    if (rawIv === null) return;
+    const minIv = Number(rawIv);
+    if (!Number.isFinite(minIv) || minIv < 0 || minIv > 10) { showNotice('IV 阈值必须是 0—10 的数值。', 'block'); return; }
+    changes = { min_iv: minIv };
+  }
   try {
-    const result = await api('/api/projects/' + state.project.id + '/what-if', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base_run_id: state.run.id, changes: { min_iv: minIv } }) });
+    const result = await api('/api/projects/' + state.project.id + '/what-if', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base_run_id: state.run.id, changes: changes }) });
     showNotice('what-if 实验已隔离启动，不会覆盖正式 Run。');
-    state.run = result.run; state.events = []; await loadConversation(); renderProject(); connectStream();
+    state.run = result.run; state.events = []; state.providerRequests = []; state.selectionExcluded = new Set(); await loadConversation(); renderProject(); await loadProviderRequests(); connectStream();
   } catch (error) { showNotice(error.message, 'block'); }
 }
 async function pauseRun() { if (!state.run) return; try { await api('/api/runs/' + state.run.id + '/pause', { method: 'POST' }); await syncRun(); if (state.eventSource) state.eventSource.close(); } catch (error) { showNotice(error.message, 'block'); } }

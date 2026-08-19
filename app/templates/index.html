@@ -126,6 +126,7 @@
             <div id="metric-grid" class="metric-grid"></div>
             <div id="report-narrative" class="report-narrative"></div>
             <div id="report-details" class="report-details"></div>
+            <div id="selection-table-panel" class="selection-table-panel"></div>
             <div id="report-narrative-editor" class="report-narrative-editor"></div>
           </section>
         </section>
@@ -144,6 +145,11 @@
               <div><span>Reviewer</span><strong>结构化审核</strong></div>
               <div><span>修复上限</span><strong>3 轮</strong></div>
             </div>
+          </div>
+          <div id="provider-audit-block" class="inspector-block provider-audit-block">
+            <div class="inspector-title"><span>Provider 出站审计</span><span id="provider-request-count" class="chip neutral">0 次</span></div>
+            <p class="muted">只显示已脱敏的请求摘要；原始行和本地路径不会进入这里。</p>
+            <div id="provider-request-list" class="provider-request-list"><span class="muted">当前 Run 尚无外部请求。</span></div>
           </div>
           <div class="inspector-block">
             <div class="inspector-title">反馈</div>

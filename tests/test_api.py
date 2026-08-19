@@ -48,6 +48,8 @@ def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
     root = client.get("/")
     assert root.status_code == 200
     assert "风控建模 Agent" in root.text
+    assert "provider-request-list" in root.text
+    assert "selection-table-panel" in root.text
 
     project, dataset = create_demo_project("API 自动流程")
     run_response = client.post(
