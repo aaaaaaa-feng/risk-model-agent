@@ -2,6 +2,8 @@
 
 当前仓库包含可在本机启动的 V0.1 风控建模 Agent 工作台，以及 1—12 份产品与研发基线文档。
 
+开源仓库：[github.com/aaaaaaa-feng/risk-model-agent](https://github.com/aaaaaaa-feng/risk-model-agent)
+
 2026-08-20 已清除上一版原型的源码、运行数据库和旧产品文档，并依据最新讨论重新生成 1—10 项 AI 产品经理产出。上一版受 Git 跟踪的内容仍可从提交 `63349c0` 恢复，但不再作为当前方案依据。
 
 ## 已确认的产品方向

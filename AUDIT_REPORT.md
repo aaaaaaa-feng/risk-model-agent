@@ -36,6 +36,7 @@
 - `.venv/bin/python scripts/run_golden_cases.py`：5/5 通过；这是最小确定性回归门禁，不等价于独立评测 Harness。
 - 真实本机回环烟测（短暂启动 Uvicorn）：`GET /api/health` 返回 200 且明确 `runtime=local`/确定性降级，首页返回 200，并包含项目生命周期、变量明细和 API Key 清除入口；这证明服务可启动和 HTML 可返回，但不替代目标系统安装验收或完整浏览器视觉验收。
 - 本地 Git 最新提交：
+  - `b2c8a9b docs: record runtime smoke evidence`
   - `ad72542 docs: record project lifecycle audit`
   - `64f5e8c docs: update latest audit commit list`
   - `c1d7227 feat: add auditable project lifecycle controls`
@@ -76,13 +77,14 @@
 - 已提供 PyInstaller spec、macOS/Windows 启动和构建脚本，但尚未在两个目标系统真实构建、签名、安装、升级/卸载验收，也没有把普通 Web 启动方式冒充“拿来即用”的桌面发行版。
 - 独立评测 Harness 按约定后置；当前仅保留 Trace 和普通软件回归测试。
 
-## GitHub 尝试结果
+## GitHub 同步结果
 
-按用户授权尝试执行公开仓库创建和推送。当前外部状态核验为：GitHub 连接器可识别账号 `aaaaaaa-feng`，但 `aaaaaaa-feng/risk-model-agent` 返回 404；连接器当前没有“创建仓库”能力。命令行路径的认证 token 也已失效，且沙箱代理连接被拒绝：
+公开仓库已创建并完成推送：
 
-```text
-Post "https://api.github.com/graphql": proxyconnect tcp: dial tcp 127.0.0.1:10808: connect: operation not permitted
-gh auth status: The token in default is invalid.
-```
+- 地址：[aaaaaaa-feng/risk-model-agent](https://github.com/aaaaaaa-feng/risk-model-agent)
+- 可见性：`PUBLIC`；默认分支：`main`
+- 本地 HEAD：`b2c8a9b8829589b3a12a62350fd9a9ce3bf38829`
+- 远端 `origin/main`：`b2c8a9b8829589b3a12a62350fd9a9ce3bf38829`
+- Git 状态：`main...origin/main`，工作树干净
 
-没有创建远程地址，也没有反复重试；仓库保留在本地，工作树干净。若后续通过 GitHub 网页或有效 CLI 重新创建仓库，应先以工作树核对后的最新本地 commit 添加远程，再核对远端 SHA。
+此前未提权的 CLI 尝试曾受到无效 Token 和沙箱代理限制；在获得回环运行验证所需的命令执行授权后，最终创建和推送已成功。远端 SHA 已按命令行和 GitHub 仓库元数据双重核对，不把本地 commit 单独当作发布证据。
