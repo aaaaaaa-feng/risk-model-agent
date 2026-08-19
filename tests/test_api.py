@@ -67,6 +67,23 @@ def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
     assert report_payload["code_review"]["review_history"]
     assert report_payload["stability"]["schema_version"] == "risk-stability/v1"
     assert report_payload["champion"]["validation"]["calibration"]
+    narrative = report_payload["narrative_sections"]["sections"]
+    edited = client.post(
+        f"/api/runs/{run['id']}/report/narrative",
+        json={"sections": [{"id": "executive_summary", "text": "已由专家补充的执行摘要。"}], "lock": False},
+    )
+    edited.raise_for_status()
+    assert edited.json()["report"]["narrative_sections"]["sections"][0]["source"] == "human-edited"
+    locked = client.post(
+        f"/api/runs/{run['id']}/report/narrative",
+        json={"sections": narrative[:1], "lock": True},
+    )
+    locked.raise_for_status()
+    rejected = client.post(
+        f"/api/runs/{run['id']}/report/narrative",
+        json={"sections": [{"id": "executive_summary", "text": "不应覆盖"}]},
+    )
+    assert rejected.status_code == 409
     run_dir = store.run_dir(project["id"], run["id"])
     checksums = json.loads((run_dir / "checksums.json").read_text(encoding="utf-8"))
     assert checksums["report.json"] == hashlib.sha256((run_dir / "report.json").read_bytes()).hexdigest()
@@ -179,6 +196,52 @@ def test_dictionary_version_and_project_backup_exclude_raw_data_by_default() -> 
     )
     restored_without_data.raise_for_status()
     assert restored_without_data.json()["missing_datasets"]
+
+
+def test_project_conversation_is_stateful_and_trace_excludes_message_content() -> None:
+    project, dataset = create_demo_project("多轮项目对话")
+    run = store.create_run(
+        project["id"],
+        dataset["id"],
+        "auto",
+        initial_state={
+            "profile": {"columns_detail": [{"name": "secret_income", "type": "numeric"}]},
+            "target": {"target": "bad_flag", "contract_ok": True},
+        },
+        phase="planning",
+    )
+    store.update_run(run["id"], status="succeeded", phase="reporting", state=run["state"])
+    first = client.post(
+        f"/api/projects/{project['id']}/conversation",
+        json={"run_id": run["id"], "message": "为什么 secret_income 需要重点复核？"},
+    )
+    first.raise_for_status()
+    assert first.json()["assistant_message"]["structured"]["schema_version"] == "risk-chat-turn/v1"
+    feedback = client.post(
+        f"/api/runs/{run['id']}/feedback",
+        json={"reaction": "like", "message_id": first.json()["assistant_message"]["id"]},
+    )
+    feedback.raise_for_status()
+    second = client.post(
+        f"/api/projects/{project['id']}/conversation",
+        json={"run_id": run["id"], "message": "下一步应该做什么？"},
+    )
+    second.raise_for_status()
+    history = client.get(f"/api/projects/{project['id']}/conversation?run_id={run['id']}")
+    history.raise_for_status()
+    assert len(history.json()["messages"]) == 4
+    trace = store.trace_bundle(run["id"])
+    conversation = trace["conversation"][0]
+    assert all(item["content_included"] is False for item in conversation["messages"])
+    assert "为什么 secret_income" not in json.dumps(trace, ensure_ascii=False)
+    backup = client.get(f"/api/projects/{project['id']}/backup.zip?include_data=true")
+    backup.raise_for_status()
+    restored = client.post(
+        "/api/projects/restore",
+        files={"file": ("conversation-backup.zip", BytesIO(backup.content), "application/zip")},
+    )
+    restored.raise_for_status()
+    assert restored.json()["restored_conversations"] >= 1
 
 
 def test_xlsx_multisheet_requires_explicit_sheet() -> None:
@@ -310,6 +373,15 @@ def test_semi_trust_run_waits_for_decision_then_completes() -> None:
     assert waiting["phase"] == "cleaning"
     assert waiting["state"].get("quality", {}).get("schema_version") == "risk-eda/v1"
     assert waiting["state"].get("cleaning", {}).get("schema_version") == "risk-cleaning-plan/v1"
+    if waiting["state"].get("cleaning", {}).get("requires_confirmation"):
+        bypass = client.post(
+            f"/api/runs/{run_id}/decision",
+            json={"kind": "confirm_plan", "values": {"target": "bad_flag", "split_method": "time_holdout", "models": ["logistic_regression"], "confirmed": True}},
+        )
+        assert bypass.status_code == 409
+        skipped = client.post(f"/api/runs/{run_id}/clean", json={"actions": []})
+        skipped.raise_for_status()
+        assert skipped.json()["execution"]["status"] == "skipped"
     decision = client.post(
         f"/api/runs/{run_id}/decision",
         json={"kind": "confirm_plan", "values": {"target": "bad_flag", "split_method": "time_holdout", "models": ["logistic_regression", "random_forest"], "confirmed": True}},

@@ -112,6 +112,15 @@
             <div id="timeline" class="timeline empty-timeline"><div class="timeline-placeholder">运行开始后，这里会显示节点、工具、审核和产物事件。</div></div>
           </section>
 
+          <section class="panel conversation-panel">
+            <div class="panel-heading"><div><span class="section-kicker">多轮协作</span><h3>和 Agent 讨论当前项目</h3></div><span class="muted">上下文绑定当前 Run · 不替代结构化确认</span></div>
+            <div id="conversation-messages" class="conversation-messages"><div class="timeline-placeholder">你可以追问当前证据、模型比较或下一步；需要改变方案时，系统会引导到确认卡。</div></div>
+            <form id="conversation-form" class="conversation-form">
+              <textarea id="conversation-input" rows="2" maxlength="2000" placeholder="例如：为什么这个字段被排除？当前最需要我确认什么？"></textarea>
+              <div class="conversation-actions"><small class="muted">外部 LLM 开启时只发送别名化 SafeEvidence；默认使用本地确定性回复。</small><button class="primary-button small" type="submit">发送</button></div>
+            </form>
+          </section>
+
           <section id="report-panel" class="panel report-panel hidden">
             <div class="panel-heading"><div><span class="section-kicker">已验证产物</span><h3>模型比较</h3></div><a id="report-link" class="text-link" target="_blank">打开 HTML 报告</a></div>
             <div id="metric-grid" class="metric-grid"></div>

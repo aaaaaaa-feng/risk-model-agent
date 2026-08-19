@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import re
 from dataclasses import dataclass
@@ -262,6 +263,233 @@ def build_safe_evidence(profile: Dict[str, Any], target: Dict[str, Any], selecti
     return evidence
 
 
+def _alias_text(text: str, profile: Optional[Dict[str, Any]]) -> str:
+    """Replace local field names before a conversational turn crosses the API boundary."""
+    result = str(text or "")[:2000]
+    for original, alias in sorted(alias_fields(profile or {}).items(), key=lambda item: len(item[0]), reverse=True):
+        pattern = rf"(?<![A-Za-z0-9_]){re.escape(original)}(?![A-Za-z0-9_])"
+        result = re.sub(pattern, alias, result)
+    return result
+
+
+def _restore_aliases(text: str, profile: Optional[Dict[str, Any]]) -> str:
+    result = str(text or "")
+    aliases = alias_fields(profile or {})
+    for original, alias in sorted(aliases.items(), key=lambda item: len(item[1]), reverse=True):
+        result = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(alias)}(?![A-Za-z0-9_])", original, result)
+    return result
+
+
+def _safe_chat_context(run_state: Dict[str, Any]) -> Dict[str, Any]:
+    profile = run_state.get("profile") or {}
+    target = run_state.get("target") or {}
+    plan = run_state.get("plan") or {}
+    return {
+        "schema_version": "risk-chat-context/v1",
+        "status": run_state.get("status"),
+        "phase": run_state.get("phase"),
+        "run_kind": run_state.get("run_kind", "formal"),
+        "evidence": build_safe_evidence(profile, target, run_state.get("selection")),
+        "plan": _safe_plan_payload(plan, profile, target) if plan else None,
+        "quality": {
+            "rows": (run_state.get("quality") or {}).get("rows"),
+            "columns": (run_state.get("quality") or {}).get("columns"),
+            "duplicate_rows": (run_state.get("quality") or {}).get("duplicate_rows"),
+        },
+        "next_step": run_state.get("next_step"),
+    }
+
+
+def answer_chat(message: str, run_state: Optional[Dict[str, Any]], gateway: ProviderGateway) -> Dict[str, Any]:
+    """Answer a project-bound conversational turn without turning chat into a second workflow engine."""
+    text = str(message or "").strip()
+    if not text:
+        raise ValueError("CHAT_MESSAGE_EMPTY")
+    if len(text) > 2000:
+        raise ValueError("CHAT_MESSAGE_TOO_LONG")
+    run_state = run_state or {}
+    profile = run_state.get("profile") or {}
+    safe_context = _safe_chat_context(run_state)
+    safe_question = _alias_text(text, profile)
+    next_actions: List[str] = []
+    status = run_state.get("status")
+    phase = run_state.get("phase")
+    if not run_state:
+        fallback = "请先导入 CSV/XLSX；我会在本机完成画像、Y 契约、变量筛选、模型比较和报告。"
+        next_actions.append("导入数据集")
+    elif status == "awaiting_confirmation":
+        if phase == "cleaning" and (run_state.get("cleaning") or {}).get("requires_confirmation") and not (run_state.get("cleaning") or {}).get("execution"):
+            fallback = "当前停在数据清洗确认节点。请批准清洗动作，或明确选择跳过业务性清洗，然后再确认 Y、切分和模型。"
+            next_actions.extend(["批准清洗", "跳过业务性清洗", "确认建模方案"])
+        else:
+            fallback = "当前方案已完成审核，等待确认 Y、样本切分、排除字段和候选模型。确认后才会开始训练。"
+            next_actions.append("确认建模方案")
+    elif status == "succeeded":
+        champion = ((run_state.get("report") or {}).get("champion") or {}).get("name")
+        fallback = f"本次 Run 已完成{f'，当前冠军为 {champion}' if champion else ''}。可以查看报告、导出 Trace，或派生一个隔离的 what-if 实验。"
+        next_actions.extend(["查看报告", "派生 what-if 实验"])
+    elif status in {"blocked", "failed"}:
+        fallback = "当前 Run 被阻断或失败。请先查看时间线里的结构化错误和 Reviewer 发现，再修改方案或创建新 Run；历史产物不会被覆盖。"
+        next_actions.append("查看结构化问题")
+    else:
+        fallback = "本地 Worker 正在按当前节点运行；时间线会持续显示工具、Agent 和 Reviewer 的反馈。"
+        next_actions.extend(["查看时间线", "暂停或取消 Run"])
+
+    provider_mode = "deterministic-fallback"
+    response_text = fallback
+    provider_call: Dict[str, Any] = {"attempted": False, "ok": False, "error_code": "PROVIDER_DISABLED"}
+    if gateway.enabled and gateway.configured:
+        provider_mode = "external-enabled"
+        result = gateway.complete(
+            "你是风控建模工作台中的项目协作 Agent。只根据匿名上下文回答，不能编造指标或客户信息。"
+            "如果问题需要改变 Y、切分、清洗、变量或模型，明确提示用户走结构化确认入口；"
+            "不要声称已经执行未发生的动作。回答简洁、带证据边界。",
+            {"question": safe_question, "context": safe_context},
+            model=gateway.config.get("model"),
+            max_tokens=600,
+        )
+        provider_call = {"attempted": True, "ok": result.ok, "error_code": result.error_code, "model": result.model}
+        if result.ok and result.content:
+            response_text = _restore_aliases(result.content, profile)
+        elif result.error_code:
+            provider_mode = "deterministic-fallback"
+    return {
+        "schema_version": "risk-chat-turn/v1",
+        "content": response_text,
+        "agent": "main-agent",
+        "provider_mode": provider_mode,
+        "provider_call": provider_call,
+        "next_actions": next_actions,
+        "evidence_refs": ["run.state.profile", "run.state.plan"] if run_state else [],
+    }
+
+
+def generate_report_narrative(report: Dict[str, Any], gateway: Optional[ProviderGateway] = None) -> Dict[str, Any]:
+    """Draft report prose from deterministic artifacts; never let an LLM invent metrics."""
+    profile = report.get("profile") or {}
+    target = (report.get("plan") or {}).get("target") or (profile.get("target_candidates") or [None])[0]
+    target_summary = {
+        "positive_rate": ((report.get("target") or {}).get("positive_rate")),
+        "contract_ok": ((report.get("target") or {}).get("contract_ok")),
+    }
+    metrics = []
+    for item in report.get("metrics", []):
+        validation = item.get("validation") or {}
+        metrics.append(
+            {
+                "model": item.get("name"),
+                "status": item.get("status"),
+                "validation_roc_auc": validation.get("roc_auc"),
+                "validation_ks": validation.get("ks"),
+                "validation_pr_auc": validation.get("pr_auc"),
+                "validation_brier": validation.get("brier"),
+            }
+        )
+    selection = report.get("selection") or {}
+    funnel = selection.get("funnel") or {}
+    quality = report.get("quality") or {}
+    champion = report.get("champion") or {}
+    stability = report.get("stability") or {}
+    summary = {
+        "schema_version": "risk-report-narrative-input/v1",
+        "run_kind": (report.get("manifest") or {}).get("run_kind", "formal"),
+        "rows": profile.get("rows"),
+        "columns": profile.get("columns"),
+        "target_contract": target_summary,
+        "split": report.get("split") or {},
+        "quality": {
+            "duplicate_rows": quality.get("duplicate_rows"),
+            "numeric_count": len(quality.get("numeric", [])),
+            "categorical_count": len(quality.get("categorical", [])),
+        },
+        "selection_funnel": funnel,
+        "candidate_metrics": metrics,
+        "champion": {
+            "name": champion.get("name"),
+            "validation": {
+                "roc_auc": (champion.get("validation") or {}).get("roc_auc"),
+                "ks": (champion.get("validation") or {}).get("ks"),
+                "pr_auc": (champion.get("validation") or {}).get("pr_auc"),
+            },
+        },
+        "baseline_available": bool(report.get("baseline")),
+        "stability_review_count": sum(
+            1
+            for item in stability.get("features", [])
+            if (item.get("validation") or {}).get("review_flag") in {"review", "high"}
+            or (item.get("oot") or {}).get("review_flag") in {"review", "high"}
+        ),
+        "code_review_verdict": (report.get("code_review") or {}).get("verdict"),
+        "fact_boundary": "离线实验结果，不代表生产效果或合规结论",
+    }
+    champion_name = champion.get("name") or "暂无"
+    validation = champion.get("validation") or {}
+    experiment_prefix = "这是 what-if 实验，默认未审核；" if summary["run_kind"] == "experiment" else ""
+    sections = [
+        {
+            "id": "executive_summary",
+            "title": "执行摘要",
+            "text": f"{experiment_prefix}本次运行在本机完成 {profile.get('rows', 0):,} 行、{profile.get('columns', 0):,} 个字段的分析，比较 {len(metrics)} 个候选模型。当前冠军建议为 {champion_name}，验证集 ROC-AUC 为 {validation.get('roc_auc', '—')}、KS 为 {validation.get('ks', '—')}。",
+            "source": "deterministic-artifact",
+            "evidence_refs": ["profile.rows", "metrics", "champion.validation"],
+        },
+        {
+            "id": "data_and_target",
+            "title": "数据与目标",
+            "text": f"数据只在本机读取；目标字段为 {target or '待确认'}，0/1 契约状态为 {target_summary.get('contract_ok', '—')}，正类比例为 {target_summary.get('positive_rate', '—')}。数据质量包含 {quality.get('duplicate_rows', 0)} 行重复记录、{len(quality.get('numeric', []))} 个数值字段和 {len(quality.get('categorical', []))} 个类别字段。",
+            "source": "deterministic-artifact",
+            "evidence_refs": ["profile", "target", "quality"],
+        },
+        {
+            "id": "selection_and_validation",
+            "title": "变量筛选与验证",
+            "text": f"变量筛选在训练分区拟合 IV/缺失等规则，字段漏斗从 {funnel.get('input_features', '—')} 个字段收敛到 {funnel.get('final', '—')} 个字段。验证协议为 train-only 拟合、validation 选择、OOT 一次评估；OOT 不参与调参或冠军选择。",
+            "source": "deterministic-artifact",
+            "evidence_refs": ["selection.funnel", "selection_rule", "split"],
+        },
+        {
+            "id": "model_comparison",
+            "title": "模型比较",
+            "text": f"候选模型统一使用冻结数据和验证协议比较。冠军建议为 {champion_name}；模型表现应结合校准、稳定性、解释性和业务审批共同判断，不能仅凭单一离线指标上线。",
+            "source": "deterministic-artifact",
+            "evidence_refs": ["metrics", "champion", "stability"],
+        },
+        {
+            "id": "limitations",
+            "title": "限制与下一步",
+            "text": f"当前有 {summary['stability_review_count']} 个变量需要稳定性复核；代码审核结论为 {(report.get('code_review') or {}).get('verdict', '—')}。本报告是指定数据和切分下的离线实验，不代表生产效果、合规结论或自动授信决策。",
+            "source": "deterministic-artifact",
+            "evidence_refs": ["stability", "code_review", "manifest.fact_boundary"],
+        },
+    ]
+    provider_call = {"attempted": False, "ok": False, "error_code": "PROVIDER_DISABLED"}
+    if gateway and gateway.enabled and gateway.configured:
+        external, result = gateway.complete_json(
+            "你是银行风控报告叙事 Agent。只能根据给定匿名结构化证据写报告段落，不能修改或编造数字。"
+            "返回 JSON：{\"sections\":[{\"id\":\"executive_summary|data_and_target|selection_and_validation|model_comparison|limitations\",\"text\":\"...\"}]}。"
+            "每段不超过 180 个汉字，明确离线实验边界，不得出现原始字段名。",
+            {"report_evidence": summary},
+            model=gateway.config.get("model"),
+        )
+        provider_call = {"attempted": True, "ok": result.ok, "error_code": result.error_code, "model": result.model}
+        external_sections = (external or {}).get("sections") if isinstance(external, dict) else None
+        if result.ok and isinstance(external_sections, list):
+            by_id = {item.get("id"): item for item in sections}
+            for item in external_sections[:5]:
+                if not isinstance(item, dict) or item.get("id") not in by_id or not str(item.get("text") or "").strip():
+                    continue
+                by_id[item["id"]]["text"] = str(item["text"])[:1000]
+                by_id[item["id"]]["source"] = "provider-draft"
+            sections = list(by_id.values())
+    return {
+        "schema_version": "risk-report-narrative/v1",
+        "sections": sections,
+        "provider_call": provider_call,
+        "locked": False,
+        "fact_boundary": summary["fact_boundary"],
+    }
+
+
 def _safe_plan_payload(plan: Dict[str, Any], profile: Dict[str, Any], target: Dict[str, Any]) -> Dict[str, Any]:
     aliases = alias_fields(profile)
     screening = dict(plan.get("screening") or {})
@@ -399,16 +627,54 @@ def review_generated_code(
     gateway: Optional[ProviderGateway] = None,
     profile: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    dangerous = [
-        ("DANGEROUS_EXEC", r"\b(eval|exec|compile)\s*\("),
-        ("DANGEROUS_SHELL", r"\b(os\.system|subprocess|Popen|shell=True)\b"),
-        ("DANGEROUS_NETWORK", r"\b(requests|httpx|urllib|socket)\b"),
-        ("DANGEROUS_SECRET", r"os\.environ|API_KEY|Authorization"),
+    findings: List[Dict[str, Any]] = []
+    seen_codes = set()
+
+    def add(code_name: str, message: str, line: Optional[int] = None) -> None:
+        if code_name not in seen_codes:
+            finding: Dict[str, Any] = {"code": code_name, "severity": "block", "message": message}
+            if line:
+                finding["location"] = {"line": line}
+            findings.append(finding)
+            seen_codes.add(code_name)
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        add("CODE_SYNTAX_INVALID", f"生成代码无法解析：第 {exc.lineno or '?'} 行存在语法错误。", exc.lineno)
+        tree = None
+    allowed_import_roots = {"math", "typing", "numpy", "pandas", "sklearn", "xgboost"}
+    blocked_import_roots = {"os", "subprocess", "requests", "httpx", "urllib", "socket", "ctypes", "pickle", "cloudpickle"}
+    if tree is not None:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                roots = [alias.name.split(".", 1)[0] for alias in node.names]
+                if any(root in blocked_import_roots for root in roots):
+                    add("DANGEROUS_IMPORT", "生成代码导入了网络、Shell、凭据或不受信序列化模块。", node.lineno)
+                if any(root not in allowed_import_roots for root in roots):
+                    add("DEPENDENCY_NOT_ALLOWLISTED", "生成代码包含未登记的第三方或系统依赖。", node.lineno)
+            elif isinstance(node, ast.ImportFrom):
+                root = (node.module or "").split(".", 1)[0]
+                if root in blocked_import_roots:
+                    add("DANGEROUS_IMPORT", "生成代码导入了网络、Shell、凭据或不受信序列化模块。", node.lineno)
+                if root not in allowed_import_roots:
+                    add("DEPENDENCY_NOT_ALLOWLISTED", "生成代码包含未登记的第三方或系统依赖。", node.lineno)
+            elif isinstance(node, ast.Call):
+                function = node.func
+                name = function.id if isinstance(function, ast.Name) else function.attr if isinstance(function, ast.Attribute) else ""
+                if name in {"eval", "exec", "compile", "__import__", "getattr", "setattr"}:
+                    add("DANGEROUS_EXEC", "生成代码包含动态执行或动态加载调用。", node.lineno)
+                if name in {"open", "system", "popen", "run", "Popen", "check_call", "check_output"}:
+                    add("DANGEROUS_SHELL", "生成代码包含文件、Shell 或子进程调用。", node.lineno)
+            elif isinstance(node, ast.Attribute) and node.attr in {"environ", "system", "popen"}:
+                add("DANGEROUS_SECRET", "生成代码包含环境变量或系统调用访问。", node.lineno)
+    dangerous_text = [
+        ("DANGEROUS_NETWORK", r"\b(requests|httpx|urllib|socket)\b|https?://"),
+        ("DANGEROUS_SECRET", r"API_KEY|Authorization|os\.environ"),
     ]
-    findings = []
-    for code_name, pattern in dangerous:
+    for code_name, pattern in dangerous_text:
         if re.search(pattern, code, flags=re.I):
-            findings.append({"code": code_name, "severity": "block", "message": "生成代码包含 V1 禁止模式。"})
+            add(code_name, "生成代码包含 V1 禁止的网络或凭据访问模式。")
     result: Dict[str, Any] = {
         "verdict": "block" if findings else "pass",
         "findings": findings,

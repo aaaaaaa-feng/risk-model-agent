@@ -1,4 +1,4 @@
-const state = { projects: [], project: null, datasets: [], dictionaries: [], runs: [], run: null, events: [], mode: 'auto', eventSource: null, config: null };
+const state = { projects: [], project: null, datasets: [], dictionaries: [], runs: [], run: null, events: [], conversation: null, messages: [], mode: 'auto', eventSource: null, config: null };
 const $ = function (selector) { return document.querySelector(selector); };
 const projectList = $('#project-list');
 const escapeHtml = function (value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]; }); };
@@ -31,6 +31,7 @@ async function loadProjects() {
 async function selectProject(projectId) {
   const data = await api('/api/projects/' + projectId);
   state.project = data.project; state.datasets = data.datasets || []; state.dictionaries = data.dictionaries || []; state.runs = data.runs || []; state.run = state.runs[0] || null; state.mode = state.run ? state.run.mode : state.mode; state.events = [];
+  await loadConversation();
   renderProjects(); renderProject();
   if (state.run) {
     const eventData = await api('/api/runs/' + state.run.id + '/events');
@@ -40,14 +41,22 @@ async function selectProject(projectId) {
     }
   }
 }
+async function loadConversation() {
+  if (!state.project) return;
+  const suffix = state.run ? '?run_id=' + encodeURIComponent(state.run.id) : '';
+  const data = await api('/api/projects/' + state.project.id + '/conversation' + suffix);
+  state.conversation = data.conversation; state.messages = data.messages || [];
+  renderConversation();
+}
 function renderProject() {
   const hasProject = Boolean(state.project);
   $('#empty-state').classList.toggle('hidden', hasProject); $('#workspace').classList.toggle('hidden', !hasProject);
   if (!hasProject) return;
   $('#project-title').textContent = state.project.name;
+  $('#mode-toggle').textContent = state.mode === 'auto' ? '自动运行模式' : '半信任模式';
   $('#dataset-version').textContent = state.datasets.length ? 'v' + state.datasets.length : '—';
   $('#run-version').textContent = state.run ? state.run.id.slice(-6) : '—';
-  renderDataset(); renderDictionaryStatus(); renderRun(); renderStages(); renderAnalysisControls();
+  renderDataset(); renderDictionaryStatus(); renderRun(); renderStages(); renderAnalysisControls(); renderConversation();
   $('#start-run').disabled = !state.datasets.length || ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run && state.run.status);
 }
 function renderDataset() {
@@ -104,6 +113,24 @@ function renderAnalysisControls() {
   control.querySelectorAll('.analysis-select').forEach(function (select) { select.addEventListener('change', function () { button.disabled = !Array.from(control.querySelectorAll('.analysis-select')).some(function (item) { return item.value; }); }); });
   button.disabled = true;
 }
+function renderConversation() {
+  const container = $('#conversation-messages');
+  if (!container) return;
+  if (!state.messages.length) {
+    container.innerHTML = '<div class="timeline-placeholder">你可以追问当前证据、模型比较或下一步；需要改变方案时，系统会引导到确认卡。</div>';
+    return;
+  }
+  container.innerHTML = state.messages.map(function (message) {
+    const roleClass = message.role === 'user' ? 'user-message' : 'assistant-message';
+    const label = message.role === 'user' ? '你' : (message.agent || 'Agent');
+    const structured = message.structured || {};
+    const actions = (structured.next_actions || []).map(function (item) { return '<span class="chat-action">' + escapeHtml(item) + '</span>'; }).join('');
+    const feedback = message.role === 'assistant' ? '<div class="chat-feedback"><button type="button" data-chat-feedback="like" data-message-id="' + escapeHtml(message.id) + '">👍</button><button type="button" data-chat-feedback="dislike" data-message-id="' + escapeHtml(message.id) + '">👎</button></div>' : '';
+    return '<div class="chat-message ' + roleClass + '"><div class="chat-label">' + escapeHtml(label) + '</div><div class="chat-content">' + escapeHtml(message.content) + '</div>' + (actions ? '<div class="chat-actions">' + actions + '</div>' : '') + feedback + '<small>' + escapeHtml((message.created_at || '').slice(11, 19)) + '</small></div>';
+  }).join('');
+  container.scrollTop = container.scrollHeight;
+  container.querySelectorAll('[data-chat-feedback]').forEach(function (button) { button.addEventListener('click', function () { sendMessageFeedback(button.dataset.messageId, button.dataset.chatFeedback); }); });
+}
 async function runAnalysis() {
   if (!state.project || !state.datasets[0]) return;
   const selects = Array.from(document.querySelectorAll('.analysis-select')).map(function (select) { return select.value; }).filter(Boolean);
@@ -142,7 +169,8 @@ function renderActionCard() {
     const modelOptions = ['woe_logistic_scorecard', 'logistic_regression', 'random_forest', 'hist_gradient_boosting', 'xgboost'].map(function (model) { return '<label class="model-option"><input type="checkbox" data-confirm-model="' + model + '" ' + ((plan.models || []).includes(model) ? 'checked' : '') + ' />' + model + '</label>'; }).join('');
     const findings = (review.findings || []).map(function (item) { return '<li>' + escapeHtml(item.message || item.code || '需关注') + '</li>'; }).join('');
     const cleaningFindings = (cleaning.requires_confirmation || []).map(function (item) { return '<li>' + escapeHtml(item.message || item.code || '需关注') + '</li>'; }).join('');
-    const cleaningButton = run.phase === 'cleaning' && (cleaning.requires_confirmation || []).length && !cleaning.execution ? '<button class="secondary-button action-button" id="apply-cleaning">批准并生成新数据版本</button>' : '';
+    const cleaningButton = run.phase === 'cleaning' && (cleaning.requires_confirmation || []).length && !cleaning.execution ? '<div class="cleaning-actions"><button class="secondary-button action-button" id="apply-cleaning">批准并生成新数据版本</button><button class="text-link action-button" id="skip-cleaning">跳过业务性清洗</button><small class="muted">必须明确选择其一，不能静默跳过。</small></div>' : '';
+    const confirmationDisabled = run.phase === 'cleaning' && (cleaning.requires_confirmation || []).length && !cleaning.execution ? ' disabled' : '';
     card.innerHTML = '<h3>需要你的确认</h3><p>Reviewer 已完成计划审核。确认的是业务方案，不需要阅读生成代码。</p>' +
       '<div class="decision-summary"><div><span>Y 字段</span><strong>' + escapeHtml(plan.target || target.target || '待确定') + '</strong></div>' +
       '<div><span>正类比例</span><strong>' + (target.positive_rate == null ? '—' : escapeHtml((target.positive_rate * 100).toFixed(2) + '%')) + '</strong></div>' +
@@ -154,9 +182,10 @@ function renderActionCard() {
       '<label>确认样本切分<select id="confirm-split">' + splitOptions + '</select></label>' +
       '<label>既有模型基线（可选）<select id="confirm-baseline">' + baselineOptions + '</select></label>' +
       '<div><span class="control-label">本次候选模型</span><div class="model-options">' + modelOptions + '</div></div></div>' +
-      cleaningButton + '<button class="primary-button action-button" id="confirm-plan">确认并继续</button>';
+      cleaningButton + '<button class="primary-button action-button" id="confirm-plan"' + confirmationDisabled + '>确认并继续</button>';
     $('#confirm-plan').addEventListener('click', confirmPlan);
     if ($('#apply-cleaning')) $('#apply-cleaning').addEventListener('click', applyCleaning);
+    if ($('#skip-cleaning')) $('#skip-cleaning').addEventListener('click', skipCleaning);
   }
   else if (run.status === 'succeeded') { card.innerHTML = '<h3>本次 Run 已完成</h3><p>模型、代码交付物和报告已保存在本机。你可以打开 HTML 报告，或从当前方案派生隔离的 what-if 实验。</p><a class="secondary-button action-button" href="/api/runs/' + run.id + '/report.html" target="_blank">打开报告</a><div class="action-links"><a class="text-link" href="/api/runs/' + run.id + '/report.xlsx" target="_blank">下载 XLSX</a><a class="text-link" href="/api/runs/' + run.id + '/trace.zip" target="_blank">下载 Trace</a></div><button class="secondary-button action-button" id="what-if-run">派生 what-if 实验</button>'; $('#what-if-run').addEventListener('click', createWhatIf); }
   else if (run.status === 'paused') { card.innerHTML = '<h3>Run 已暂停</h3><p>已保存最近安全节点，不会把半成品当作成功结果。</p><button class="primary-button action-button" id="resume-run">恢复运行</button><button class="secondary-button action-button" id="cancel-run">取消 Run</button>'; $('#resume-run').addEventListener('click', resumeRun); $('#cancel-run').addEventListener('click', cancelRun); }
@@ -224,7 +253,7 @@ async function startRun() {
   if (!state.project || !state.datasets[0]) return;
   try {
     const data = await api('/api/projects/' + state.project.id + '/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: state.datasets[0].id, mode: state.mode }) });
-    state.run = data.run; state.events = []; renderProject(); connectStream();
+    state.run = data.run; state.events = []; await loadConversation(); renderProject(); connectStream();
   } catch (error) { showNotice(error.message, 'block'); }
 }
 async function confirmPlan() {
@@ -246,6 +275,13 @@ async function applyCleaning() {
   if (!actions.length || !window.confirm('确认按当前方案执行清洗？系统会保留原数据并创建新的本地数据版本。')) return;
   try { await api('/api/runs/' + state.run.id + '/clean', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actions: actions }) }); showNotice('清洗已执行并生成新的本地数据版本。'); await syncRun(); } catch (error) { showNotice(error.message, 'block'); }
 }
+async function skipCleaning() {
+  try {
+    await api('/api/runs/' + state.run.id + '/clean', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actions: [] }) });
+    showNotice('已记录跳过业务性清洗，原始数据版本保持不变。');
+    await syncRun();
+  } catch (error) { showNotice(error.message, 'block'); }
+}
 async function createWhatIf() {
   if (!state.project || !state.run) return;
   const currentPlan = state.run.state && state.run.state.plan || {};
@@ -257,7 +293,7 @@ async function createWhatIf() {
   try {
     const result = await api('/api/projects/' + state.project.id + '/what-if', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base_run_id: state.run.id, changes: { min_iv: minIv } }) });
     showNotice('what-if 实验已隔离启动，不会覆盖正式 Run。');
-    state.run = result.run; state.events = []; renderProject(); connectStream();
+    state.run = result.run; state.events = []; await loadConversation(); renderProject(); connectStream();
   } catch (error) { showNotice(error.message, 'block'); }
 }
 async function pauseRun() { if (!state.run) return; try { await api('/api/runs/' + state.run.id + '/pause', { method: 'POST' }); await syncRun(); if (state.eventSource) state.eventSource.close(); } catch (error) { showNotice(error.message, 'block'); } }
@@ -276,6 +312,24 @@ async function sendFeedback(reaction) {
   if (!state.run) return; const reason = reaction === 'dislike' ? window.prompt('请告诉我们哪里需要改进（可留空）', '') : '';
   await api('/api/runs/' + state.run.id + '/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reaction: reaction, reason: reason }) }); showNotice('反馈已记录，不会改变正式确认。');
 }
+async function sendConversation(event) {
+  event.preventDefault();
+  if (!state.project) return;
+  const input = $('#conversation-input'); const message = input.value.trim();
+  if (!message) return;
+  const button = event.target.querySelector('button[type="submit"]'); button.disabled = true;
+  try {
+    const result = await api('/api/projects/' + state.project.id + '/conversation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: message, run_id: state.run && state.run.id }) });
+    state.conversation = result.conversation; state.messages.push(result.user_message, result.assistant_message); input.value = ''; renderConversation();
+  } catch (error) { showNotice(error.message, 'block'); }
+  finally { button.disabled = false; }
+}
+async function sendMessageFeedback(messageId, reaction) {
+  if (!state.run || !messageId) return;
+  const reason = reaction === 'dislike' ? window.prompt('请告诉我们哪里需要改进（可留空）', '') : '';
+  try { await api('/api/runs/' + state.run.id + '/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reaction: reaction, reason: reason, message_id: messageId }) }); showNotice('已记录这条 Agent 回复的反馈。'); }
+  catch (error) { showNotice(error.message, 'block'); }
+}
 
 $('#new-project').addEventListener('click', createProject); $('#empty-new-project').addEventListener('click', createProject); $('#empty-demo').addEventListener('click', createDemo); $('#start-run').addEventListener('click', startRun); $('#choose-file').addEventListener('click', function () { $('#file-input').click(); }); $('#file-input').addEventListener('change', function (event) { uploadFile(event.target.files[0]); });
 $('#choose-dictionary').addEventListener('click', function () { $('#dictionary-input').click(); }); $('#dictionary-input').addEventListener('change', function (event) { uploadDictionary(event.target.files[0]); });
@@ -283,8 +337,9 @@ $('#run-analysis').addEventListener('click', runAnalysis);
 $('#dataset-card').addEventListener('dragover', function (event) { event.preventDefault(); $('#dataset-card').classList.add('dragging'); });
 $('#dataset-card').addEventListener('dragleave', function () { $('#dataset-card').classList.remove('dragging'); });
 $('#dataset-card').addEventListener('drop', function (event) { event.preventDefault(); $('#dataset-card').classList.remove('dragging'); uploadFile(event.dataTransfer.files[0]); });
-$('#mode-toggle').addEventListener('click', function () { state.mode = state.mode === 'auto' ? 'semi_trust' : 'auto'; $('#mode-toggle').textContent = state.mode === 'auto' ? '自动运行模式' : '半信任模式'; renderRun(); });
+$('#mode-toggle').addEventListener('click', function () { if (state.run && ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run.status)) { showNotice('当前 Run 已开始，模式只影响下一次 Run。', 'block'); return; } state.mode = state.mode === 'auto' ? 'semi_trust' : 'auto'; $('#mode-toggle').textContent = state.mode === 'auto' ? '自动运行模式' : '半信任模式'; renderRun(); });
 $('#open-settings').addEventListener('click', async function () { $('#settings-modal').classList.remove('hidden'); await loadSettings(); }); $('#close-settings').addEventListener('click', function () { $('#settings-modal').classList.add('hidden'); }); $('#cancel-settings').addEventListener('click', function () { $('#settings-modal').classList.add('hidden'); }); $('#settings-form').addEventListener('submit', saveSettings);
 document.querySelectorAll('.feedback-button').forEach(function (button) { button.addEventListener('click', function () { sendFeedback(button.dataset.reaction); }); });
 $('#provider-test').addEventListener('click', async function () { $('#settings-status').textContent = '正在测试…'; try { const result = await api('/api/config/test', { method: 'POST' }); $('#settings-status').textContent = result.ok ? '连接成功。' : (result.error_code || '连接未成功') + '：' + result.message; } catch (error) { $('#settings-status').textContent = error.message; } });
+$('#conversation-form').addEventListener('submit', sendConversation);
 loadSettings().catch(function () {}); loadProjects().catch(function (error) { showNotice(error.message, 'block'); });

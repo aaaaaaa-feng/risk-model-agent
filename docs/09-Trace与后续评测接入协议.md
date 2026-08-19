@@ -175,6 +175,8 @@
 
 如未来评测需要原始对话文本，必须在本地、经明确策略和脱敏后单独导出。
 
+当前 V0.1 的项目对话 API 为 `GET/POST /api/projects/{project_id}/conversation`（可选 `run_id`）。Run Trace 只保留对话消息的角色、Agent、结构化下一步、长度和内容哈希，不导出聊天原文。
+
 ## 7. Trace Bundle
 
 用户或未来 Harness 可导出（当前 V0.1 将其压缩为单一脱敏 JSON + 说明文件，后续可拆分为下列目录）：
@@ -198,8 +200,8 @@ trace-bundle/
 
 ```text
 POST /api/projects/{project_id}/runs
-POST /api/projects/{project_id}/conversations
-GET  /api/projects/{project_id}/conversations/{conversation_id}
+POST /api/projects/{project_id}/conversation
+GET  /api/projects/{project_id}/conversation
 GET  /api/runs/{run_id}
 GET  /api/runs/{run_id}/events
 GET  /api/runs/{run_id}/artifacts

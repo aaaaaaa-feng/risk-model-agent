@@ -9,6 +9,7 @@ import shutil
 import sys
 import tempfile
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,10 +20,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .agent import ProviderGateway
+from .agent import ProviderGateway, answer_chat
 from .config import MAX_BACKUP_BYTES, MAX_UPLOAD_BYTES, ensure_runtime, load_config, new_id, public_config, save_config
-from .orchestrator import resume_after_confirmation, resume_after_pause, start_run
-from .storage import sha256_file, store
+from .orchestrator import _report_html, _write_checksums, _write_report_xlsx, resume_after_confirmation, resume_after_pause, start_run
+from .storage import dumps, sha256_file, store
 from .tools import registry_manifest, require_tool
 from .worker import apply_cleaning_plan, estimate_table_resources, list_sheets, parse_data_dictionary, profile_table, quality_analysis, read_table, segment_analysis, target_summary
 
@@ -49,6 +50,17 @@ class FeedbackPayload(BaseModel):
     reaction: str = Field(pattern="^(like|dislike)$")
     reason: Optional[str] = Field(default=None, max_length=500)
     event_id: Optional[str] = None
+    message_id: Optional[str] = None
+
+
+class ChatPayload(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    run_id: Optional[str] = None
+
+
+class NarrativePayload(BaseModel):
+    sections: List[Dict[str, Any]] = Field(default_factory=list)
+    lock: bool = False
 
 
 class ConfigPayload(BaseModel):
@@ -399,6 +411,13 @@ def create_what_if(project_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(404, "基线 Run 不存在或不属于当前项目")
     if base["status"] != "succeeded":
         raise HTTPException(409, "what-if 只能从已完成的正式或实验 Run 派生")
+    active = [
+        item
+        for item in store.list_runs(project_id)
+        if item["status"] in {"queued", "running", "awaiting_confirmation", "paused"}
+    ]
+    if active:
+        raise HTTPException(409, "该项目已有活动 Run；请先完成、暂停或取消后再创建 what-if")
     base_state = deepcopy(base.get("state") or {})
     if base_state.get("run_kind") == "experiment" and not payload.get("allow_nested_experiment"):
         raise HTTPException(400, "默认不允许从实验 Run 再次派生，请回到正式 Run")
@@ -496,6 +515,9 @@ def confirm_decision(run_id: str, payload: DecisionPayload) -> Dict[str, Any]:
     if run["status"] != "awaiting_confirmation":
         raise HTTPException(409, "当前 Run 不在等待确认状态")
     state = dict(run.get("state") or {})
+    cleaning = dict(state.get("cleaning") or {})
+    if run["phase"] == "cleaning" and cleaning.get("requires_confirmation") and not cleaning.get("execution"):
+        raise HTTPException(409, "请先批准清洗动作，或明确选择跳过业务性清洗，再确认建模方案")
     plan = dict(state.get("plan") or {})
     values = dict(payload.values or {})
     target = values.get("target") or plan.get("target")
@@ -567,6 +589,24 @@ def apply_run_cleaning(run_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     dataset = store.get_dataset(run["dataset_id"])
     if not dataset:
         raise HTTPException(404, "数据集不存在")
+    if not actions:
+        execution = {
+            "status": "skipped",
+            "actions": [],
+            "rows_before": dataset.get("rows"),
+            "rows_after": dataset.get("rows"),
+            "rows_removed": 0,
+            "columns_before": dataset.get("columns"),
+            "columns_after": dataset.get("columns"),
+            "rule_version": cleaning.get("rule_version", "cleaning-rules/v1"),
+            "reason": "用户明确选择不执行业务性清洗；原始数据版本继续作为当前版本。",
+        }
+        cleaning["execution"] = execution
+        state["cleaning"] = cleaning
+        store.add_decision(run_id, "cleaning_skipped", {"execution": execution})
+        store.update_run(run_id, status="awaiting_confirmation", phase="cleaning", state=state)
+        store.append_event(run_id, "cleaning_skipped", {"node": "cleaning", "status": "awaiting_confirmation", "message": "用户明确跳过业务性清洗；将继续等待建模方案确认。", "execution": execution})
+        return {"run": public_run(store.get_run(run_id)), "dataset": public_dataset(dataset), "execution": execution}
     try:
         require_tool("apply_cleaning_plan", "cleaning")
         frame = read_table(Path(dataset["path"]), dataset.get("sheet"))
@@ -645,8 +685,87 @@ def cancel_run(run_id: str) -> Dict[str, Any]:
 def add_feedback(run_id: str, payload: FeedbackPayload) -> Dict[str, Any]:
     if not store.get_run(run_id):
         raise HTTPException(404, "Run 不存在")
-    store.add_feedback(run_id, payload.reaction, payload.reason, payload.event_id)
+    event_id = payload.event_id
+    if payload.message_id:
+        message = store.get_conversation_message(payload.message_id)
+        if not message or message.get("run_id") != run_id or message.get("role") != "assistant":
+            raise HTTPException(400, "反馈消息不存在或不属于当前 Run")
+        event_id = payload.message_id
+    store.add_feedback(run_id, payload.reaction, payload.reason, event_id)
     return {"ok": True, "message": "反馈已记录，不会直接改变正式确认状态。"}
+
+
+def _public_message(message: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: message.get(key)
+        for key in ("id", "conversation_id", "run_id", "role", "agent", "content", "structured", "created_at")
+    }
+
+
+@app.get("/api/projects/{project_id}/conversation")
+def get_conversation(project_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
+    if not store.get_project(project_id):
+        raise HTTPException(404, "项目不存在")
+    if run_id:
+        run = store.get_run(run_id)
+        if not run or run["project_id"] != project_id:
+            raise HTTPException(404, "Run 不存在或不属于当前项目")
+    conversation = store.get_or_create_conversation(project_id, run_id)
+    return {"conversation": conversation, "messages": [_public_message(item) for item in store.list_conversation_messages(conversation["id"])]}
+
+
+@app.post("/api/projects/{project_id}/conversation")
+def post_conversation(project_id: str, payload: ChatPayload) -> Dict[str, Any]:
+    if not store.get_project(project_id):
+        raise HTTPException(404, "项目不存在")
+    run = None
+    if payload.run_id:
+        run = store.get_run(payload.run_id)
+        if not run or run["project_id"] != project_id:
+            raise HTTPException(404, "Run 不存在或不属于当前项目")
+    conversation = store.get_or_create_conversation(project_id, payload.run_id)
+    user_message = store.add_conversation_message(conversation["id"], payload.run_id, "user", "user", payload.message.strip(), {})
+    run_state = dict(run.get("state") or {}) if run else {}
+    if run:
+        run_state.update({"status": run.get("status"), "phase": run.get("phase"), "run_kind": run_state.get("run_kind", "formal")})
+    config = load_config()
+    gateway = ProviderGateway(
+        config=config,
+        budget_guard=(lambda requested: store.provider_budget_error(run["id"], requested, config)) if run else None,
+        usage_callback=(lambda tokens, model: store.record_provider_usage(run["id"], tokens, model, "chat")) if run else None,
+        request_callback=(lambda purpose, safe_payload, model: store.record_provider_request(run["id"], purpose, model, safe_payload)) if run else None,
+        purpose="chat",
+    )
+    try:
+        answer = answer_chat(payload.message, run_state, gateway)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    assistant_message = store.add_conversation_message(
+        conversation["id"],
+        payload.run_id,
+        "assistant",
+        str(answer.get("agent") or "main-agent"),
+        str(answer.get("content") or ""),
+        {key: answer.get(key) for key in ("schema_version", "provider_mode", "provider_call", "next_actions", "evidence_refs")},
+    )
+    if run:
+        store.append_event(
+            run["id"],
+            "conversation_turn_completed",
+            {
+                "node": run.get("phase", "run"),
+                "status": run.get("status", "running"),
+                "message": "项目对话已完成一轮 Agent 协作回复",
+                "agent": answer.get("agent", "main-agent"),
+                "provider_mode": answer.get("provider_mode"),
+                "next_actions": answer.get("next_actions", []),
+            },
+        )
+    return {
+        "conversation": conversation,
+        "user_message": _public_message(user_message),
+        "assistant_message": _public_message(assistant_message),
+    }
 
 
 @app.get("/api/runs/{run_id}/events")
@@ -724,6 +843,72 @@ def get_report(run_id: str) -> JSONResponse:
     if not report_path.exists():
         raise HTTPException(404, "报告尚未生成")
     return JSONResponse(json.loads(report_path.read_text(encoding="utf-8")))
+
+
+@app.post("/api/runs/{run_id}/report/narrative")
+def update_report_narrative(run_id: str, payload: NarrativePayload) -> Dict[str, Any]:
+    """Edit and optionally lock report prose without changing deterministic facts."""
+    run = store.get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run 不存在")
+    if run.get("status") not in {"succeeded", "blocked"}:
+        raise HTTPException(409, "只有报告已生成的 Run 才能编辑叙事")
+    report_path = store.run_dir(run["project_id"], run_id) / "report.json"
+    if not report_path.exists():
+        raise HTTPException(404, "报告尚未生成")
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(500, "报告文件无法读取") from exc
+    narrative = dict(report.get("narrative_sections") or {})
+    if narrative.get("locked"):
+        raise HTTPException(409, "报告叙事已经锁定，不能覆盖")
+    existing = {item.get("id"): item for item in narrative.get("sections", []) if isinstance(item, dict) and item.get("id")}
+    if not existing:
+        raise HTTPException(409, "当前报告没有可编辑的叙事章节")
+    changed = []
+    for item in payload.sections:
+        section_id = str(item.get("id") or "")
+        if section_id not in existing:
+            raise HTTPException(400, f"未知报告章节：{section_id}")
+        text = str(item.get("text") or "").strip()
+        if not text or len(text) > 3000:
+            raise HTTPException(400, "报告章节内容不能为空且不得超过 3000 字")
+        existing[section_id]["text"] = text
+        existing[section_id]["source"] = "human-edited"
+        existing[section_id]["evidence_refs"] = list(existing[section_id].get("evidence_refs") or [])
+        changed.append(section_id)
+    narrative["sections"] = list(existing.values())
+    narrative["locked"] = bool(payload.lock)
+    narrative["revision"] = int(narrative.get("revision") or 0) + 1
+    narrative["edited_at"] = datetime.now(timezone.utc).isoformat()
+    report["narrative_sections"] = narrative
+    report["narrative"] = next(
+        (item.get("text") for item in narrative["sections"] if item.get("id") == "executive_summary"),
+        report.get("narrative", ""),
+    )
+    run_dir = store.run_dir(run["project_id"], run_id)
+    _write_report_xlsx(report, run_dir / "report.xlsx")
+    report_path.write_text(dumps(report), encoding="utf-8")
+    (run_dir / "report.html").write_text(_report_html(report), encoding="utf-8")
+    _write_checksums(run_dir)
+    state = dict(run.get("state") or {})
+    state["report"] = report
+    store.update_run(run_id, state=state, status=run["status"], phase=run["phase"], error=run.get("error"))
+    store.add_decision(run_id, "report_narrative_edit", {"sections": changed, "locked": bool(payload.lock), "revision": narrative["revision"]})
+    store.append_event(
+        run_id,
+        "report_narrative_updated",
+        {
+            "node": "reporting",
+            "status": run["status"],
+            "message": "报告叙事已更新；确定性指标和模型产物未被修改。",
+            "sections": changed,
+            "locked": bool(payload.lock),
+            "revision": narrative["revision"],
+        },
+    )
+    return {"report": report, "changed_sections": changed, "locked": narrative["locked"]}
 
 
 @app.get("/api/runs/{run_id}/report.html")
@@ -974,6 +1159,30 @@ async def restore_project(file: UploadFile = File(...)) -> Dict[str, Any]:
                         store.add_decision(new_run_id, str(decision.get("kind") or "restored_decision"), _remap_ids(decision.get("payload") or {}, id_map))
                     for feedback in item.get("feedback") or []:
                         store.add_feedback(new_run_id, str(feedback.get("reaction") or "dislike"), feedback.get("reason"), feedback.get("event_id"))
+                restored_conversations = 0
+                for item in manifest.get("conversations") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    old_conversation_run_id = str(item.get("run_id") or "")
+                    if old_conversation_run_id and old_conversation_run_id not in run_map:
+                        warnings.append("有一组 Run 对话因对应 Run 未恢复而跳过。")
+                        continue
+                    conversation = store.get_or_create_conversation(
+                        project_id,
+                        run_map.get(old_conversation_run_id) if old_conversation_run_id else None,
+                    )
+                    for message in item.get("messages") or []:
+                        if not isinstance(message, dict):
+                            continue
+                        store.add_conversation_message(
+                            conversation["id"],
+                            run_map.get(old_conversation_run_id) if old_conversation_run_id else None,
+                            str(message.get("role") or "assistant"),
+                            str(message.get("agent") or "main-agent"),
+                            str(message.get("content") or ""),
+                            _remap_ids(message.get("structured") or {}, id_map),
+                        )
+                    restored_conversations += 1
                 skipped_runs = len(run_entries) - len(restorable_runs)
                 for item in run_entries:
                     if item not in restorable_runs:
@@ -989,6 +1198,7 @@ async def restore_project(file: UploadFile = File(...)) -> Dict[str, Any]:
                     "project": store.get_project(project_id),
                     "restored_datasets": restored_datasets,
                     "restored_runs": len(restorable_runs),
+                    "restored_conversations": restored_conversations,
                     "missing_datasets": missing_datasets,
                     "warnings": warnings,
                     "raw_data_included": bool(manifest.get("raw_data_included")),
@@ -1020,6 +1230,8 @@ def run() -> None:
     import uvicorn
     host = os.getenv("RISK_AGENT_HOST", "127.0.0.1")
     port = int(os.getenv("RISK_AGENT_PORT", "8765"))
+    if host.lower() not in {"127.0.0.1", "localhost", "::1"} and os.getenv("RISK_AGENT_ALLOW_REMOTE", "0") != "1":
+        raise RuntimeError("REMOTE_BIND_REQUIRES_EXPLICIT_OPT_IN: 默认只允许回环地址；如确需远程访问请显式设置 RISK_AGENT_ALLOW_REMOTE=1")
     # A frozen PyInstaller process should pass the already-imported ASGI app;
     # string re-import can fail when the bundle has no normal module path.
     target = app if getattr(sys, "frozen", False) else "app.main:app"

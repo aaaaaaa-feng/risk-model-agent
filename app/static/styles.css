@@ -104,6 +104,20 @@ button { cursor: pointer; }
 .timeline-panel { min-height: 240px; }
 .timeline { display: grid; gap: 0; max-height: 430px; overflow: auto; padding: 2px 5px 4px 0; }
 .timeline-placeholder { color: var(--muted); font-size: 12px; padding: 40px 20px; text-align: center; background: #fafdfb; border-radius: 12px; }
+.conversation-messages { display: grid; gap: 9px; max-height: 320px; overflow: auto; padding: 2px 2px 4px; }
+.chat-message { max-width: 88%; padding: 10px 12px; border-radius: 12px; font-size: 12px; line-height: 1.55; }
+.chat-message.user-message { justify-self: end; background: #e7f6ef; color: var(--ink); }
+.chat-message.assistant-message { justify-self: start; background: #f6faf8; border: 1px solid var(--line); color: #46625c; }
+.chat-label { font-size: 10px; color: var(--muted); font-weight: 800; margin-bottom: 3px; }
+.chat-message small { display: block; color: var(--muted); font-size: 9px; margin-top: 5px; }
+.chat-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.chat-action { padding: 3px 6px; color: var(--teal); background: #e4f6ed; border-radius: 999px; font-size: 9px; }
+.chat-feedback { display: flex; gap: 4px; margin-top: 7px; }
+.chat-feedback button { border: 1px solid var(--line); border-radius: 7px; background: white; color: var(--muted); padding: 3px 6px; font-size: 10px; }
+.conversation-form { margin-top: 10px; }
+.conversation-form textarea { width: 100%; resize: vertical; min-height: 54px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; color: var(--ink); background: #fbfefc; font-size: 12px; outline: none; }
+.conversation-form textarea:focus { border-color: #7abda7; box-shadow: 0 0 0 3px #e5f5ed; }
+.conversation-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 7px; }
 .timeline-event { display: grid; grid-template-columns: 22px 1fr; gap: 11px; padding: 5px 0; }
 .timeline-dot { width: 9px; height: 9px; border-radius: 50%; background: #a8cfc1; margin: 8px 0 0 4px; box-shadow: 0 0 0 4px #edf8f3; }
 .timeline-event:first-child .timeline-dot { background: var(--teal); }
@@ -130,6 +144,8 @@ button { cursor: pointer; }
 .action-card h3 { margin: 0 0 8px; font-size: 14px; }
 .action-card p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .action-card .action-button { margin-top: 14px; width: 100%; }
+.cleaning-actions { display: grid; gap: 5px; }
+.cleaning-actions .text-link { margin-top: 5px; text-align: center; }
 .action-links { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }
 .decision-summary { display: grid; gap: 8px; margin-top: 13px; padding: 11px; border-radius: 11px; background: #f7fbf9; }
 .decision-summary div { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; }

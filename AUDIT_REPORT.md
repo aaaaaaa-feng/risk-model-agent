@@ -22,11 +22,12 @@
 
 ## 已验证证据
 
-- `28 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算/出站摘要、报告导出、Trace 脱敏与事件链、资源边界、数据字典、校准/稳定性/评分卡映射、训练集筛选、高维分析守卫、Tool Registry、清洗版本、Baseline 和 what-if 隔离、跨平台打包契约。
-- `ruff check app tests scripts/verify_packaging.py`：通过。
+- `31 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算/出站摘要、报告导出、Trace 脱敏与事件链、资源边界、数据字典、校准/稳定性/评分卡映射、训练集筛选、高维分析守卫、Tool Registry、清洗版本、清洗确认门禁、Baseline 和 what-if 隔离、项目多轮对话、报告叙事锁定、跨平台打包契约和黄金回归。
+- `ruff check app tests scripts/*.py`：通过。
 - `node --check app/static/app.js`：通过。
 - `git diff --check`：通过。
 - `python scripts/verify_packaging.py`：通过；这是入口和资源契约检查，不等价于目标平台真实打包。
+- `.venv/bin/python scripts/run_golden_cases.py`：5/5 通过；这是最小确定性回归门禁，不等价于独立评测 Harness。
 - 本地 Git 提交：
   - `4a8460a fix: escape local HTML report content`
   - `ecf7269 fix: keep demo dataset versions immutable`
@@ -35,6 +36,7 @@
 - `57c073b feat: harden resources trace and model evidence`
 - 外部 Provider 默认关闭；启用后只发送别名化 SafeEvidence，测试覆盖敏感载荷阻断和 OpenAI-compatible 请求形态。
 - 生成代码只作为本地交付物，产品不执行任意生成代码；静态 Reviewer 阻断不会被标成成功。
+- 代码 Reviewer 已覆盖 AST 语法、依赖白名单、危险调用、网络/凭据模式，并给出结构化位置；项目对话只向 Provider 发送别名化上下文，Trace 不导出聊天原文。
 - 当前验证使用 FastAPI TestClient 和本地 Worker 子进程；本环境不把一次受限沙箱端口绑定失败当作应用功能失败，也未把它包装成真实浏览器/跨平台验收。
 
 ## 仍明确未完成、不能宣称的事项

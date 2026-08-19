@@ -225,6 +225,24 @@ class Store:
                     metadata_json TEXT,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL DEFAULT '项目对话',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS conversation_messages (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                    run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+                    role TEXT NOT NULL,
+                    agent TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    structured_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                );
                 """
             )
             # Keep existing local databases forward-compatible after the demo label
@@ -385,6 +403,115 @@ class Store:
         dictionaries = self.list_dictionaries(project_id)
         return dictionaries[0] if dictionaries else None
 
+    def get_or_create_conversation(self, project_id: str, run_id: Optional[str] = None) -> Dict[str, Any]:
+        with self.connect() as conn:
+            if run_id:
+                row = conn.execute(
+                    "SELECT * FROM conversations WHERE project_id=? AND run_id=? ORDER BY created_at LIMIT 1",
+                    (project_id, run_id),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM conversations WHERE project_id=? AND run_id IS NULL ORDER BY created_at LIMIT 1",
+                    (project_id,),
+                ).fetchone()
+        if row:
+            return dict(row)
+        conversation = {
+            "id": new_id("conv"),
+            "project_id": project_id,
+            "run_id": run_id,
+            "title": "项目对话",
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+        }
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO conversations(id,project_id,run_id,title,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                tuple(conversation[key] for key in ("id", "project_id", "run_id", "title", "created_at", "updated_at")),
+            )
+        return conversation
+
+    def add_conversation_message(
+        self,
+        conversation_id: str,
+        run_id: Optional[str],
+        role: str,
+        agent: str,
+        content: str,
+        structured: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        message = {
+            "id": new_id("msg"),
+            "conversation_id": conversation_id,
+            "run_id": run_id,
+            "role": role,
+            "agent": agent,
+            "content": str(content),
+            "structured": structured or {},
+            "created_at": now_iso(),
+        }
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO conversation_messages(id,conversation_id,run_id,role,agent,content,structured_json,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    message["id"],
+                    conversation_id,
+                    run_id,
+                    role,
+                    agent,
+                    message["content"],
+                    dumps(message["structured"]),
+                    message["created_at"],
+                ),
+            )
+            conn.execute("UPDATE conversations SET updated_at=? WHERE id=?", (message["created_at"], conversation_id))
+        return message
+
+    def list_conversation_messages(self, conversation_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+        bounded_limit = max(1, min(int(limit), 500))
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM conversation_messages WHERE conversation_id=? ORDER BY created_at, id LIMIT ?",
+                (conversation_id, bounded_limit),
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "conversation_id": row["conversation_id"],
+                "run_id": row["run_id"],
+                "role": row["role"],
+                "agent": row["agent"],
+                "content": row["content"],
+                "structured": loads(row["structured_json"], {}),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def get_conversation_message(self, message_id: str) -> Optional[Dict[str, Any]]:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM conversation_messages WHERE id=?", (message_id,)).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "conversation_id": row["conversation_id"],
+            "run_id": row["run_id"],
+            "role": row["role"],
+            "agent": row["agent"],
+            "content": row["content"],
+            "structured": loads(row["structured_json"], {}),
+            "created_at": row["created_at"],
+        }
+
+    def list_conversations(self, project_id: str) -> List[Dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM conversations WHERE project_id=? ORDER BY updated_at DESC", (project_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_decisions(self, run_id: str) -> List[Dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM decisions WHERE run_id=? ORDER BY created_at", (run_id,)).fetchall()
@@ -465,6 +592,26 @@ class Store:
                 "updated_at",
             )
         }
+        conversation_trace = []
+        for conversation in self.list_conversations(str(run.get("project_id"))):
+            if conversation.get("run_id") != run_id:
+                continue
+            messages = []
+            for message in self.list_conversation_messages(conversation["id"]):
+                content = str(message.get("content") or "")
+                messages.append(
+                    {
+                        "id": message.get("id"),
+                        "role": message.get("role"),
+                        "agent": message.get("agent"),
+                        "structured": message.get("structured") or {},
+                        "content_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                        "content_length": len(content),
+                        "content_included": False,
+                        "created_at": message.get("created_at"),
+                    }
+                )
+            conversation_trace.append({"id": conversation.get("id"), "messages": messages})
         # The full state is useful for future evaluation (node decisions,
         # screening funnel, reviews), but is recursively redacted first.
         raw_trace = _trace_redact(
@@ -475,6 +622,7 @@ class Store:
                 "events": self.list_events(run_id),
                 "decisions": self.list_decisions(run_id),
                 "feedback": self.list_feedback(run_id),
+                "conversation": conversation_trace,
                 "provider_usage": self.list_provider_usage(run_id),
                 "provider_requests": self.list_provider_requests(run_id),
                 "manifest": {
@@ -509,6 +657,13 @@ class Store:
             "project": project,
             "datasets": [{key: value for key, value in item.items() if key != "path"} for item in self.list_datasets(project_id)],
             "dictionaries": [{key: value for key, value in item.items() if key != "path"} for item in self.list_dictionaries(project_id)],
+            "conversations": [
+                {
+                    **conversation,
+                    "messages": self.list_conversation_messages(conversation["id"]),
+                }
+                for conversation in self.list_conversations(project_id)
+            ],
             "runs": [
                 {
                     **{key: value for key, value in run.items() if key != "state"},
@@ -605,6 +760,10 @@ class Store:
 
     def append_event(self, run_id: str, event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         with self.connect() as conn:
+            # A Run may receive a control event from the API while its worker
+            # thread emits progress. Serialize sequence allocation so the
+            # hash chain cannot fork on concurrent writers.
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT sequence,event_hash FROM events WHERE run_id=? ORDER BY sequence DESC LIMIT 1",
                 (run_id,),

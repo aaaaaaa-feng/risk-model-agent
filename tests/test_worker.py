@@ -179,6 +179,10 @@ def test_generated_code_review_blocks_network_and_allows_reference_code() -> Non
     assert review_generated_code("import pandas as pd\nprint('ok')")["verdict"] == "pass"
     result = review_generated_code("import requests\nrequests.get('https://example.com')")
     assert result["verdict"] == "block"
+    assert any(item["code"] == "DANGEROUS_IMPORT" for item in result["findings"])
+    syntax = review_generated_code("def broken(:\n    pass")
+    assert syntax["verdict"] == "block"
+    assert any(item["code"] == "CODE_SYNTAX_INVALID" for item in syntax["findings"])
     assert any(item["code"] == "DANGEROUS_NETWORK" for item in result["findings"])
 
     frame = make_frame()

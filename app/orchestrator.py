@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional, TypedDict
 import pandas as pd
 from langgraph.graph import END, StateGraph
 
-from .agent import ProviderGateway, build_safe_evidence, generate_reproducible_code, propose_plan, repair_generated_code, review_generated_code, review_plan
+from .agent import ProviderGateway, build_safe_evidence, generate_report_narrative, generate_reproducible_code, propose_plan, repair_generated_code, review_generated_code, review_plan
 from .config import BASE_DIR, WORKER_TIMEOUT_SECONDS, load_config
 from .storage import Store, dumps, sha256_file, store
 from .tools import require_tool
@@ -137,9 +137,15 @@ def _report_html(report: Dict[str, Any]) -> str:
         baseline_row = f"<tr><td>Baseline · {safe(baseline.get('score_column', '-'))}</td><td>{safe(baseline_metrics.get('roc_auc', '-'))}</td><td>{safe(baseline_metrics.get('ks', '-'))}</td><td>既有模型比较（{safe(swap_note)}）</td></tr>"
     experiment_note = "<p><strong>实验 Run：</strong>本结果由 what-if 方案派生，默认未审核，不覆盖正式 Run。</p>" if report.get("manifest", {}).get("run_kind") == "experiment" else ""
     manifest_text = safe(json.dumps(report.get('manifest',{}), ensure_ascii=False, indent=2))
+    narrative_sections = report.get("narrative_sections") or {}
+    narrative_html = "".join(
+        f"<article class='narrative-section'><h3>{safe(item.get('title', ''))}</h3><p>{safe(item.get('text', ''))}</p><small>来源：{safe(item.get('source', ''))} · 证据：{safe(', '.join(item.get('evidence_refs', [])))}</small></article>"
+        for item in narrative_sections.get("sections", [])
+    )
     return f"""<!doctype html><html lang='zh-CN'><meta charset='utf-8'><title>风控建模报告</title>
-    <style>body{{font-family:system-ui,sans-serif;max-width:1100px;margin:40px auto;color:#18332f}}table{{border-collapse:collapse;width:100%}}td,th{{padding:10px;border-bottom:1px solid #dce9e4;text-align:left}}.hero{{background:#eaf7f0;padding:24px;border-radius:18px}}</style>
+    <style>body{{font-family:system-ui,sans-serif;max-width:1100px;margin:40px auto;color:#18332f}}table{{border-collapse:collapse;width:100%}}td,th{{padding:10px;border-bottom:1px solid #dce9e4;text-align:left}}.hero{{background:#eaf7f0;padding:24px;border-radius:18px}}.narrative-section{{padding:14px 16px;margin:10px 0;border:1px solid #dce9e4;border-radius:12px;background:#fbfefc}}.narrative-section h3{{margin:0 0 6px}}.narrative-section p{{line-height:1.7;margin:0 0 7px}}.narrative-section small{{color:#718682}}</style>
     <div class='hero'><h1>{safe(report.get('title','风控建模报告'))}</h1><p>{safe(report.get('narrative',''))}</p><p>事实边界：离线实验结果，不代表生产效果。</p>{experiment_note}</div>
+    <h2>报告叙事与证据</h2>{narrative_html or '<p>暂无章节叙事。</p>'}
     <h2>模型比较</h2><table><thead><tr><th>模型</th><th>验证 ROC-AUC</th><th>验证 KS</th><th>状态</th></tr></thead><tbody>{rows}{baseline_row}</tbody></table>
     <h2>冠军解释与稳定性</h2><p>下表为训练分区拟合规则下的变量重要性；PSI 仅作稳定性复核提示，不参与 OOT 选择。</p><table><thead><tr><th>变量</th><th>重要性/绝对系数</th></tr></thead><tbody>{importance_rows or '<tr><td colspan="2">暂无解释结果</td></tr>'}</tbody></table>
     <h3>验证集校准</h3><table><thead><tr><th>分箱</th><th>样本</th><th>预测坏率</th><th>实际坏率</th><th>绝对差</th></tr></thead><tbody>{calibration_rows or '<tr><td colspan="5">暂无校准结果</td></tr>'}</tbody></table>
@@ -197,8 +203,22 @@ def _write_report_xlsx(report: Dict[str, Any], path: Path) -> None:
             "dataset_id": report.get("manifest", {}).get("dataset_id"),
             "champion": (report.get("champion") or {}).get("name"),
             "narrative": report.get("narrative"),
+            "narrative_locked": (report.get("narrative_sections") or {}).get("locked"),
+            "narrative_revision": (report.get("narrative_sections") or {}).get("revision", 0),
             "fact_boundary": "离线实验结果，不代表生产效果",
         }]).to_excel(writer, sheet_name="summary", index=False)
+        pd.DataFrame(
+            [
+                {
+                    "section_id": item.get("id"),
+                    "title": item.get("title"),
+                    "text": item.get("text"),
+                    "source": item.get("source"),
+                    "evidence_refs": ", ".join(item.get("evidence_refs", [])),
+                }
+                for item in (report.get("narrative_sections") or {}).get("sections", [])
+            ]
+        ).to_excel(writer, sheet_name="narrative", index=False)
         pd.DataFrame(metrics).to_excel(writer, sheet_name="metrics", index=False)
         pd.DataFrame(selection).to_excel(writer, sheet_name="selection", index=False)
         pd.DataFrame(lift_rows).to_excel(writer, sheet_name="lift", index=False)
@@ -566,6 +586,7 @@ def _node_report(context: RunContext, state: GraphState) -> GraphState:
         "review": state.get("plan_review", {}),
         "code_review": {},
         "profile": state.get("profile", {}),
+        "target": state.get("target", {}),
         "quality": state.get("quality", {}),
         "cleaning": (state.get("profile", {}) or {}).get("cleaning", {}),
         "selection_rule": {
@@ -588,6 +609,16 @@ def _node_report(context: RunContext, state: GraphState) -> GraphState:
             "oof_policy": f"3-fold when train rows <= {10000}; otherwise explicit skip",
         },
     }
+    narrative_gateway = context.gateway("report_narrative")
+    report["narrative_sections"] = generate_report_narrative(report, narrative_gateway)
+    report["narrative"] = next(
+        (
+            item.get("text")
+            for item in report["narrative_sections"].get("sections", [])
+            if item.get("id") == "executive_summary"
+        ),
+        report.get("narrative", ""),
+    )
     run_dir = context.store.run_dir(state["project_id"], state["run_id"])
     report["cleaning"] = state.get("cleaning", report["cleaning"])
     selected_features = state["selection"]["selected"]
