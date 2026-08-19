@@ -33,8 +33,8 @@ async function selectProject(projectId) {
   state.project = data.project; state.datasets = data.datasets || []; state.dictionaries = data.dictionaries || []; state.runs = data.runs || []; state.run = state.runs[0] || null; state.mode = state.run ? state.run.mode : state.mode; state.events = []; state.providerRequests = []; state.selectionExcluded = new Set();
   await loadConversation();
   renderProjects(); renderProject();
+  await loadProviderRequests();
   if (state.run) {
-    await loadProviderRequests();
     const eventData = await api('/api/runs/' + state.run.id + '/events');
     state.events = eventData.events || []; renderTimeline(); connectStream();
     if (state.run.status === 'succeeded') {
