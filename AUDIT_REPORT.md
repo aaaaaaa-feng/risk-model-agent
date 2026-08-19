@@ -24,6 +24,7 @@
 - `node --check app/static/app.js`：通过。
 - `git diff --check`：通过。
 - 本地 Git 提交：
+  - `b752bc2 feat: complete local risk modeling agent workflow`
   - `00dced8 feat: complete guarded modeling workflow`
   - `9a2feb6 fix: bound training selection and segment analysis`
 - 外部 Provider 默认关闭；启用后只发送别名化 SafeEvidence，测试覆盖敏感载荷阻断和 OpenAI-compatible 请求形态。
