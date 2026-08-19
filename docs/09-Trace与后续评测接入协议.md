@@ -93,11 +93,12 @@
   },
   "error": null,
   "policy_version": "trace-redaction/v1",
+  "previous_event_hash": "sha256:...",
   "event_hash": "sha256:..."
 }
 ```
 
-`summary` 只允许通过白名单 Schema，不能写入任意原始对象。
+`summary` 只允许通过白名单 Schema，不能写入任意原始对象。`event_hash = SHA256(canonical_event_without_event_hash + previous_event_hash)`；Trace Bundle 导出时按 `sequence` 校验链式哈希。
 
 ## 5. 事件类型
 
@@ -197,6 +198,8 @@ trace-bundle/
 
 ```text
 POST /api/projects/{project_id}/runs
+POST /api/projects/{project_id}/conversations
+GET  /api/projects/{project_id}/conversations/{conversation_id}
 GET  /api/runs/{run_id}
 GET  /api/runs/{run_id}/events
 GET  /api/runs/{run_id}/artifacts

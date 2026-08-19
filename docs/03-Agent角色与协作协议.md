@@ -146,6 +146,8 @@ V1 不为每个小步骤创建 Agent。只在以下条件同时成立时拆分�
 }
 ```
 
+有效权限 = 角色权限 ∩ TaskPacket `constraints`。任何角色都不能通过任务包扩大自己的权限；`raw_data_access=false`、`network_access=false` 和 `write_access=false` 是默认硬约束。
+
 ### 5.2 ReviewResult
 
 Reviewer 返回：
@@ -197,6 +199,8 @@ Orchestrator 把 Reviewer 结论转换为 Code Agent 的修复任务：
 6. 连续失败时展示问题、已尝试修复、尚需决定的内容。
 
 Reviewer 的措辞必须是“未发现阻断问题”，不能宣称“代码绝对安全”或“模型绝对正确”。
+
+每个 Run 还必须携带 token/费用预算和模型路由策略。低风险字段分类、摘要任务可以使用低成本模型；方案审核和 Reviewer 使用配置的强模型。预算触顶时停止 LLM 调用或降级为确定性流程，不得静默超支。
 
 ## 7. 模型独立性
 
