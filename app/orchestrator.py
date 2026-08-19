@@ -26,6 +26,7 @@ class GraphState(TypedDict, total=False):
     target: Dict[str, Any]
     plan: Dict[str, Any]
     plan_review: Dict[str, Any]
+    safe_evidence: Dict[str, Any]
     selection: Dict[str, Any]
     training: Dict[str, Any]
     code: str
@@ -125,7 +126,7 @@ def _node_plan(context: RunContext, state: GraphState) -> GraphState:
     plan = propose_plan(state["profile"], state["target"], state.get("mode", "auto"), gateway)
     evidence = build_safe_evidence(state["profile"], state["target"])
     review = review_plan(plan, state["profile"], state["target"])
-    state.update({"plan": plan, "plan_review": review, "safe_evidence": evidence})  # type: ignore[typeddict-item]
+    state.update({"plan": plan, "plan_review": review, "safe_evidence": evidence})
     context.event("agent_output_validated", "Reviewer 已完成计划审核", node="planning", actor="reviewer-agent", verdict=review["verdict"], findings=review["findings"], provider=gateway.status(), safe_evidence_summary={"fields": len(evidence.get("fields", [])), "raw_rows_included": False})
     if review["verdict"] == "block":
         context.save(state, status="blocked", phase="planning")
@@ -209,6 +210,9 @@ def _run_training_worker(
         "VECLIB_MAXIMUM_THREADS": "1",
         "NUMEXPR_NUM_THREADS": "1",
     }
+    for key in ("RISK_AGENT_MAX_UPLOAD_MB", "RISK_AGENT_MAX_ROWS", "RISK_AGENT_MAX_COLUMNS"):
+        if key in os.environ:
+            env[key] = os.environ[key]
     command = [sys.executable, "-m", "app.worker_runner"]
     try:
         completed = subprocess.run(

@@ -47,7 +47,7 @@
 
 ```bash
 python3.9 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/pip install ".[dev]" --no-build-isolation
 .venv/bin/python -m app.main
 ```
 
