@@ -20,16 +20,21 @@
 11. Provider 出站请求新增本地脱敏摘要、策略版本和内容哈希接口；Trace 对原始列名做稳定别名化，并校验事件链。
 12. 项目备份新增安全恢复入口：包含数据的包会重新映射本地 ID，默认不含数据的包只恢复元数据并明确列出缺失数据集，不覆盖已有项目。
 13. 变量筛选结果和 Provider 出站摘要原先只有后端能力、页面不可查；现在报告提供字段搜索/状态筛选/排序和隔离 what-if 入口，行动面板提供脱敏出站请求审计列表。
+14. 类别不平衡原先只有文档约束、缺少产物证据；现在训练分区统计正负样本并采用算法级类别权重（XGBoost 使用训练分区 `scale_pos_weight`），明确不做重采样，策略和 `fit_scope=train` 写入 JSON/HTML/XLSX 报告，验证集与 OOT 不参与权重拟合。
 
 ## 已验证证据
 
-- `34 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算/出站摘要、报告导出、Trace 脱敏与事件链、资源边界、数据字典、校准/稳定性/评分卡映射、训练集筛选、高维分析守卫、Tool Registry、清洗版本、清洗确认门禁、Baseline/新 OOT 复评和 what-if 隔离、项目多轮对话、报告叙事锁定、聊天文本边界、跨平台打包契约和黄金回归。
+- `34 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算/出站摘要、报告导出、Trace 脱敏与事件链、资源边界、数据字典、校准/稳定性/评分卡映射、训练集筛选、高维分析守卫、类别不平衡训练策略、Tool Registry、清洗版本、清洗确认门禁、Baseline/新 OOT 复评和 what-if 隔离、项目多轮对话、报告叙事锁定、聊天文本边界、跨平台打包契约和黄金回归。
 - `ruff check app tests scripts/*.py`：通过。
 - `node --check app/static/app.js`：通过。
 - `git diff --check`：通过。
 - `python scripts/verify_packaging.py`：通过；这是入口和资源契约检查，不等价于目标平台真实打包。
 - `.venv/bin/python scripts/run_golden_cases.py`：5/5 通过；这是最小确定性回归门禁，不等价于独立评测 Harness。
 - 本地 Git 最新提交：
+  - `82d90b2 feat: record train-only imbalance policy`
+  - `7359ee5 feat: add frozen baseline OOT reevaluation`
+  - `ab1d19e fix: clear provider audit when switching projects`
+  - `8628ae4 feat: expose selection and provider audit panels`
   - `3967feb docs: record final regression count`
   - `74e22b6 fix: keep free-form chat local by default`
   - `c776715 feat: add guarded chat and feature confirmation controls`

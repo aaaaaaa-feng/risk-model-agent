@@ -150,7 +150,7 @@ CSV/XLSX
 
 ### P1 Backlog
 
-- `P1-301` Random Forest 与 HistGradientBoosting；
+- `P1-301` Random Forest 与 HistGradientBoosting（已实现算法级类别不平衡策略；训练分区拟合并写入报告，重采样与超参数搜索仍待后续）；
 - `P1-302` 候选预算、早停和失败隔离；
 - `P1-303` WOE + Logistic Scorecard；
 - `P1-304` 树模型解释；

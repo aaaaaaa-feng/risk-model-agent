@@ -1044,9 +1044,11 @@ def train_candidates(
     train_idx = np.asarray(split["train"], dtype=int)
     valid_idx = np.asarray(split["valid"], dtype=int)
     oot_idx = np.asarray(split["oot"], dtype=int)
-    train_positive = max(int(np.sum(y[train_idx] == 1)), 1)
-    train_negative = max(int(np.sum(y[train_idx] == 0)), 1)
-    scale_pos_weight = round(train_negative / train_positive, 8)
+    train_positive = int(np.sum(y[train_idx] == 1))
+    train_negative = int(np.sum(y[train_idx] == 0))
+    # split_frame enforces both classes for supported runs; keep the fallback
+    # deterministic for direct Worker callers while reporting true counts.
+    scale_pos_weight = round(train_negative / train_positive, 8) if train_positive else 1.0
     imbalance_policy = {
         "schema_version": "risk-imbalance-policy/v1",
         "fit_scope": "train",

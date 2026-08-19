@@ -199,7 +199,7 @@ Worker 能力通过本地 Tool Registry 暴露给 Orchestrator。执行模型按
 - 留出/OOT 只在模型选择规则锁定后使用；
 - 保存随机种子、依赖版本、线程数和参数；
 - XGBoost 限制线程、树深、轮次和内存，支持 early stopping；
-- 允许算法级类别不平衡处理（如 `class_weight`、`scale_pos_weight`），只在训练分区拟合并写入方案；
+- 允许算法级类别不平衡处理（如 `class_weight`、`scale_pos_weight`），只在训练分区拟合并写入方案；当前 V0.1 不做重采样。Logistic/Random Forest/HistGradientBoosting 使用类别权重，XGBoost 的 `scale_pos_weight` 由训练分区正负样本数计算；结果必须写入 `imbalance_policy`（含 `fit_scope=train`、训练正负计数、策略和 `resampling=none`）。验证集与 OOT 不得参与权重拟合；报告应明确这不是业务阈值或生产策略结论；
 - 单个候选失败不应让成功候选消失，但报告必须明确失败原因；
 - 只有验证完成的产物可以进入正式报告。
 
