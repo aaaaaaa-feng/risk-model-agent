@@ -9,7 +9,7 @@ import pandas as pd
 from app import agent as agent_module
 from app.agent import ProviderGateway, _safe_plan_payload, answer_chat, build_safe_evidence, generate_reproducible_code, propose_plan, repair_generated_code, review_generated_code, review_plan
 from app.tools import registry_manifest, require_tool
-from app.worker import build_cleaning_plan, estimate_table_resources, evaluate_baseline, parse_data_dictionary, profile_table, quality_analysis, read_table, segment_analysis, select_features, split_frame, target_summary, train_candidates
+from app.worker import build_cleaning_plan, estimate_table_resources, evaluate_baseline, parse_data_dictionary, profile_table, quality_analysis, read_table, reevaluate_baseline, segment_analysis, select_features, split_frame, target_summary, train_candidates
 
 
 def make_frame(rows: int = 600) -> pd.DataFrame:
@@ -379,3 +379,17 @@ def test_baseline_uses_validation_orientation_and_freezes_oot_threshold() -> Non
     assert result["oot"]["threshold"] == result["validation"]["threshold"]
     assert result["oot_used_for_selection"] is False
     assert result["validation_fixed_rate"]["approval_rate"] == 0.75
+
+
+def test_baseline_reevaluation_reuses_frozen_orientation_and_threshold() -> None:
+    frame = pd.DataFrame(
+        {
+            "bad_flag": [0, 1, 0, 1, 0, 1, 0, 1],
+            "existing_score": [900, 100, 850, 120, 800, 150, 780, 180],
+        }
+    )
+    result = reevaluate_baseline(frame, "bad_flag", "existing_score", "higher_is_good", 0.0, 0.75)
+    assert result["schema_version"] == "risk-baseline-reevaluation/v1"
+    assert result["eval_scope"] == "new_oot_only"
+    assert result["threshold"] == 0.0
+    assert result["oot_used_for_selection"] is False

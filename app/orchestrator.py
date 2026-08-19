@@ -135,6 +135,10 @@ def _report_html(report: Dict[str, Any]) -> str:
         swap = baseline.get("swap_set", {}).get("groups", {})
         swap_note = "；".join(f"{key}: {value.get('count', 0)} 条" for key, value in swap.items()) if swap else "未计算 swap set"
         baseline_row = f"<tr><td>Baseline · {safe(baseline.get('score_column', '-'))}</td><td>{safe(baseline_metrics.get('roc_auc', '-'))}</td><td>{safe(baseline_metrics.get('ks', '-'))}</td><td>既有模型比较（{safe(swap_note)}）</td></tr>"
+    reevaluation_rows = "".join(
+        f"<tr><td>{safe(item.get('dataset_filename', item.get('dataset_id', '-')))}</td><td>{safe((item.get('metrics') or {}).get('roc_auc', '-'))}</td><td>{safe((item.get('metrics') or {}).get('ks', '-'))}</td><td>{safe((item.get('fixed_rate') or {}).get('bad_capture_rate', '-'))}</td><td>冻结阈值 · 仅新 OOT</td></tr>"
+        for item in report.get("baseline_reevaluations", [])
+    )
     experiment_note = "<p><strong>实验 Run：</strong>本结果由 what-if 方案派生，默认未审核，不覆盖正式 Run。</p>" if report.get("manifest", {}).get("run_kind") == "experiment" else ""
     manifest_text = safe(json.dumps(report.get('manifest',{}), ensure_ascii=False, indent=2))
     narrative_sections = report.get("narrative_sections") or {}
@@ -152,6 +156,7 @@ def _report_html(report: Dict[str, Any]) -> str:
     <table><thead><tr><th>变量</th><th>验证 PSI</th><th>验证提示</th><th>OOT PSI</th><th>OOT 提示</th></tr></thead><tbody>{stability_rows or '<tr><td colspan="5">暂无稳定性结果</td></tr>'}</tbody></table>
     <h2>探索与数据处理</h2><p>重复行：{report.get('quality', {}).get('duplicate_rows', 0)}；数值字段：{len(report.get('quality', {}).get('numeric', []))}；类别字段：{len(report.get('quality', {}).get('categorical', []))}</p><p>{report.get('cleaning', {}).get('note', '仅展示已记录的本地处理规则。')}</p>
     {f"<h2>既有模型基线</h2><p>分数列：{safe(baseline.get('score_column', '-'))}；方向：{safe(baseline.get('orientation', '-'))}；验证阈值在验证集冻结，OOT 仅评估。固定通过率：{safe(baseline.get('fixed_approval_rate', '-'))}；swap set 已按冠军与基线的验证排序生成聚合比较。</p>" if baseline else ""}
+    {f"<h2>既有模型新 OOT 复评</h2><table><thead><tr><th>数据集</th><th>ROC-AUC</th><th>KS</th><th>固定通过率坏样本捕获</th><th>协议</th></tr></thead><tbody>{reevaluation_rows}</tbody></table>" if reevaluation_rows else ""}
     <h2>运行信息</h2><pre>{manifest_text}</pre></html>"""
 
 
@@ -249,6 +254,27 @@ def _write_report_xlsx(report: Dict[str, Any], path: Path) -> None:
             ).to_excel(writer, sheet_name="baseline", index=False)
             swap_rows = [{"group": key, **value} for key, value in (baseline.get("swap_set", {}).get("groups", {}) or {}).items()]
             pd.DataFrame(swap_rows).to_excel(writer, sheet_name="swap_set", index=False)
+        reevaluations = []
+        for item in report.get("baseline_reevaluations", []):
+            metrics = item.get("metrics") or {}
+            fixed_rate = item.get("fixed_rate") or {}
+            reevaluations.append(
+                {
+                    "dataset_id": item.get("dataset_id"),
+                    "dataset_filename": item.get("dataset_filename"),
+                    "rows": item.get("rows"),
+                    "score_column": item.get("score_column"),
+                    "orientation": item.get("orientation"),
+                    "threshold": item.get("threshold"),
+                    "roc_auc": metrics.get("roc_auc"),
+                    "ks": metrics.get("ks"),
+                    "pr_auc": metrics.get("pr_auc"),
+                    "bad_capture_rate": fixed_rate.get("bad_capture_rate"),
+                    "eval_scope": item.get("eval_scope"),
+                }
+            )
+        if reevaluations:
+            pd.DataFrame(reevaluations).to_excel(writer, sheet_name="baseline_reevaluation", index=False)
 
 
 def _write_checksums(run_dir: Path) -> Dict[str, str]:

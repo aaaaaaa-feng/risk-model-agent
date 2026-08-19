@@ -245,7 +245,13 @@ function renderActionCard() {
     if ($('#apply-cleaning')) $('#apply-cleaning').addEventListener('click', applyCleaning);
     if ($('#skip-cleaning')) $('#skip-cleaning').addEventListener('click', skipCleaning);
   }
-  else if (run.status === 'succeeded') { card.innerHTML = '<h3>本次 Run 已完成</h3><p>模型、代码交付物和报告已保存在本机。你可以打开 HTML 报告，或从当前方案派生隔离的 what-if 实验。</p><a class="secondary-button action-button" href="/api/runs/' + run.id + '/report.html" target="_blank">打开报告</a><div class="action-links"><a class="text-link" href="/api/runs/' + run.id + '/report.xlsx" target="_blank">下载 XLSX</a><a class="text-link" href="/api/runs/' + run.id + '/trace.zip" target="_blank">下载 Trace</a></div><button class="secondary-button action-button" id="what-if-run">派生 what-if 实验</button>'; $('#what-if-run').addEventListener('click', createWhatIf); }
+  else if (run.status === 'succeeded') {
+    const baseline = (run.state && run.state.report && run.state.report.baseline) || {};
+    const reevalButton = baseline.score_column ? '<button class="secondary-button action-button" id="reevaluate-baseline">新 OOT 复评既有模型</button>' : '';
+    card.innerHTML = '<h3>本次 Run 已完成</h3><p>模型、代码交付物和报告已保存在本机。你可以打开 HTML 报告，或从当前方案派生隔离的 what-if 实验。</p><a class="secondary-button action-button" href="/api/runs/' + run.id + '/report.html" target="_blank">打开报告</a><div class="action-links"><a class="text-link" href="/api/runs/' + run.id + '/report.xlsx" target="_blank">下载 XLSX</a><a class="text-link" href="/api/runs/' + run.id + '/trace.zip" target="_blank">下载 Trace</a></div><button class="secondary-button action-button" id="what-if-run">派生 what-if 实验</button>' + reevalButton;
+    $('#what-if-run').addEventListener('click', createWhatIf);
+    if ($('#reevaluate-baseline')) $('#reevaluate-baseline').addEventListener('click', reevaluateBaseline);
+  }
   else if (run.status === 'paused') { card.innerHTML = '<h3>Run 已暂停</h3><p>已保存最近安全节点，不会把半成品当作成功结果。</p><button class="primary-button action-button" id="resume-run">恢复运行</button><button class="secondary-button action-button" id="cancel-run">取消 Run</button>'; $('#resume-run').addEventListener('click', resumeRun); $('#cancel-run').addEventListener('click', cancelRun); }
   else if (run.status === 'queued' || run.status === 'running') { card.innerHTML = '<h3>正在运行</h3><p>页面会持续接收节点和工具事件。你可以暂停到最近安全节点，或取消本次 Run。</p><button class="secondary-button action-button" id="pause-run">暂停</button><button class="secondary-button action-button" id="cancel-run">取消 Run</button>'; $('#pause-run').addEventListener('click', pauseRun); $('#cancel-run').addEventListener('click', cancelRun); }
   else if (run.status === 'failed' || run.status === 'blocked') card.innerHTML = '<h3>需要处理</h3><p>' + escapeHtml(run.error || '查看时间线中的结构化问题。') + '</p>';
@@ -263,7 +269,9 @@ function renderReport(report) {
   const excluded = decisions.filter(function (item) { return item.status !== 'included'; });
   const calibrationGap = calibration.length ? Math.max.apply(null, calibration.map(function (item) { return Number(item.absolute_gap || 0); })).toFixed(4) : '—';
   const highPsi = stability.filter(function (item) { return ['review', 'high'].includes(item.validation && item.validation.review_flag) || ['review', 'high'].includes(item.oot && item.oot.review_flag); }).length;
-  $('#report-details').innerHTML = '<div class="report-facts"><span>校准最大绝对差</span><strong>' + calibrationGap + '</strong><span>需稳定性复核变量</span><strong>' + highPsi + '</strong></div>' + (excluded.length ? '<strong>字段处理摘要</strong><ul>' + excluded.map(function (item) { return '<li><code>' + escapeHtml(item.column) + '</code> · ' + escapeHtml(item.status) + ' · ' + escapeHtml((item.reasons || []).join('、') || '规则排除') + '</li>'; }).join('') + '</ul>' : '<strong>字段处理摘要</strong><span>没有字段被规则排除。</span>');
+  const reevaluations = report.baseline_reevaluations || [];
+  const reevaluationNote = reevaluations.length ? '<strong>既有模型新 OOT 复评</strong><ul>' + reevaluations.map(function (item) { const metrics = item.metrics || {}; return '<li>' + escapeHtml(item.dataset_filename || item.dataset_id || '新数据集') + ' · ROC-AUC ' + escapeHtml(metrics.roc_auc == null ? '—' : metrics.roc_auc) + ' · KS ' + escapeHtml(metrics.ks == null ? '—' : metrics.ks) + ' · 固定通过率坏样本捕获 ' + escapeHtml((item.fixed_rate || {}).bad_capture_rate == null ? '—' : (item.fixed_rate || {}).bad_capture_rate) + '</li>'; }).join('') + '</ul>' : '';
+  $('#report-details').innerHTML = '<div class="report-facts"><span>校准最大绝对差</span><strong>' + calibrationGap + '</strong><span>需稳定性复核变量</span><strong>' + highPsi + '</strong></div>' + (excluded.length ? '<strong>字段处理摘要</strong><ul>' + excluded.map(function (item) { return '<li><code>' + escapeHtml(item.column) + '</code> · ' + escapeHtml(item.status) + ' · ' + escapeHtml((item.reasons || []).join('、') || '规则排除') + '</li>'; }).join('') + '</ul>' : '<strong>字段处理摘要</strong><span>没有字段被规则排除。</span>') + reevaluationNote;
   renderSelectionTable(report);
   renderNarrativeEditor(report);
 }
@@ -408,6 +416,26 @@ async function createWhatIf(changes) {
 async function pauseRun() { if (!state.run) return; try { await api('/api/runs/' + state.run.id + '/pause', { method: 'POST' }); await syncRun(); if (state.eventSource) state.eventSource.close(); } catch (error) { showNotice(error.message, 'block'); } }
 async function resumeRun() { if (!state.run) return; try { await api('/api/runs/' + state.run.id + '/resume', { method: 'POST' }); await syncRun(); connectStream(); } catch (error) { showNotice(error.message, 'block'); } }
 async function cancelRun() { if (!state.run || !window.confirm('确认取消当前 Run？未完成产物不会作为正式结果。')) return; try { await api('/api/runs/' + state.run.id + '/cancel', { method: 'POST' }); await syncRun(); if (state.eventSource) state.eventSource.close(); } catch (error) { showNotice(error.message, 'block'); } }
+async function reevaluateBaseline() {
+  if (!state.run) return;
+  const baseline = (state.run.state && state.run.state.report && state.run.state.report.baseline) || {};
+  if (!baseline.score_column) { showNotice('当前 Run 没有可复评的既有模型基线。', 'block'); return; }
+  const datasets = state.datasets || [];
+  if (!datasets.length) return;
+  const choices = datasets.map(function (item, index) { return (index + 1) + '. ' + item.filename; }).join('\n');
+  const rawIndex = window.prompt('选择用于新 OOT 复评的数据集：\n' + choices, '1');
+  if (rawIndex === null) return;
+  const index = Number(rawIndex) - 1;
+  if (!Number.isInteger(index) || !datasets[index]) { showNotice('数据集序号无效。', 'block'); return; }
+  const scoreColumn = window.prompt('基线分数列', baseline.score_column);
+  if (scoreColumn === null || !scoreColumn.trim()) return;
+  try {
+    const result = await api('/api/runs/' + state.run.id + '/baseline/reevaluate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: datasets[index].id, score_column: scoreColumn.trim(), approval_rate: 0.8 }) });
+    state.run.state = state.run.state || {}; state.run.state.report = result.report;
+    showNotice('新 OOT 复评已完成，阈值沿用正式 Run 的验证集冻结值。');
+    renderReport(result.report); renderActionCard(); await loadProviderRequests();
+  } catch (error) { showNotice(error.message, 'block'); }
+}
 async function loadSettings() {
   const data = await api('/api/config'); state.config = data.config; $('#provider-chip').textContent = data.provider.enabled ? 'LLM 已启用' : data.provider.configured ? 'API 已配置 · 确定性' : '未配置 LLM'; $('#provider-chip').className = 'chip ' + (data.provider.enabled ? 'safe' : 'neutral'); $('#evidence-provider').textContent = data.provider.enabled ? '外部 API · 仅 SafeEvidence' : data.provider.configured ? '已配置 · 当前仍确定性' : '确定性降级';
   const form = $('#settings-form'); Object.entries(data.config || {}).forEach(function (entry) { if (form.elements[entry[0]] && entry[0] !== 'api_key') { if (form.elements[entry[0]].type === 'checkbox') form.elements[entry[0]].checked = Boolean(entry[1]); else form.elements[entry[0]].value = entry[1] == null ? '' : entry[1]; } });

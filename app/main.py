@@ -25,7 +25,7 @@ from .config import MAX_BACKUP_BYTES, MAX_UPLOAD_BYTES, ensure_runtime, load_con
 from .orchestrator import _report_html, _write_checksums, _write_report_xlsx, resume_after_confirmation, resume_after_pause, start_run
 from .storage import dumps, sha256_file, store
 from .tools import registry_manifest, require_tool
-from .worker import apply_cleaning_plan, estimate_table_resources, list_sheets, parse_data_dictionary, profile_table, quality_analysis, read_table, segment_analysis, target_summary
+from .worker import apply_cleaning_plan, estimate_table_resources, list_sheets, parse_data_dictionary, profile_table, quality_analysis, read_table, reevaluate_baseline, segment_analysis, target_summary
 
 ensure_runtime()
 app = FastAPI(title="风控建模 Agent", version=__version__)
@@ -61,6 +61,12 @@ class ChatPayload(BaseModel):
 class NarrativePayload(BaseModel):
     sections: List[Dict[str, Any]] = Field(default_factory=list)
     lock: bool = False
+
+
+class BaselineReevaluationPayload(BaseModel):
+    dataset_id: str
+    score_column: str = Field(min_length=1, max_length=200)
+    approval_rate: float = Field(default=0.8, gt=0, le=1)
 
 
 class ConfigPayload(BaseModel):
@@ -843,6 +849,75 @@ def get_report(run_id: str) -> JSONResponse:
     if not report_path.exists():
         raise HTTPException(404, "报告尚未生成")
     return JSONResponse(json.loads(report_path.read_text(encoding="utf-8")))
+
+
+@app.post("/api/runs/{run_id}/baseline/reevaluate")
+def reevaluate_run_baseline(run_id: str, payload: BaselineReevaluationPayload) -> Dict[str, Any]:
+    """Evaluate a frozen baseline score on a new local OOT dataset only."""
+    run = store.get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run 不存在")
+    if run.get("status") != "succeeded":
+        raise HTTPException(409, "只有已完成 Run 才能进行既有模型 OOT 复评")
+    dataset = store.get_dataset(payload.dataset_id)
+    if not dataset or dataset.get("project_id") != run.get("project_id"):
+        raise HTTPException(404, "复评数据集不存在或不属于当前项目")
+    report_path = store.run_dir(run["project_id"], run_id) / "report.json"
+    if not report_path.exists():
+        raise HTTPException(404, "正式报告尚未生成")
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(500, "正式报告无法读取") from exc
+    baseline = report.get("baseline") or {}
+    validation = baseline.get("validation") or {}
+    if not baseline.get("score_column") or validation.get("threshold") is None:
+        raise HTTPException(409, "当前正式报告没有冻结的既有模型基线和验证阈值")
+    try:
+        frame = read_table(Path(dataset["path"]), dataset.get("sheet"))
+        reevaluation = reevaluate_baseline(
+            frame,
+            str(report.get("plan", {}).get("target") or ""),
+            payload.score_column.strip(),
+            str(baseline.get("orientation") or ""),
+            float(validation["threshold"]),
+            payload.approval_rate,
+        )
+    except (OSError, ValueError, KeyError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    reevaluation.update({"dataset_id": dataset["id"], "dataset_filename": dataset["filename"]})
+    run_dir = store.run_dir(run["project_id"], run_id)
+    artifact_name = f"baseline-reevaluation-{dataset['id']}.json"
+    (run_dir / artifact_name).write_text(dumps(reevaluation), encoding="utf-8")
+    report.setdefault("baseline_reevaluations", []).append(reevaluation)
+    manifest = dict(report.get("manifest") or {})
+    manifest["artifacts"] = sorted(set((manifest.get("artifacts") or []) + [artifact_name]))
+    report["manifest"] = manifest
+    _write_report_xlsx(report, run_dir / "report.xlsx")
+    report_path.write_text(dumps(report), encoding="utf-8")
+    (run_dir / "report.html").write_text(_report_html(report), encoding="utf-8")
+    _write_checksums(run_dir)
+    state = dict(run.get("state") or {})
+    state["report"] = report
+    store.update_run(run_id, state=state, status=run["status"], phase=run["phase"], error=run.get("error"))
+    store.add_decision(
+        run_id,
+        "baseline_reevaluation",
+        {"dataset_id": dataset["id"], "score_column": payload.score_column.strip(), "rows": reevaluation["rows"], "eval_scope": "new_oot_only"},
+    )
+    store.append_event(
+        run_id,
+        "baseline_reevaluated",
+        {
+            "node": "reporting",
+            "status": "succeeded",
+            "message": "既有模型基线已在新 OOT 数据集完成冻结阈值复评",
+            "dataset_id": dataset["id"],
+            "rows": reevaluation["rows"],
+            "eval_scope": "new_oot_only",
+        },
+    )
+    return {"reevaluation": reevaluation, "report": report, "artifact": artifact_name}
 
 
 @app.post("/api/runs/{run_id}/report/narrative")

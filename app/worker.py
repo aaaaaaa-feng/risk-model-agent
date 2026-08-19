@@ -763,6 +763,59 @@ def evaluate_baseline(frame: pd.DataFrame, target: str, score_column: str, split
     }
 
 
+def reevaluate_baseline(
+    frame: pd.DataFrame,
+    target: str,
+    score_column: str,
+    orientation: str,
+    threshold: float,
+    approval_rate: float = 0.8,
+) -> Dict[str, Any]:
+    """Evaluate an existing score column on a new OOT-only dataset.
+
+    Direction and threshold must come from the already-frozen baseline
+    validation result. The new dataset contributes evaluation evidence only;
+    it cannot re-orient the score, choose a threshold, or affect the champion.
+    """
+    if score_column not in frame.columns:
+        raise ValueError(f"BASELINE_COLUMN_NOT_FOUND: {score_column}")
+    if target not in frame.columns:
+        raise ValueError(f"TARGET_COLUMN_NOT_FOUND: {target}")
+    if orientation not in {"higher_is_bad", "higher_is_good"}:
+        raise ValueError("BASELINE_ORIENTATION_INVALID")
+    try:
+        frozen_threshold = float(threshold)
+        rate = float(approval_rate)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("BASELINE_REEVALUATION_PARAMETER_INVALID") from exc
+    if not np.isfinite(frozen_threshold) or not 0 < rate <= 1:
+        raise ValueError("BASELINE_REEVALUATION_PARAMETER_INVALID")
+    normalized = frame[target].map(_to_binary)
+    if normalized.isna().any() or len(normalized) < 2 or normalized.nunique() < 2:
+        raise ValueError("BASELINE_REEVALUATION_TARGET_INVALID: 新 OOT 必须包含完整的 0/1 两类 Y")
+    values = pd.to_numeric(frame[score_column], errors="coerce").to_numpy(dtype=float)
+    if not np.isfinite(values).all():
+        raise ValueError("BASELINE_SCORE_INVALID: 基线分数必须全部是可解析数值")
+    y = normalized.astype(int).to_numpy()
+    risk_scores = values if orientation == "higher_is_bad" else -values
+    return {
+        "schema_version": "risk-baseline-reevaluation/v1",
+        "rows": int(len(frame)),
+        "target": target,
+        "score_column": score_column,
+        "orientation": orientation,
+        "threshold": round(frozen_threshold, 8),
+        "approval_rate": round(rate, 6),
+        "metrics": _metrics(y, risk_scores, frozen_threshold),
+        "lift": _lift_table(y, risk_scores),
+        "fixed_rate": _fixed_rate_metrics(y, risk_scores, rate),
+        "fit_scope": "none",
+        "eval_scope": "new_oot_only",
+        "oot_used_for_selection": False,
+        "fact_boundary": "仅为新 OOT 离线复评，不改变正式冠军或阈值",
+    }
+
+
 def _lift_table(y_true: np.ndarray, probabilities: np.ndarray, bins: int = 10) -> List[Dict[str, Any]]:
     if len(y_true) == 0:
         return []

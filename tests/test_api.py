@@ -362,6 +362,42 @@ def test_confirmation_accepts_numeric_baseline_column(monkeypatch) -> None:
     assert confirmed.json()["run"]["state"]["plan"]["baseline_column"] == "income"
 
 
+def test_baseline_reevaluation_writes_new_oot_artifact() -> None:
+    project, dataset = create_demo_project("既有模型新 OOT 复评")
+    report = {
+        "title": "测试报告",
+        "narrative": "测试",
+        "metrics": [],
+        "champion": {},
+        "selection": {"decisions": []},
+        "plan": {"target": "bad_flag"},
+        "profile": {},
+        "quality": {},
+        "cleaning": {},
+        "manifest": {"run_id": "pending", "dataset_id": dataset["id"], "artifacts": []},
+        "baseline": {"score_column": "existing_score", "orientation": "higher_is_bad", "validation": {"threshold": 0.5}},
+        "narrative_sections": {"sections": [], "locked": False},
+    }
+    state = {"plan": {"target": "bad_flag"}, "report": report}
+    run = store.create_run(project["id"], dataset["id"], "auto", initial_state=state, phase="reporting")
+    report["manifest"]["run_id"] = run["id"]
+    store.update_run(run["id"], status="succeeded", phase="reporting", state={**state, "report": report})
+    run_dir = store.run_dir(project["id"], run["id"])
+    (run_dir / "report.json").write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+    content = b"bad_flag,existing_score\n0,0.1\n1,0.9\n0,0.2\n1,0.8\n0,0.3\n1,0.7\n"
+    oot = client.post(f"/api/projects/{project['id']}/datasets", files={"file": ("new_oot.csv", BytesIO(content), "text/csv")})
+    oot.raise_for_status()
+    response = client.post(
+        f"/api/runs/{run['id']}/baseline/reevaluate",
+        json={"dataset_id": oot.json()["dataset"]["id"], "score_column": "existing_score", "approval_rate": 0.8},
+    )
+    response.raise_for_status()
+    reevaluation = response.json()["reevaluation"]
+    assert reevaluation["schema_version"] == "risk-baseline-reevaluation/v1"
+    assert reevaluation["eval_scope"] == "new_oot_only"
+    assert response.json()["artifact"].startswith("baseline-reevaluation-")
+
+
 def test_semi_trust_run_waits_for_decision_then_completes() -> None:
     project, dataset = create_demo_project("API 半信任流程")
     run_response = client.post(

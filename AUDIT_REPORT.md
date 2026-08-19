@@ -15,7 +15,7 @@
 6. 多维画像原先可能先构造过大的笛卡尔积再截断。现在先做 Top-K/`<OTHER>`、分箱上限和组合数预估，超限返回 `GROUP_LIMIT_EXCEEDED`。
 7. CSV 导入增加 UTF-8/GB18030 解码回退；XLSX 多 Sheet 必须明确选择，不再静默使用第一张表。
 8. Provider 的单 Run/单月 token 预算不再只是界面字段：调用前检查额度，返回 usage 后写入本地 `provider_usage` 审计表，超限返回 `PROVIDER_BUDGET_EXCEEDED`。
-9. Baseline、what-if 和清洗执行已进入本地 API/报告链路：Baseline 在同一冻结样本上输出固定通过率和 swap set 聚合比较；what-if 从已完成 Run fork 独立实验 Run；批准的去重/IQR 动作创建不可变新 DatasetVersion。
+9. Baseline、what-if、清洗执行和既有模型新 OOT 复评已进入本地 API/报告链路：Baseline 在同一冻结样本上输出固定通过率和 swap set 聚合比较；新 OOT 复评沿用正式验证方向/阈值且不参与选择；what-if 从已完成 Run fork 独立实验 Run；批准的去重/IQR 动作创建不可变新 DatasetVersion。
 10. 导入前新增 CSV/XLSX 行列与保守内存估算，超过本地边界会在物化表格前阻断；同时增加脱敏 Trace JSON/ZIP 下载、数据字典本地语义联动、校准分箱、训练集相关性/PSI 和候选变量重要性。
 11. Provider 出站请求新增本地脱敏摘要、策略版本和内容哈希接口；Trace 对原始列名做稳定别名化，并校验事件链。
 12. 项目备份新增安全恢复入口：包含数据的包会重新映射本地 ID，默认不含数据的包只恢复元数据并明确列出缺失数据集，不覆盖已有项目。
@@ -23,7 +23,7 @@
 
 ## 已验证证据
 
-- `32 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算/出站摘要、报告导出、Trace 脱敏与事件链、资源边界、数据字典、校准/稳定性/评分卡映射、训练集筛选、高维分析守卫、Tool Registry、清洗版本、清洗确认门禁、Baseline 和 what-if 隔离、项目多轮对话、报告叙事锁定、聊天文本边界、跨平台打包契约和黄金回归。
+- `34 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算/出站摘要、报告导出、Trace 脱敏与事件链、资源边界、数据字典、校准/稳定性/评分卡映射、训练集筛选、高维分析守卫、Tool Registry、清洗版本、清洗确认门禁、Baseline/新 OOT 复评和 what-if 隔离、项目多轮对话、报告叙事锁定、聊天文本边界、跨平台打包契约和黄金回归。
 - `ruff check app tests scripts/*.py`：通过。
 - `node --check app/static/app.js`：通过。
 - `git diff --check`：通过。
@@ -46,7 +46,7 @@
 - Reviewer 已实现最多三轮“冻结方案 → 受控模板重生成 → 重审”，并保留 `generated_model_v1/v2/v3.py`；它不是任意自然语言代码的语义修复器，三轮仍未通过就阻断。
 - 当前不做超参数搜索；训练分区在 10,000 行以内提供 3-fold OOF 诊断，冠军仍按冻结验证集选择，超过资源上限会显式跳过。报告新增校准分箱、训练集拟合的 PSI/相关性复核和模型变量重要性，但这些证据不自动替代人工/治理判断。
 - 清洗目前自动执行的只有安全标准化；去重和 IQR 分位截断可在确认节点显式批准并产生新数据版本，稀有类别合并和样本删除仍未实现。
-- 评分卡已是 WOE + Logistic 路线，包含训练集分箱、WOE/IV、PDO/Base Score/Odds、分箱分值、评分—概率映射校验和训练/验证/OOT 指标；单调性、模型包跨版本加载和目标规模实测仍属后续版本。
+- 评分卡已是 WOE + Logistic 路线，包含训练集分箱、WOE/IV、PDO/Base Score/Odds、分箱分值、评分—概率映射校验和训练/验证/OOT 指标；单调性、模型包跨版本加载验收和目标规模实测仍属后续版本。
 - 已提供 PyInstaller spec、macOS/Windows 启动和构建脚本，但尚未在两个目标系统真实构建、签名、安装、升级/卸载验收，也没有把普通 Web 启动方式冒充“拿来即用”的桌面发行版。
 - 独立评测 Harness 按约定后置；当前仅保留 Trace 和普通软件回归测试。
 
