@@ -56,6 +56,8 @@ def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
     report_payload = report.json()
     assert report_payload["manifest"]["protocol"] == "train_fit → validation_select → oot_once"
     assert report_payload["selection"]["funnel"]["fit_scope"] == "train"
+    assert "generated_model_v1.py" in report_payload["manifest"]["artifacts"]
+    assert report_payload["code_review"]["review_history"]
     run_dir = store.run_dir(project["id"], run["id"])
     checksums = json.loads((run_dir / "checksums.json").read_text(encoding="utf-8"))
     assert checksums["report.json"] == hashlib.sha256((run_dir / "report.json").read_bytes()).hexdigest()

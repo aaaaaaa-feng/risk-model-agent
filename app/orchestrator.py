@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional, TypedDict
 import pandas as pd
 from langgraph.graph import END, StateGraph
 
-from .agent import ProviderGateway, build_safe_evidence, generate_reproducible_code, propose_plan, review_generated_code, review_plan
+from .agent import ProviderGateway, build_safe_evidence, generate_reproducible_code, propose_plan, repair_generated_code, review_generated_code, review_plan
 from .config import BASE_DIR, WORKER_TIMEOUT_SECONDS, load_config
 from .storage import Store, dumps, sha256_file, store
 from .worker import (
@@ -436,9 +436,36 @@ def _node_report(context: RunContext, state: GraphState) -> GraphState:
     }
     run_dir = context.store.run_dir(state["project_id"], state["run_id"])
     report["cleaning"] = state.get("cleaning", report["cleaning"])
-    code = generate_reproducible_code(state["plan"], state["selection"]["selected"], state.get("profile"))
+    selected_features = state["selection"]["selected"]
+    code = generate_reproducible_code(state["plan"], selected_features, state.get("profile"))
+    review_history = []
+    repair_history = []
+    reviewer_gateway = context.gateway("code_review")
+    for review_round in range(1, 4):
+        (run_dir / f"generated_model_v{review_round}.py").write_text(code, encoding="utf-8")
+        code_review = review_generated_code(code, gateway=reviewer_gateway, profile=state.get("profile"))
+        code_review["review_round"] = review_round
+        # Store a snapshot; appending the live dict would create a recursive
+        # ``code_review.review_history -> code_review`` object later.
+        review_history.append(dict(code_review))
+        if code_review.get("verdict") != "block" or review_round == 3:
+            break
+        context.event(
+            "revision_requested",
+            f"Reviewer 第 {review_round} 轮发现阻断问题，主 Agent 将基于冻结方案重新生成代码",
+            node="reporting",
+            actor="main-agent",
+            reviewer="reviewer-agent",
+            review_round=review_round,
+            findings=code_review.get("findings", []),
+        )
+        code, repair = repair_generated_code(code, state["plan"], selected_features, code_review.get("findings", []), state.get("profile"))
+        repair["review_round"] = review_round
+        repair_history.append(repair)
+    code_review["review_history"] = review_history
+    code_review["repair_history"] = repair_history
+    code_review["max_review_rounds"] = 3
     (run_dir / "generated_model.py").write_text(code, encoding="utf-8")
-    code_review = review_generated_code(code, gateway=context.gateway("code_review"), profile=state.get("profile"))
     report["code_review"] = code_review
     report["provider_usage"] = context.store.provider_usage_totals(state["run_id"])
     artifact_names = sorted(
@@ -466,7 +493,7 @@ def _node_report(context: RunContext, state: GraphState) -> GraphState:
         )
         context.save(state, status="blocked", phase="reporting")
         return state
-    context.event("artifact_validated", "报告与代码交付物已保存，生成代码未在产品内执行", node="reporting", tool="render_report", progress=100, status="succeeded", artifacts=["eda.json", "cleaning-result.json", "report.json", "report.html", "report.xlsx", "generated_model.py", "checksums.json"], code_review=code_review)
+    context.event("artifact_validated", "报告与代码交付物已保存，生成代码未在产品内执行", node="reporting", tool="render_report", progress=100, status="succeeded", artifacts=report["manifest"].get("artifacts", []) + ["checksums.json"], code_review=code_review)
     context.save(state, status="succeeded", phase="reporting")
     context.store.update_project_status(state["project_id"], "completed")
     return state

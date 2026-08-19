@@ -421,6 +421,29 @@ def review_generated_code(
     return result
 
 
+def repair_generated_code(
+    code: str,
+    plan: Dict[str, Any],
+    selected: List[str],
+    findings: List[Dict[str, Any]],
+    profile: Optional[Dict[str, Any]] = None,
+) -> tuple[str, Dict[str, Any]]:
+    """Regenerate from the allowlisted template after a code review block.
+
+    The repair worker never edits arbitrary text suggested by an LLM. It
+    discards the rejected draft and reconstructs the reproducibility artifact
+    from the frozen plan, which is the only safe repair strategy while V1 does
+    not execute generated code.
+    """
+    repaired = generate_reproducible_code(plan, selected, profile)
+    return repaired, {
+        "strategy": "regenerate_allowlisted_template",
+        "finding_codes": [item.get("code") for item in findings[:20]],
+        "generated_code_executed": False,
+        "source": "frozen_model_plan",
+    }
+
+
 def generate_reproducible_code(plan: Dict[str, Any], selected: List[str], profile: Optional[Dict[str, Any]] = None) -> str:
     profile = profile or {}
     details = {item.get("name"): item.get("type") for item in profile.get("columns_detail", [])}

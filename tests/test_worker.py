@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from app import agent as agent_module
-from app.agent import ProviderGateway, build_safe_evidence, generate_reproducible_code, propose_plan, review_generated_code, review_plan
+from app.agent import ProviderGateway, build_safe_evidence, generate_reproducible_code, propose_plan, repair_generated_code, review_generated_code, review_plan
 from app.worker import build_cleaning_plan, profile_table, quality_analysis, read_table, segment_analysis, select_features, split_frame, target_summary, train_candidates
 
 
@@ -148,6 +148,9 @@ def test_generated_code_review_blocks_network_and_allows_reference_code() -> Non
     code = generate_reproducible_code({"target": "bad_flag"}, ["income", "channel"], profile)
     compile(code, "generated_model.py", "exec")
     assert "OneHotEncoder" in code
+    repaired, metadata = repair_generated_code("import requests", {"target": "bad_flag"}, ["income"], [{"code": "DANGEROUS_NETWORK"}], profile)
+    assert "requests" not in repaired
+    assert metadata["generated_code_executed"] is False
 
 
 def test_provider_gateway_requires_opt_in_and_blocks_sensitive_payload(monkeypatch) -> None:
