@@ -177,7 +177,7 @@
 
 ## 7. Trace Bundle
 
-用户或未来 Harness 可导出：
+用户或未来 Harness 可导出（当前 V0.1 将其压缩为单一脱敏 JSON + 说明文件，后续可拆分为下列目录）：
 
 ```text
 trace-bundle/
@@ -208,6 +208,9 @@ POST /api/runs/{run_id}/resume
 POST /api/runs/{run_id}/cancel
 GET  /api/runs/{run_id}/trace-bundle
 ```
+
+当前可用接口为 `GET /api/runs/{run_id}/trace.json` 和
+`GET /api/runs/{run_id}/trace.zip`，另有 `GET /api/runs/{run_id}/provider-requests` 查看脱敏出站摘要。两者都只包含状态、事件、决策、反馈、Provider 调用量和链式事件哈希；实现会递归移除密钥、本地路径、原始列名和客户级原始行数据，不复制数据集、模型文件或完整报告。
 
 事件流使用 SSE 或 WebSocket；持久化事件接口用于重连和未来 Harness 读取。实时流不是唯一事实源。
 

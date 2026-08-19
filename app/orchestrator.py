@@ -102,6 +102,7 @@ class RunContext:
             config=config,
             budget_guard=lambda requested: self.store.provider_budget_error(self.run_id, requested, config),
             usage_callback=lambda tokens, model: self.store.record_provider_usage(self.run_id, tokens, model, purpose),
+            request_callback=lambda logged_purpose, payload, model: self.store.record_provider_request(self.run_id, logged_purpose, model, payload),
             purpose=purpose,
         )
 
@@ -112,6 +113,13 @@ def _report_html(report: Dict[str, Any]) -> str:
         f"<tr><td>{item.get('name')}</td><td>{item.get('validation', {}).get('roc_auc', '-')}</td><td>{item.get('validation', {}).get('ks', '-')}</td><td>{item.get('status')}</td></tr>"
         for item in metrics
     )
+    stability = report.get("stability") or {}
+    stability_rows = "".join(
+        f"<tr><td>{item.get('feature')}</td><td>{(item.get('validation') or {}).get('psi', '-')}</td><td>{(item.get('validation') or {}).get('review_flag', '-')}</td><td>{(item.get('oot') or {}).get('psi', '-')}</td><td>{(item.get('oot') or {}).get('review_flag', '-')}</td></tr>"
+        for item in stability.get("features", [])[:50]
+    )
+    champion_importance = (report.get("champion") or {}).get("feature_importance", [])
+    importance_rows = "".join(f"<tr><td>{item.get('feature')}</td><td>{item.get('importance', item.get('absolute_coefficient', '-'))}</td></tr>" for item in champion_importance[:20])
     baseline = report.get("baseline") or {}
     baseline_row = ""
     if baseline:
@@ -124,6 +132,8 @@ def _report_html(report: Dict[str, Any]) -> str:
     <style>body{{font-family:system-ui,sans-serif;max-width:1100px;margin:40px auto;color:#18332f}}table{{border-collapse:collapse;width:100%}}td,th{{padding:10px;border-bottom:1px solid #dce9e4;text-align:left}}.hero{{background:#eaf7f0;padding:24px;border-radius:18px}}</style>
     <div class='hero'><h1>{report.get('title','风控建模报告')}</h1><p>{report.get('narrative','')}</p><p>事实边界：离线实验结果，不代表生产效果。</p>{experiment_note}</div>
     <h2>模型比较</h2><table><thead><tr><th>模型</th><th>验证 ROC-AUC</th><th>验证 KS</th><th>状态</th></tr></thead><tbody>{rows}{baseline_row}</tbody></table>
+    <h2>冠军解释与稳定性</h2><p>下表为训练分区拟合规则下的变量重要性；PSI 仅作稳定性复核提示，不参与 OOT 选择。</p><table><thead><tr><th>变量</th><th>重要性/绝对系数</th></tr></thead><tbody>{importance_rows or '<tr><td colspan="2">暂无解释结果</td></tr>'}</tbody></table>
+    <table><thead><tr><th>变量</th><th>验证 PSI</th><th>验证提示</th><th>OOT PSI</th><th>OOT 提示</th></tr></thead><tbody>{stability_rows or '<tr><td colspan="5">暂无稳定性结果</td></tr>'}</tbody></table>
     <h2>探索与数据处理</h2><p>重复行：{report.get('quality', {}).get('duplicate_rows', 0)}；数值字段：{len(report.get('quality', {}).get('numeric', []))}；类别字段：{len(report.get('quality', {}).get('categorical', []))}</p><p>{report.get('cleaning', {}).get('note', '仅展示已记录的本地处理规则。')}</p>
     {f"<h2>既有模型基线</h2><p>分数列：{baseline.get('score_column', '-')}；方向：{baseline.get('orientation', '-')}；验证阈值在验证集冻结，OOT 仅评估。固定通过率：{baseline.get('fixed_approval_rate', '-')}；swap set 已按冠军与基线的验证排序生成聚合比较。</p>" if baseline else ""}
     <h2>运行信息</h2><pre>{json.dumps(report.get('manifest',{}), ensure_ascii=False, indent=2)}</pre></html>"""
@@ -146,6 +156,7 @@ def _write_report_xlsx(report: Dict[str, Any], path: Path) -> None:
                 "validation_pr_auc": validation.get("pr_auc"),
                 "validation_ks": validation.get("ks"),
                 "validation_brier": validation.get("brier"),
+                "validation_calibration_max_gap": max((row.get("absolute_gap", 0.0) for row in validation.get("calibration", [])), default=None),
                 "oof_status": oof.get("status"),
                 "oof_roc_auc": (oof.get("metrics") or {}).get("roc_auc"),
                 "train_roc_auc": train.get("roc_auc"),
@@ -162,6 +173,13 @@ def _write_report_xlsx(report: Dict[str, Any], path: Path) -> None:
             lift_rows.append({"model": item.get("name"), "scope": "oot", **row})
     selection = report.get("selection", {}).get("decisions", [])
     cleaning = report.get("cleaning", {})
+    importance_rows = []
+    for item in report.get("metrics", []):
+        for row in item.get("feature_importance", []):
+            importance_rows.append({"model": item.get("name"), **row})
+    stability_rows = []
+    for item in (report.get("stability") or {}).get("features", []):
+        stability_rows.append({"feature": item.get("feature"), "validation_psi": (item.get("validation") or {}).get("psi"), "validation_review_flag": (item.get("validation") or {}).get("review_flag"), "oot_psi": (item.get("oot") or {}).get("psi"), "oot_review_flag": (item.get("oot") or {}).get("review_flag"), "fit_scope": "train"})
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         pd.DataFrame([{
             "title": report.get("title"),
@@ -176,6 +194,9 @@ def _write_report_xlsx(report: Dict[str, Any], path: Path) -> None:
         pd.DataFrame(lift_rows).to_excel(writer, sheet_name="lift", index=False)
         pd.DataFrame(cleaning.get("actions", [])).to_excel(writer, sheet_name="cleaning", index=False)
         pd.DataFrame((report.get("scorecard") or {}).get("points", [])).to_excel(writer, sheet_name="scorecard", index=False)
+        pd.DataFrame(importance_rows).to_excel(writer, sheet_name="explanations", index=False)
+        pd.DataFrame(stability_rows).to_excel(writer, sheet_name="stability", index=False)
+        pd.DataFrame((report.get("scorecard") or {}).get("feature_importance", [])).to_excel(writer, sheet_name="scorecard_importance", index=False)
         baseline = report.get("baseline") or {}
         if baseline:
             pd.DataFrame(
@@ -255,10 +276,24 @@ def _node_profile(context: RunContext, state: GraphState) -> GraphState:
     if not dataset:
         raise ValueError("DATASET_NOT_FOUND")
     frame = read_table(Path(dataset["path"]), dataset.get("sheet"))
-    profile = profile_table(frame)
+    dictionary = context.store.latest_dictionary(state["project_id"])
+    dictionary_metadata = (dictionary or {}).get("metadata") or {}
+    profile = profile_table(frame, dictionary_metadata)
     target_name = profile.get("target_candidates", [None])[0]
     target = target_summary(frame, target_name) if target_name else {"target": None, "contract_ok": False}
-    state.update({"profile": profile, "target": target})
+    state.update(
+        {
+            "profile": profile,
+            "target": target,
+            "dictionary": {
+                "id": (dictionary or {}).get("id"),
+                "sha256": (dictionary or {}).get("sha256"),
+                "field_count": dictionary_metadata.get("field_count", 0),
+                "matched_count": profile.get("dictionary", {}).get("matched_count", 0),
+                "schema_version": dictionary_metadata.get("schema_version"),
+            },
+        }
+    )
     context.store.update_dataset_profile(state["dataset_id"], profile)
     context.event("node_progressed", f"画像完成：{profile['rows']:,} 行 / {profile['columns']:,} 个字段", node="profiling", tool="profile_dataset", progress=100, summary={"rows": profile["rows"], "columns": profile["columns"], "target_candidates": profile["target_candidates"]})
     context.save(state, status="running", phase="planning")
@@ -450,7 +485,7 @@ def _run_training_worker(
         "VECLIB_MAXIMUM_THREADS": "1",
         "NUMEXPR_NUM_THREADS": "1",
     }
-    for key in ("RISK_AGENT_MAX_UPLOAD_MB", "RISK_AGENT_MAX_ROWS", "RISK_AGENT_MAX_COLUMNS"):
+    for key in ("RISK_AGENT_MAX_UPLOAD_MB", "RISK_AGENT_MAX_ROWS", "RISK_AGENT_MAX_COLUMNS", "RISK_AGENT_MEMORY_BUDGET_MB"):
         if key in os.environ:
             env[key] = os.environ[key]
     command = [sys.executable, "-m", "app.worker_runner"]
@@ -530,6 +565,7 @@ def _node_report(context: RunContext, state: GraphState) -> GraphState:
             "note": "V0.1 使用固定训练/验证/OOT 留出协议作候选排序，不将 OOT 结果用于调参；生产上线仍需独立模型审批。",
         },
         "scorecard": training.get("scorecard"),
+        "stability": training.get("stability", {}),
         "baseline": training.get("baseline"),
         "manifest": {
             "run_id": state["run_id"],

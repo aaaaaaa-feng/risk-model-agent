@@ -1,4 +1,4 @@
-const state = { projects: [], project: null, datasets: [], runs: [], run: null, events: [], mode: 'auto', eventSource: null, config: null };
+const state = { projects: [], project: null, datasets: [], dictionaries: [], runs: [], run: null, events: [], mode: 'auto', eventSource: null, config: null };
 const $ = function (selector) { return document.querySelector(selector); };
 const projectList = $('#project-list');
 const escapeHtml = function (value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]; }); };
@@ -30,7 +30,7 @@ async function loadProjects() {
 }
 async function selectProject(projectId) {
   const data = await api('/api/projects/' + projectId);
-  state.project = data.project; state.datasets = data.datasets || []; state.runs = data.runs || []; state.run = state.runs[0] || null; state.mode = state.run ? state.run.mode : state.mode; state.events = [];
+  state.project = data.project; state.datasets = data.datasets || []; state.dictionaries = data.dictionaries || []; state.runs = data.runs || []; state.run = state.runs[0] || null; state.mode = state.run ? state.run.mode : state.mode; state.events = [];
   renderProjects(); renderProject();
   if (state.run) {
     const eventData = await api('/api/runs/' + state.run.id + '/events');
@@ -47,7 +47,7 @@ function renderProject() {
   $('#project-title').textContent = state.project.name;
   $('#dataset-version').textContent = state.datasets.length ? 'v' + state.datasets.length : '—';
   $('#run-version').textContent = state.run ? state.run.id.slice(-6) : '—';
-  renderDataset(); renderRun(); renderStages(); renderAnalysisControls();
+  renderDataset(); renderDictionaryStatus(); renderRun(); renderStages(); renderAnalysisControls();
   $('#start-run').disabled = !state.datasets.length || ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run && state.run.status);
 }
 function renderDataset() {
@@ -58,9 +58,18 @@ function renderDataset() {
     $('#dataset-badge').textContent = '未导入'; $('#choose-file').addEventListener('click', function () { $('#file-input').click(); }); return;
   }
   card.className = 'dataset-card dataset-filled';
-  card.innerHTML = '<div class="file-title"><span class="drop-icon">✓</span>' + escapeHtml(dataset.filename) + '</div><div class="file-meta">大小 ' + (dataset.bytes / 1024).toFixed(1) + ' KB<br/>' + (dataset.rows || '—') + ' 行 · ' + (dataset.columns || '—') + ' 列<br/>SHA-256 ' + escapeHtml(dataset.sha256.slice(0, 16)) + '…</div>';
+  const resource = dataset.profile && dataset.profile.resource_estimate || {};
+  const resourceNote = resource.risk === 'warn' ? '<br/><span class="warn-text">资源预估接近本机预算</span>' : resource.risk === 'block' ? '<br/><span class="error-text">资源预估超过当前边界</span>' : '';
+  card.innerHTML = '<div class="file-title"><span class="drop-icon">✓</span>' + escapeHtml(dataset.filename) + '</div><div class="file-meta">大小 ' + (dataset.bytes / 1024).toFixed(1) + ' KB<br/>' + (dataset.rows || '—') + ' 行 · ' + (dataset.columns || '—') + ' 列<br/>SHA-256 ' + escapeHtml(dataset.sha256.slice(0, 16)) + '…' + resourceNote + '</div><button id="replace-file" class="secondary-button small" type="button">重新导入版本</button>';
+  $('#replace-file').addEventListener('click', function () { $('#file-input').click(); });
   $('#dataset-badge').textContent = dataset.is_demo ? '合成演示' : '本地已导入';
   $('#dataset-badge').className = 'chip ' + (dataset.is_demo ? 'warn' : 'safe');
+}
+function renderDictionaryStatus() {
+  const status = $('#dictionary-status');
+  if (!status) return;
+  const dictionary = state.dictionaries[0];
+  status.textContent = dictionary ? '已绑定：' + dictionary.filename + ' · ' + ((dictionary.metadata || {}).field_count || 0) + ' 个字段语义' : '字段中文名、口径和来源会留在本机并进入报告。';
 }
 function phaseLabel(phase) { return ({ profiling: '数据画像', planning: '计划与审核', eda: '探索分析', cleaning: '数据清洗', screening: '变量筛选', training: '模型训练', reporting: '报告产出' })[phase] || phase || '等待'; }
 function renderRun() {
@@ -149,7 +158,7 @@ function renderActionCard() {
     $('#confirm-plan').addEventListener('click', confirmPlan);
     if ($('#apply-cleaning')) $('#apply-cleaning').addEventListener('click', applyCleaning);
   }
-  else if (run.status === 'succeeded') { card.innerHTML = '<h3>本次 Run 已完成</h3><p>模型、代码交付物和报告已保存在本机。你可以打开 HTML 报告，或从当前方案派生隔离的 what-if 实验。</p><a class="secondary-button action-button" href="/api/runs/' + run.id + '/report.html" target="_blank">打开报告</a><button class="secondary-button action-button" id="what-if-run">派生 what-if 实验</button>'; $('#what-if-run').addEventListener('click', createWhatIf); }
+  else if (run.status === 'succeeded') { card.innerHTML = '<h3>本次 Run 已完成</h3><p>模型、代码交付物和报告已保存在本机。你可以打开 HTML 报告，或从当前方案派生隔离的 what-if 实验。</p><a class="secondary-button action-button" href="/api/runs/' + run.id + '/report.html" target="_blank">打开报告</a><div class="action-links"><a class="text-link" href="/api/runs/' + run.id + '/report.xlsx" target="_blank">下载 XLSX</a><a class="text-link" href="/api/runs/' + run.id + '/trace.zip" target="_blank">下载 Trace</a></div><button class="secondary-button action-button" id="what-if-run">派生 what-if 实验</button>'; $('#what-if-run').addEventListener('click', createWhatIf); }
   else if (run.status === 'paused') { card.innerHTML = '<h3>Run 已暂停</h3><p>已保存最近安全节点，不会把半成品当作成功结果。</p><button class="primary-button action-button" id="resume-run">恢复运行</button><button class="secondary-button action-button" id="cancel-run">取消 Run</button>'; $('#resume-run').addEventListener('click', resumeRun); $('#cancel-run').addEventListener('click', cancelRun); }
   else if (run.status === 'queued' || run.status === 'running') { card.innerHTML = '<h3>正在运行</h3><p>页面会持续接收节点和工具事件。你可以暂停到最近安全节点，或取消本次 Run。</p><button class="secondary-button action-button" id="pause-run">暂停</button><button class="secondary-button action-button" id="cancel-run">取消 Run</button>'; $('#pause-run').addEventListener('click', pauseRun); $('#cancel-run').addEventListener('click', cancelRun); }
   else if (run.status === 'failed' || run.status === 'blocked') card.innerHTML = '<h3>需要处理</h3><p>' + escapeHtml(run.error || '查看时间线中的结构化问题。') + '</p>';
@@ -159,12 +168,15 @@ function renderActionCard() {
 function renderReport(report) {
   if (!report) return; $('#report-panel').classList.remove('hidden'); $('#report-link').href = '/api/runs/' + state.run.id + '/report.html';
   const champion = report.champion || {}; const metrics = champion.validation || {};
+  const calibration = metrics.calibration || []; const stability = report.stability && report.stability.features || [];
   const values = [['冠军建议', champion.name || '—'], ['验证 ROC-AUC', metrics.roc_auc == null ? '—' : metrics.roc_auc], ['验证 KS', metrics.ks == null ? '—' : metrics.ks], ['最终变量', report.selection && report.selection.funnel ? report.selection.funnel.final : '—']];
   $('#metric-grid').innerHTML = values.map(function (item) { return '<div class="metric-card"><span>' + item[0] + '</span><strong>' + escapeHtml(item[1]) + '</strong></div>'; }).join('');
   $('#report-narrative').textContent = report.narrative || '报告已生成。';
   const decisions = report.selection && report.selection.decisions || [];
   const excluded = decisions.filter(function (item) { return item.status !== 'included'; });
-  $('#report-details').innerHTML = excluded.length ? '<strong>字段处理摘要</strong><ul>' + excluded.map(function (item) { return '<li><code>' + escapeHtml(item.column) + '</code> · ' + escapeHtml(item.status) + ' · ' + escapeHtml((item.reasons || []).join('、') || '规则排除') + '</li>'; }).join('') + '</ul>' : '<strong>字段处理摘要</strong><span>没有字段被规则排除。</span>';
+  const calibrationGap = calibration.length ? Math.max.apply(null, calibration.map(function (item) { return Number(item.absolute_gap || 0); })).toFixed(4) : '—';
+  const highPsi = stability.filter(function (item) { return ['review', 'high'].includes(item.validation && item.validation.review_flag) || ['review', 'high'].includes(item.oot && item.oot.review_flag); }).length;
+  $('#report-details').innerHTML = '<div class="report-facts"><span>校准最大绝对差</span><strong>' + calibrationGap + '</strong><span>需稳定性复核变量</span><strong>' + highPsi + '</strong></div>' + (excluded.length ? '<strong>字段处理摘要</strong><ul>' + excluded.map(function (item) { return '<li><code>' + escapeHtml(item.column) + '</code> · ' + escapeHtml(item.status) + ' · ' + escapeHtml((item.reasons || []).join('、') || '规则排除') + '</li>'; }).join('') + '</ul>' : '<strong>字段处理摘要</strong><span>没有字段被规则排除。</span>');
 }
 function connectStream() {
   if (state.eventSource) state.eventSource.close(); if (!state.run) return;
@@ -198,6 +210,15 @@ async function uploadFile(file) {
     const data = await api('/api/projects/' + state.project.id + '/datasets', { method: 'POST', body: form }); showNotice(data.message); await selectProject(state.project.id);
   }
   catch (error) { showNotice(error.message, 'block'); }
+}
+async function uploadDictionary(file) {
+  if (!state.project || !file) return;
+  const form = new FormData(); form.append('file', file);
+  try {
+    const result = await api('/api/projects/' + state.project.id + '/dictionaries', { method: 'POST', body: form });
+    showNotice(result.message || '数据字典已保存到本机。');
+    await selectProject(state.project.id);
+  } catch (error) { showNotice(error.message, 'block'); }
 }
 async function startRun() {
   if (!state.project || !state.datasets[0]) return;
@@ -257,6 +278,7 @@ async function sendFeedback(reaction) {
 }
 
 $('#new-project').addEventListener('click', createProject); $('#empty-new-project').addEventListener('click', createProject); $('#empty-demo').addEventListener('click', createDemo); $('#start-run').addEventListener('click', startRun); $('#choose-file').addEventListener('click', function () { $('#file-input').click(); }); $('#file-input').addEventListener('change', function (event) { uploadFile(event.target.files[0]); });
+$('#choose-dictionary').addEventListener('click', function () { $('#dictionary-input').click(); }); $('#dictionary-input').addEventListener('change', function (event) { uploadDictionary(event.target.files[0]); });
 $('#run-analysis').addEventListener('click', runAnalysis);
 $('#dataset-card').addEventListener('dragover', function (event) { event.preventDefault(); $('#dataset-card').classList.add('dragging'); });
 $('#dataset-card').addEventListener('dragleave', function () { $('#dataset-card').classList.remove('dragging'); });

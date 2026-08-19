@@ -20,7 +20,7 @@ from .config import MAX_UPLOAD_BYTES, ensure_runtime, load_config, new_id, publi
 from .orchestrator import resume_after_confirmation, resume_after_pause, start_run
 from .storage import sha256_file, store
 from .tools import registry_manifest, require_tool
-from .worker import apply_cleaning_plan, list_sheets, profile_table, quality_analysis, read_table, segment_analysis, target_summary
+from .worker import apply_cleaning_plan, estimate_table_resources, list_sheets, parse_data_dictionary, profile_table, quality_analysis, read_table, segment_analysis, target_summary
 
 ensure_runtime()
 app = FastAPI(title="风控建模 Agent", version=__version__)
@@ -210,6 +210,13 @@ def create_demo(project_id: str) -> Dict[str, Any]:
         raise HTTPException(404, "项目不存在")
     path = write_demo(project_id)
     dataset = store.create_dataset(project_id, path.name, path, sha256_file(path), path.stat().st_size, is_demo=True)
+    try:
+        store.update_dataset_profile(dataset["id"], profile_table(read_table(path)))
+        dataset = store.get_dataset(dataset["id"]) or dataset
+    except ValueError:
+        # The deterministic demo is generated locally; an unexpected profile
+        # failure should not make project creation silently claim a profile.
+        pass
     return {"dataset": public_dataset(dataset), "is_demo": True, "message": "已创建本地合成演示数据，不代表真实业务效果。"}
 
 
@@ -252,7 +259,14 @@ async def upload_dataset(project_id: str, file: UploadFile = File(...), sheet: O
         destination.unlink(missing_ok=True)
         raise HTTPException(400, f"文件预检失败：{exc}")
     dataset = store.create_dataset(project_id, destination.name, destination, sha256_file(destination), size, len(frame), len(frame.columns), sheet, is_demo=False)
-    return {"dataset": public_dataset(dataset), "is_demo": False, "message": "文件已留在本机，尚未上传任何外部服务。"}
+    store.update_dataset_profile(dataset["id"], profile_table(frame))
+    dataset = store.get_dataset(dataset["id"]) or dataset
+    return {
+        "dataset": public_dataset(dataset),
+        "resource_estimate": frame.attrs.get("resource_estimate", {}),
+        "is_demo": False,
+        "message": "文件已留在本机，尚未上传任何外部服务。",
+    }
 
 
 @app.post("/api/projects/{project_id}/datasets/inspect")
@@ -276,12 +290,21 @@ async def inspect_dataset(project_id: str, file: UploadFile = File(...)) -> Dict
                 if size > MAX_UPLOAD_BYTES:
                     raise HTTPException(413, "文件超过本地导入上限")
                 handle.write(chunk)
+        resources = estimate_table_resources(temporary)
         sheets = list_sheets(temporary)
         if len(sheets) > 1:
-            return {"filename": filename, "bytes": size, "sheets": sheets, "requires_sheet": True}
+            return {"filename": filename, "bytes": size, "sheets": sheets, "requires_sheet": True, "resource_estimate": resources}
         frame = read_table(temporary)
-        profile = {"rows": len(frame), "columns": len(frame.columns), "target_candidates": profile_table(frame).get("target_candidates", [])}
-        return {"filename": filename, "bytes": size, "sheets": sheets, "requires_sheet": False, "preflight": profile}
+        profile_view = profile_table(frame)
+        profile = {"rows": len(frame), "columns": len(frame.columns), "target_candidates": profile_view.get("target_candidates", [])}
+        return {
+            "filename": filename,
+            "bytes": size,
+            "sheets": sheets,
+            "requires_sheet": False,
+            "resource_estimate": frame.attrs.get("resource_estimate", resources),
+            "preflight": profile,
+        }
     except HTTPException:
         raise
     except Exception as exc:
@@ -327,8 +350,12 @@ async def upload_dictionary(project_id: str, file: UploadFile = File(...), sheet
     except Exception as exc:
         destination.unlink(missing_ok=True)
         raise HTTPException(400, f"数据字典预检失败：{exc}")
-    dictionary = store.create_dictionary(project_id, destination.name, destination, sha256_file(destination), len(frame), len(frame.columns))
-    return {"dictionary": public_dictionary(dictionary), "message": "数据字典已版本化保存在本机。"}
+    metadata = parse_data_dictionary(frame)
+    if not metadata.get("columns"):
+        destination.unlink(missing_ok=True)
+        raise HTTPException(400, "数据字典没有解析出有效字段名映射")
+    dictionary = store.create_dictionary(project_id, destination.name, destination, sha256_file(destination), len(frame), len(frame.columns), metadata=metadata)
+    return {"dictionary": public_dictionary(dictionary), "metadata": metadata, "message": "数据字典已版本化保存在本机，并将用于画像、筛选和报告展示。"}
 
 
 @app.get("/api/projects/{project_id}/dictionaries")
@@ -539,7 +566,16 @@ def apply_run_cleaning(run_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     cleaned.to_csv(destination, index=False)
     new_dataset = store.create_dataset(run["project_id"], destination.name, destination, sha256_file(destination), destination.stat().st_size, len(cleaned), len(cleaned.columns), None, is_demo=False)
     target_name = (state.get("plan") or {}).get("target") or (state.get("target") or {}).get("target")
-    new_profile = profile_table(cleaned)
+    previous_dictionary = {
+        "schema_version": ((state.get("profile") or {}).get("dictionary") or {}).get("schema_version"),
+        "columns": {
+            item.get("name"): item.get("dictionary")
+            for item in ((state.get("profile") or {}).get("columns_detail") or [])
+            if item.get("name") and item.get("dictionary")
+        },
+    }
+    previous_dictionary["field_count"] = len(previous_dictionary["columns"])
+    new_profile = profile_table(cleaned, previous_dictionary)
     new_quality = quality_analysis(cleaned, target=target_name)
     state["profile"] = new_profile
     state["quality"] = new_quality
@@ -607,6 +643,39 @@ def get_events(run_id: str, after: int = 0) -> Dict[str, Any]:
     if not store.get_run(run_id):
         raise HTTPException(404, "Run 不存在")
     return {"events": store.list_events(run_id, after)}
+
+
+@app.get("/api/runs/{run_id}/trace.json")
+def trace_json(run_id: str) -> JSONResponse:
+    """Download a redacted, hash-linked trace for later evaluation."""
+    if not store.get_run(run_id):
+        raise HTTPException(404, "Run 不存在")
+    return JSONResponse(store.trace_bundle(run_id), headers={"Content-Disposition": f'attachment; filename="{run_id}-trace.json"'})
+
+
+@app.get("/api/runs/{run_id}/provider-requests")
+def provider_requests(run_id: str) -> Dict[str, Any]:
+    if not store.get_run(run_id):
+        raise HTTPException(404, "Run 不存在")
+    return {"requests": store.list_provider_requests(run_id), "policy": "provider-redaction/v1"}
+
+
+@app.get("/api/runs/{run_id}/trace.zip")
+def trace_zip(run_id: str) -> FileResponse:
+    """Package only the redacted trace; never include datasets or model files."""
+    run = store.get_run(run_id)
+    if not run:
+        raise HTTPException(404, "Run 不存在")
+    trace = store.trace_bundle(run_id)
+    run_dir = store.run_dir(run["project_id"], run_id)
+    archive = run_dir / "trace.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as handle:
+        handle.writestr("trace.json", json.dumps(trace, ensure_ascii=False, sort_keys=True, indent=2))
+        handle.writestr(
+            "README.txt",
+            "这是 risk-trace-bundle/v1 的脱敏本地 Trace。它只包含状态、事件、决策、反馈和调用量，不包含原始行数据、密钥或本地路径。\n",
+        )
+    return FileResponse(archive, media_type="application/zip", filename=f"{run_id}-trace.zip")
 
 
 @app.get("/api/runs/{run_id}/events/stream")

@@ -83,12 +83,14 @@ class ProviderGateway:
         client_factory: Any = None,
         budget_guard: Optional[Callable[[int], Optional[str]]] = None,
         usage_callback: Optional[Callable[[int, str], None]] = None,
+        request_callback: Optional[Callable[[str, Dict[str, Any], str], None]] = None,
         purpose: str = "agent",
     ):
         self.config = config or load_config()
         self._client_factory = client_factory or httpx.Client
         self._budget_guard = budget_guard
         self._usage_callback = usage_callback
+        self._request_callback = request_callback
         self._purpose = purpose
 
     @property
@@ -156,6 +158,12 @@ class ProviderGateway:
             ],
         }
         headers = {"Authorization": f"Bearer {provider_key()}", "Content-Type": "application/json"}
+        if self._request_callback:
+            try:
+                self._request_callback(self._purpose, user_payload, str(body["model"]))
+            except Exception:
+                # Request logging must never change the provider safety path.
+                pass
         timeout = httpx.Timeout(30.0, connect=10.0)
         client_kwargs: Dict[str, Any] = {"timeout": timeout}
         proxy = str(self.config.get("proxy") or "").strip()
@@ -219,6 +227,7 @@ def build_safe_evidence(profile: Dict[str, Any], target: Dict[str, Any], selecti
     aliases = alias_fields(profile)
     fields = []
     for item in profile.get("columns_detail", []):
+        dictionary = item.get("dictionary") or {}
         fields.append(
             {
                 "alias": aliases.get(item["name"]),
@@ -226,6 +235,8 @@ def build_safe_evidence(profile: Dict[str, Any], target: Dict[str, Any], selecti
                 "missing_rate": item.get("missing_rate"),
                 "unique_count": item.get("unique_count"),
                 "target_candidate": item.get("target_candidate", False),
+                "dictionary_role": dictionary.get("role"),
+                "semantic_metadata_available": bool(dictionary),
             }
         )
     evidence = {
@@ -253,6 +264,8 @@ def build_safe_evidence(profile: Dict[str, Any], target: Dict[str, Any], selecti
 
 def _safe_plan_payload(plan: Dict[str, Any], profile: Dict[str, Any], target: Dict[str, Any]) -> Dict[str, Any]:
     aliases = alias_fields(profile)
+    screening = dict(plan.get("screening") or {})
+    screening["excluded_columns"] = [aliases.get(column, column) for column in screening.get("excluded_columns", [])]
     return {
         "schema_version": "risk-safe-plan/v1",
         "target_alias": aliases.get(plan.get("target"), "target"),
@@ -261,7 +274,7 @@ def _safe_plan_payload(plan: Dict[str, Any], profile: Dict[str, Any], target: Di
         "negative_value": plan.get("negative_value"),
         "split": plan.get("split"),
         "models": plan.get("models"),
-        "screening": plan.get("screening"),
+        "screening": screening,
         "mode": plan.get("mode"),
         "target_contract": {
             "positive_count": target.get("positive_count"),

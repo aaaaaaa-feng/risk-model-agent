@@ -23,7 +23,7 @@ from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from .config import MAX_COLUMNS, MAX_ROWS, MAX_UPLOAD_BYTES
+from .config import MAX_COLUMNS, MAX_ROWS, MAX_UPLOAD_BYTES, MEMORY_BUDGET_BYTES
 
 try:
     from xgboost import XGBClassifier
@@ -43,9 +43,91 @@ def _parse_datetime(series: pd.Series) -> pd.Series:
         return pd.to_datetime(series, errors="coerce")
 
 
+def estimate_table_resources(path: Path, sheet: Optional[str] = None) -> Dict[str, Any]:
+    """Estimate row/column and in-memory footprint before materializing a table."""
+    size_bytes = int(path.stat().st_size)
+    suffix = path.suffix.lower()
+    if suffix == ".xlsx":
+        try:
+            from openpyxl import load_workbook
+
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            try:
+                if sheet and sheet not in workbook.sheetnames:
+                    raise ValueError(f"XLSX_SHEET_NOT_FOUND: {sheet}")
+                worksheet = workbook[sheet] if sheet else workbook[workbook.sheetnames[0]]
+                rows = int(worksheet.max_row or 0)
+                columns = int(worksheet.max_column or 0)
+            finally:
+                workbook.close()
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError(f"XLSX_RESOURCE_ESTIMATE_FAILED: {exc}") from exc
+    elif suffix == ".csv":
+        rows = 0
+        columns = 0
+        decode_errors: List[str] = []
+        for encoding in ("utf-8-sig", "utf-8", "gb18030"):
+            try:
+                with path.open("r", encoding=encoding, newline="") as handle:
+                    sample = handle.read(1024 * 1024)
+                    handle.seek(0)
+                    if sample:
+                        try:
+                            import csv
+
+                            dialect = csv.Sniffer().sniff(sample[:10000])
+                        except csv.Error:
+                            dialect = csv.excel
+                        reader = csv.reader(handle, dialect)
+                        columns = len(next(reader, []))
+                        rows = max(0, sum(1 for _ in reader))
+                    break
+            except UnicodeDecodeError as exc:
+                decode_errors.append(f"{encoding}: {exc}")
+        else:
+            raise ValueError(f"CSV_ENCODING_UNSUPPORTED: {decode_errors[-1] if decode_errors else 'unknown'}")
+    else:
+        raise ValueError("UNSUPPORTED_FILE: 仅支持 CSV 和 XLSX")
+    data_rows = max(0, rows)
+    # A conservative object-heavy estimate; actual pandas memory is measured
+    # again after loading. This is a guardrail, not a claim of exact usage.
+    estimated_memory_bytes = int(max(size_bytes * 2, data_rows * max(columns, 1) * 96))
+    risk = "ok"
+    reasons: List[str] = []
+    if data_rows > MAX_ROWS:
+        risk = "block"
+        reasons.append("ROW_LIMIT_EXCEEDED")
+    if columns > MAX_COLUMNS:
+        risk = "block"
+        reasons.append("COLUMN_LIMIT_EXCEEDED")
+    if estimated_memory_bytes > MEMORY_BUDGET_BYTES:
+        risk = "block"
+        reasons.append("MEMORY_BUDGET_EXCEEDED")
+    elif estimated_memory_bytes > int(MEMORY_BUDGET_BYTES * 0.7):
+        risk = "warn"
+        reasons.append("MEMORY_BUDGET_NEAR_LIMIT")
+    return {
+        "schema_version": "risk-resource-estimate/v1",
+        "file_bytes": size_bytes,
+        "rows": data_rows,
+        "columns": columns,
+        "estimated_memory_bytes": estimated_memory_bytes,
+        "memory_budget_bytes": MEMORY_BUDGET_BYTES,
+        "risk": risk,
+        "reasons": reasons,
+        "exact": False,
+    }
+
+
 def read_table(path: Path, sheet: Optional[str] = None) -> pd.DataFrame:
     if path.stat().st_size > MAX_UPLOAD_BYTES:
         raise ValueError("FILE_TOO_LARGE: 文件超过本地配置的导入上限")
+    resource_estimate = estimate_table_resources(path, sheet)
+    if resource_estimate["risk"] == "block":
+        reason = ",".join(resource_estimate.get("reasons", [])) or "RESOURCE_LIMIT"
+        raise ValueError(f"RESOURCE_LIMIT: 导入前估算超出支持边界（{reason}）")
     suffix = path.suffix.lower()
     if suffix == ".xlsx":
         frame = pd.read_excel(path, sheet_name=sheet or 0, engine="openpyxl")
@@ -54,7 +136,7 @@ def read_table(path: Path, sheet: Optional[str] = None) -> pd.DataFrame:
         decode_errors: List[str] = []
         for encoding in ("utf-8-sig", "utf-8", "gb18030"):
             try:
-                frame = pd.read_csv(path, nrows=MAX_ROWS, low_memory=True, encoding=encoding)
+                frame = pd.read_csv(path, nrows=MAX_ROWS + 1, low_memory=True, encoding=encoding)
                 break
             except UnicodeDecodeError as exc:
                 decode_errors.append(f"{encoding}: {exc}")
@@ -87,6 +169,7 @@ def read_table(path: Path, sheet: Optional[str] = None) -> pd.DataFrame:
         "rows_removed": 0,
         "columns_removed": 0,
     }
+    frame.attrs["resource_estimate"] = {**resource_estimate, "exact": True, "actual_memory_bytes": int(frame.memory_usage(deep=True).sum())}
     return frame
 
 
@@ -96,8 +179,13 @@ def list_sheets(path: Path) -> List[str]:
     if path.stat().st_size > MAX_UPLOAD_BYTES:
         raise ValueError("FILE_TOO_LARGE: 文件超过本地配置的导入上限")
     try:
-        with pd.ExcelFile(path, engine="openpyxl") as workbook:
-            return [str(name) for name in workbook.sheet_names]
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(path, read_only=True, data_only=True)
+        try:
+            return [str(name) for name in workbook.sheetnames]
+        finally:
+            workbook.close()
     except Exception as exc:
         raise ValueError(f"XLSX_SHEET_READ_FAILED: {exc}") from exc
 
@@ -115,7 +203,51 @@ def infer_type(series: pd.Series) -> str:
     return "categorical" if series.nunique(dropna=True) < min(100, max(10, len(series) // 20)) else "text"
 
 
-def profile_table(frame: pd.DataFrame) -> Dict[str, Any]:
+def parse_data_dictionary(frame: pd.DataFrame) -> Dict[str, Any]:
+    """Parse a small, local-only field dictionary into a versioned mapping."""
+    aliases = {
+        "field": {"field", "field_name", "column", "column_name", "name", "字段", "字段名", "变量", "变量名", "特征", "特征名"},
+        "display_name": {"display_name", "label", "中文名", "字段中文名", "变量中文名", "展示名"},
+        "definition": {"meaning", "description", "definition", "口径", "字段口径", "业务含义", "含义", "定义"},
+        "source": {"source", "source_table", "来源", "来源表"},
+        "role": {"role", "字段角色", "变量角色", "角色"},
+    }
+    normalized = {str(column).strip().lower(): column for column in frame.columns}
+    selected: Dict[str, Any] = {}
+    for key, candidates in aliases.items():
+        for candidate, original in normalized.items():
+            if candidate in candidates or candidate.replace(" ", "_") in candidates:
+                selected[key] = original
+                break
+    warnings: List[str] = []
+    if "field" not in selected:
+        if len(frame.columns):
+            selected["field"] = frame.columns[0]
+            warnings.append("FIELD_COLUMN_INFERRED_FROM_FIRST_COLUMN")
+        else:
+            return {"schema_version": "risk-data-dictionary/v1", "columns": {}, "field_count": 0, "warnings": ["EMPTY_DICTIONARY"]}
+    mapping: Dict[str, Dict[str, Any]] = {}
+    for _, row in frame.iterrows():
+        raw_name = str(row.get(selected["field"], "") or "").strip()
+        if not raw_name or raw_name.lower() == "nan":
+            continue
+        item: Dict[str, Any] = {}
+        for key in ("display_name", "definition", "source", "role"):
+            value = row.get(selected.get(key)) if selected.get(key) is not None else None
+            if pd.notna(value) and str(value).strip():
+                item[key] = str(value).strip()[:500]
+        mapping[raw_name] = item
+    return {
+        "schema_version": "risk-data-dictionary/v1",
+        "columns": mapping,
+        "field_count": len(mapping),
+        "source_columns": [str(column) for column in frame.columns],
+        "warnings": warnings,
+        "policy": "仅在本机展示原始字段语义；外部 Provider 仍只接收字段别名和聚合证据。",
+    }
+
+
+def profile_table(frame: pd.DataFrame, dictionary: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     columns: List[Dict[str, Any]] = []
     for column in frame.columns:
         series = frame[column]
@@ -125,24 +257,32 @@ def profile_table(frame: pd.DataFrame) -> Dict[str, Any]:
         values = set(series.dropna().unique().tolist())
         if values and len(values) <= 2 and values.issubset({0, 1, True, False, "0", "1"}):
             candidates = True
-        columns.append(
-            {
-                "name": str(column),
-                "type": infer_type(series),
-                "missing_rate": round(missing, 6),
-                "unique_count": unique_count,
-                "unique_ratio": round(unique_count / max(len(series), 1), 6),
-                "target_candidate": candidates,
-                "constant": unique_count <= 1,
-            }
-        )
+        item = {
+            "name": str(column),
+            "type": infer_type(series),
+            "missing_rate": round(missing, 6),
+            "unique_count": unique_count,
+            "unique_ratio": round(unique_count / max(len(series), 1), 6),
+            "target_candidate": candidates,
+            "constant": unique_count <= 1,
+        }
+        if dictionary and column in (dictionary.get("columns") or {}):
+            item["dictionary"] = dictionary["columns"][column]
+        columns.append(item)
     return {
         "rows": int(len(frame)),
         "columns": int(len(frame.columns)),
         "memory_bytes": int(frame.memory_usage(deep=True).sum()),
+        "resource_estimate": frame.attrs.get("resource_estimate", {}),
         "duplicate_rows": int(frame.duplicated().sum()),
         "target_candidates": [item["name"] for item in columns if item["target_candidate"]],
         "columns_detail": columns,
+        "dictionary": {
+            "schema_version": (dictionary or {}).get("schema_version"),
+            "field_count": (dictionary or {}).get("field_count", 0),
+            "matched_count": sum(1 for item in columns if item.get("dictionary")),
+            "warnings": (dictionary or {}).get("warnings", []),
+        },
         "warnings": _profile_warnings(frame, columns),
         "cleaning": {
             "status": "safe_normalization_only",
@@ -493,7 +633,17 @@ def _preprocessor(frame: pd.DataFrame, features: Sequence[str], dense: bool = Fa
 
 def _metrics(y_true: np.ndarray, probabilities: np.ndarray, threshold: float) -> Dict[str, Any]:
     if len(y_true) == 0 or len(np.unique(y_true)) < 2:
-        return {"roc_auc": None, "pr_auc": None, "ks": None, "gini": None, "brier": None, "threshold": threshold, "positive_rate": round(float(np.mean(y_true)) if len(y_true) else 0.0, 6), "confusion_matrix": None}
+        return {
+            "roc_auc": None,
+            "pr_auc": None,
+            "ks": None,
+            "gini": None,
+            "brier": None,
+            "threshold": threshold,
+            "positive_rate": round(float(np.mean(y_true)) if len(y_true) else 0.0, 6),
+            "confusion_matrix": None,
+            "calibration": [],
+        }
     fpr, tpr, thresholds = roc_curve(y_true, probabilities)
     ks = float(np.max(tpr - fpr))
     finite_mask = np.isfinite(thresholds)
@@ -512,7 +662,69 @@ def _metrics(y_true: np.ndarray, probabilities: np.ndarray, threshold: float) ->
         "threshold": round(chosen, 6),
         "positive_rate": round(float(np.mean(y_true)), 6),
         "confusion_matrix": matrix,
+        "calibration": _calibration_table(y_true, probabilities),
     }
+
+
+def _calibration_table(y_true: np.ndarray, probabilities: np.ndarray, bins: int = 10) -> List[Dict[str, Any]]:
+    """Return equal-frequency calibration evidence without selecting a model."""
+    if len(y_true) == 0 or len(probabilities) != len(y_true):
+        return []
+    values = np.asarray(probabilities, dtype=float)
+    if not np.isfinite(values).all() or not np.all((values >= 0) & (values <= 1)):
+        return []
+    order = np.argsort(values, kind="stable")
+    chunks = np.array_split(order, min(max(2, bins), len(order)))
+    rows: List[Dict[str, Any]] = []
+    for index, chunk in enumerate(chunks, start=1):
+        if len(chunk) == 0:
+            continue
+        predicted = float(np.mean(values[chunk]))
+        observed = float(np.mean(y_true[chunk]))
+        rows.append(
+            {
+                "bucket": index,
+                "row_count": int(len(chunk)),
+                "predicted_rate": round(predicted, 6),
+                "observed_rate": round(observed, 6),
+                "absolute_gap": round(abs(predicted - observed), 6),
+            }
+        )
+    return rows
+
+
+def _pipeline_feature_importance(pipeline: Pipeline, features: Sequence[str]) -> List[Dict[str, Any]]:
+    """Aggregate transformed feature importance back to source columns."""
+    preprocess = pipeline.named_steps.get("preprocess")
+    model = pipeline.named_steps.get("model")
+    if preprocess is None or model is None:
+        return []
+    try:
+        names = [str(item) for item in preprocess.get_feature_names_out()]
+    except Exception:
+        names = list(features)
+    raw_values: Optional[np.ndarray] = None
+    if hasattr(model, "feature_importances_"):
+        raw_values = np.asarray(getattr(model, "feature_importances_"), dtype=float)
+    elif hasattr(model, "coef_"):
+        raw_values = np.abs(np.asarray(getattr(model, "coef_"), dtype=float).reshape(-1))
+    if raw_values is None or len(raw_values) != len(names):
+        return []
+    aggregated = {str(feature): 0.0 for feature in features}
+    for name, value in zip(names, raw_values):
+        source = name.split("__", 1)[-1]
+        # One-hot names append the category after the original column name.
+        if source not in aggregated:
+            source = next((feature for feature in features if source.startswith(f"{feature}_")), source)
+        if source in aggregated and np.isfinite(value):
+            aggregated[source] += float(abs(value))
+    total = sum(aggregated.values())
+    rows = [
+        {"feature": feature, "importance": round(value, 8), "normalized_importance": round(value / total, 8) if total else 0.0}
+        for feature, value in aggregated.items()
+    ]
+    rows.sort(key=lambda item: (-item["importance"], item["feature"]))
+    return rows
 
 
 def evaluate_baseline(frame: pd.DataFrame, target: str, score_column: str, split: Dict[str, Any]) -> Dict[str, Any]:
@@ -618,6 +830,87 @@ def _swap_set(y_true: np.ndarray, baseline_scores: np.ndarray, candidate_scores:
     for name, mask in groups.items():
         count = int(np.sum(mask))
         result["groups"][name] = {"count": count, "bad_count": int(np.sum(y_true[mask])) if count else 0, "bad_rate": round(float(np.mean(y_true[mask])), 6) if count else None}
+    return result
+
+
+def _psi_from_counts(reference: np.ndarray, current: np.ndarray) -> float:
+    reference = np.asarray(reference, dtype=float)
+    current = np.asarray(current, dtype=float)
+    reference = reference / max(float(reference.sum()), 1.0)
+    current = current / max(float(current.sum()), 1.0)
+    reference = np.clip(reference, 1e-6, None)
+    current = np.clip(current, 1e-6, None)
+    return float(np.sum((current - reference) * np.log(current / reference)))
+
+
+def _stability_for_feature(reference: pd.Series, current: pd.Series) -> Dict[str, Any]:
+    """Compute train-fitted PSI bins for one feature and one evaluation split."""
+    if pd.api.types.is_numeric_dtype(reference):
+        ref = pd.to_numeric(reference, errors="coerce")
+        cur = pd.to_numeric(current, errors="coerce")
+        finite = ref.dropna().astype(float)
+        if finite.nunique() > 1:
+            edges = np.unique(np.nanquantile(finite.to_numpy(), np.linspace(0, 1, 11))).astype(float)
+            if len(edges) > 1:
+                edges[0] = -np.inf
+                edges[-1] = np.inf
+            else:
+                edges = np.array([-np.inf, np.inf])
+        else:
+            edges = np.array([-np.inf, np.inf])
+        ref_labels = pd.cut(ref, bins=edges, include_lowest=True, duplicates="drop").astype("string").fillna("<MISSING>")
+        cur_labels = pd.cut(cur, bins=edges, include_lowest=True, duplicates="drop").astype("string").fillna("<MISSING>")
+        categories = sorted(set(ref_labels.tolist()) | set(cur_labels.tolist()))
+    else:
+        ref_labels = reference.fillna("<MISSING>").astype(str)
+        cur_labels = current.fillna("<MISSING>").astype(str)
+        top = list(ref_labels.value_counts().head(20).index)
+        categories = list(dict.fromkeys(top + ["<OTHER>"]))
+        ref_labels = ref_labels.map(lambda value: value if value in top else "<OTHER>")
+        cur_labels = cur_labels.map(lambda value: value if value in top else "<OTHER>")
+    ref_counts = ref_labels.value_counts().reindex(categories, fill_value=0).to_numpy(dtype=float)
+    cur_counts = cur_labels.value_counts().reindex(categories, fill_value=0).to_numpy(dtype=float)
+    return {
+        "psi": round(_psi_from_counts(ref_counts, cur_counts), 6),
+        "reference_rows": int(len(reference)),
+        "current_rows": int(len(current)),
+        "bins": int(len(categories)),
+        "fit_scope": "train",
+        "note": "分箱/类别集合仅使用训练分区拟合；PSI 阈值只是复核提示，不是普遍定律。",
+    }
+
+
+def stability_analysis(frame: pd.DataFrame, features: Sequence[str], split: Dict[str, Any]) -> Dict[str, Any]:
+    """Summarize train-only PSI and correlation evidence for selected features."""
+    train_idx = np.asarray(split.get("train", []), dtype=int)
+    valid_idx = np.asarray(split.get("valid", []), dtype=int)
+    oot_idx = np.asarray(split.get("oot", []), dtype=int)
+    result: Dict[str, Any] = {"schema_version": "risk-stability/v1", "fit_scope": "train", "features": [], "correlation": []}
+    for feature in features:
+        if feature not in frame.columns:
+            continue
+        reference = frame.iloc[train_idx][feature]
+        valid = frame.iloc[valid_idx][feature]
+        oot = frame.iloc[oot_idx][feature]
+        item = {
+            "feature": str(feature),
+            "validation": _stability_for_feature(reference, valid),
+            "oot": _stability_for_feature(reference, oot),
+        }
+        for scope in ("validation", "oot"):
+            value = item[scope]["psi"]
+            item[scope]["review_flag"] = "high" if value >= 0.25 else ("review" if value >= 0.1 else "ok")
+        result["features"].append(item)
+    numeric = [feature for feature in features if feature in frame.columns and pd.api.types.is_numeric_dtype(frame[feature])]
+    if len(numeric) >= 2 and len(train_idx):
+        corr = frame.iloc[train_idx][numeric].corr().abs()
+        for left_index, left in enumerate(numeric):
+            for right in numeric[left_index + 1 :]:
+                value = corr.loc[left, right]
+                if pd.notna(value) and float(value) >= 0.7:
+                    result["correlation"].append({"feature_a": left, "feature_b": right, "absolute_correlation": round(float(value), 6), "fit_scope": "train", "review_flag": "high" if value >= 0.9 else "review"})
+        result["correlation"].sort(key=lambda item: (-item["absolute_correlation"], item["feature_a"], item["feature_b"]))
+        result["correlation"] = result["correlation"][:100]
     return result
 
 
@@ -744,6 +1037,8 @@ def train_candidates(
                 "oot_fixed_rate": _fixed_rate_metrics(y[oot_idx], np.asarray(scorecard.get("_oot_probability", []), dtype=float)),
                 "oof": scorecard.get("oof"),
                 "params": scorecard.get("params", {}),
+                "feature_importance": scorecard.get("feature_importance", []),
+                "score_mapping_check": scorecard.get("score_mapping_check", {}),
             }
         )
         scorecard.pop("_validation_probability", None)
@@ -782,18 +1077,35 @@ def train_candidates(
                 "oot_fixed_rate": _fixed_rate_metrics(y[oot_idx], oot_probability),
                 "oof": oof,
                 "params": estimator.get_params(deep=False),
+                "feature_importance": _pipeline_feature_importance(pipeline, features),
             }
             candidates.append(item)
             try:
-                import joblib
+                if name == "xgboost" and hasattr(estimator, "save_model"):
+                    native_path = output_dir / f"{name}.json"
+                    estimator.save_model(native_path)
+                    item["serialization"] = {
+                        "format": "xgboost_native_json",
+                        "artifact": native_path.name,
+                        "load_policy": "仅从本 Run 本地目录加载；不接受外部不受信模型文件。",
+                    }
+                else:
+                    import joblib
 
-                joblib.dump(pipeline, output_dir / f"{name}.joblib")
+                    artifact = output_dir / f"{name}.joblib"
+                    joblib.dump(pipeline, artifact)
+                    item["serialization"] = {
+                        "format": "joblib_local_pipeline",
+                        "artifact": artifact.name,
+                        "load_policy": "仅从本 Run 本地目录加载；不接受外部不受信模型文件。",
+                    }
             except Exception:
-                pass
+                item["serialization"] = {"format": "unavailable", "artifact": None, "load_policy": "模型文件未成功写入，不能宣称可加载。"}
         except Exception as exc:  # candidate isolation is intentional
             candidates.append({"name": name, "status": "failed", "error": f"{type(exc).__name__}: {exc}", "features": len(features)})
     succeeded = [item for item in candidates if item["status"] == "succeeded"]
     champion = max(succeeded, key=lambda item: (item["validation"]["roc_auc"] or -1, item["validation"]["ks"] or -1), default=None)
+    stability = stability_analysis(valid_frame, features, {"train": train_idx, "valid": valid_idx, "oot": oot_idx})
     baseline = None
     if baseline_column:
         baseline = evaluate_baseline(valid_frame, target, baseline_column, split)
@@ -809,6 +1121,7 @@ def train_candidates(
         "champion": champion,
         "scorecard": scorecard,
         "baseline": baseline,
+        "stability": stability,
     }
 
 
@@ -902,6 +1215,13 @@ def _scorecard_from_woe(
             coefficient = coefficients[feature]
             for row in specs[feature]["rows"]:
                 points.append({"feature": feature, **row, "coefficient": round(coefficient, 6), "points": round(-factor * coefficient * specs[feature]["woe"][row["bin"]], 4)})
+        score_values = np.full(len(transformed), base_points, dtype=float)
+        for feature in features:
+            score_values += -factor * coefficients[feature] * transformed[feature].to_numpy(dtype=float)
+        score_odds = odds * np.power(2.0, (score_values - base_score) / pdo)
+        score_probability = 1.0 / (1.0 + score_odds)
+        model_probability = model.predict_proba(transformed)[:, 1]
+        mapping_error = np.abs(score_probability - model_probability)
         return {
             "route": "woe_logistic",
             "base_score": base_score,
@@ -913,6 +1233,18 @@ def _scorecard_from_woe(
             "features": list(features),
             "bins": {feature: {key: value for key, value in spec.items() if key not in {"woe", "rows"}} | {"iv": spec["iv"], "rows": spec["rows"]} for feature, spec in specs.items()},
             "points": points,
+            "feature_importance": [
+                {"feature": feature, "coefficient": round(coefficients[feature], 8), "absolute_coefficient": round(abs(coefficients[feature]), 8), "iv": specs[feature]["iv"]}
+                for feature in sorted(features, key=lambda item: (-abs(coefficients[item]), item))
+            ],
+            "score_mapping_check": {
+                "passed": bool(np.isfinite(mapping_error).all() and (float(np.max(mapping_error)) if len(mapping_error) else 0.0) <= 1e-6),
+                "sample_count": int(len(score_values)),
+                "max_absolute_probability_error": round(float(np.max(mapping_error)) if len(mapping_error) else 0.0, 10),
+                "score_min": round(float(np.min(score_values)) if len(score_values) else 0.0, 6),
+                "score_max": round(float(np.max(score_values)) if len(score_values) else 0.0, 6),
+                "checked_scopes": ["train", "validation", "oot"],
+            },
             "params": {"max_iter": 500, "class_weight": "balanced", "random_state": 42},
             "validation": _metrics(y[valid_idx], valid_probability, threshold),
             "train": _metrics(y[train_idx], train_probability, threshold),

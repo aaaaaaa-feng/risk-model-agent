@@ -91,6 +91,8 @@ button { cursor: pointer; }
 .dataset-card.dragging { border-color: var(--accent); background: #eefaf4; box-shadow: 0 0 0 3px #dff4e9; }
 .dataset-card strong { font-size: 13px; }
 .dataset-card span { font-size: 11px; color: var(--muted); }
+.dataset-subactions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.dataset-subactions .text-link { border: 0; background: transparent; padding: 0; cursor: pointer; }
 .drop-icon { width: 35px; height: 35px; border-radius: 12px; display: grid; place-items: center; color: var(--teal); background: var(--mint); font-size: 22px; font-weight: 300; }
 .dataset-filled { align-items: flex-start; padding: 18px; justify-content: flex-start; border-style: solid; background: #f5fbf8; }
 .dataset-filled .file-title { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 13px; }
@@ -118,6 +120,8 @@ button { cursor: pointer; }
 .report-details { margin-top: 13px; padding: 13px 15px; color: #46625c; font-size: 12px; line-height: 1.7; background: #f8fbfa; border-radius: 11px; }
 .report-details ul { margin: 8px 0 0; padding-left: 18px; }
 .report-details code { color: #14796d; }
+.report-facts { display: flex; gap: 8px 14px; flex-wrap: wrap; margin-bottom: 10px; color: var(--muted); }
+.report-facts strong { color: var(--teal); }
 .text-link { color: var(--teal); font-size: 11px; text-decoration: none; }
 .text-link:hover { text-decoration: underline; }
 .inspector { display: grid; align-content: start; gap: 14px; padding-top: 8px; }
@@ -126,6 +130,7 @@ button { cursor: pointer; }
 .action-card h3 { margin: 0 0 8px; font-size: 14px; }
 .action-card p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .action-card .action-button { margin-top: 14px; width: 100%; }
+.action-links { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }
 .decision-summary { display: grid; gap: 8px; margin-top: 13px; padding: 11px; border-radius: 11px; background: #f7fbf9; }
 .decision-summary div { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; }
 .decision-summary span, .review-findings > span { color: var(--muted); }
@@ -151,6 +156,8 @@ button { cursor: pointer; }
 .detail-list div { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .detail-list strong { font-size: 11px; }
 .green-text { color: var(--teal); }
+.warn-text { color: #a16e1e !important; }
+.error-text { color: #a34c53 !important; }
 .feedback-row { display: flex; gap: 6px; margin: 10px 0 7px; }
 .feedback-button { border: 1px solid var(--line); background: #fbfdfc; color: var(--muted); border-radius: 8px; padding: 7px 8px; font-size: 10px; }
 .feedback-button:hover { border-color: #a8d2c3; color: var(--teal); }

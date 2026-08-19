@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import numbers
 import sqlite3
 from datetime import datetime, timezone
@@ -55,6 +56,63 @@ def loads(value: Optional[str], default: Any = None) -> Any:
         return json.loads(value)
     except json.JSONDecodeError:
         return default
+
+
+_TRACE_SECRET_KEYS = {
+    "api_key",
+    "authorization",
+    "password",
+    "secret",
+    "token",
+}
+_TRACE_RAW_KEYS = {
+    "raw",
+    "raw_data",
+    "raw_rows",
+    "rows_data",
+    "customer_rows",
+}
+
+
+def _trace_redact(value: Any, key: str = "") -> Any:
+    """Redact credentials, local paths and customer-level payloads in traces.
+
+    Trace bundles are intended for later evaluation and debugging, not for
+    moving the source dataset out of the local runtime. Keep aggregate state
+    and event hashes while failing closed on fields that could contain secrets
+    or row-level data.
+    """
+    normalized = key.lower().replace("-", "_")
+    if normalized in _TRACE_SECRET_KEYS or any(marker in normalized for marker in ("api_key", "secret", "password", "authorization")):
+        return "<redacted>"
+    if normalized in _TRACE_RAW_KEYS or any(marker in normalized for marker in ("raw_rows", "raw_data", "customer_rows")):
+        return {"included": False} if isinstance(value, (dict, list)) else False
+    if normalized == "path" or normalized.endswith("_path"):
+        return "<local-path-redacted>"
+    if isinstance(value, dict):
+        return {str(item_key): _trace_redact(item_value, str(item_key)) for item_key, item_value in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_trace_redact(item, key) for item in value]
+    return _json_safe(value)
+
+
+def _trace_alias(value: Any, aliases: Dict[str, str]) -> Any:
+    """Replace original field names in trace text and keys with stable aliases."""
+    if isinstance(value, dict):
+        result: Dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            aliased_key = aliases.get(key_text, key_text)
+            result[aliased_key] = _trace_alias(item, aliases)
+        return result
+    if isinstance(value, list):
+        return [_trace_alias(item, aliases) for item in value]
+    if isinstance(value, str):
+        result = value
+        for original, alias in sorted(aliases.items(), key=lambda item: len(item[0]), reverse=True):
+            result = re.sub(re.escape(original), alias, result)
+        return result
+    return value
 
 
 class Store:
@@ -142,6 +200,18 @@ class Store:
                     purpose TEXT,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS provider_requests (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+                    purpose TEXT,
+                    model TEXT,
+                    payload_json TEXT NOT NULL,
+                    payload_hash TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    error_code TEXT,
+                    created_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS data_dictionaries (
                     id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -150,6 +220,7 @@ class Store:
                     sha256 TEXT NOT NULL,
                     rows INTEGER,
                     columns INTEGER,
+                    metadata_json TEXT,
                     created_at TEXT NOT NULL
                 );
                 """
@@ -160,6 +231,9 @@ class Store:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(datasets)").fetchall()}
             if "is_demo" not in columns:
                 conn.execute("ALTER TABLE datasets ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0")
+            dictionary_columns = {row[1] for row in conn.execute("PRAGMA table_info(data_dictionaries)").fetchall()}
+            if "metadata_json" not in dictionary_columns:
+                conn.execute("ALTER TABLE data_dictionaries ADD COLUMN metadata_json TEXT")
 
     def create_project(self, name: str) -> Dict[str, Any]:
         project_id = new_id("proj")
@@ -262,24 +336,38 @@ class Store:
         sha256: str,
         rows: Optional[int],
         columns: Optional[int],
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         dictionary_id = new_id("dict")
         with self.connect() as conn:
             conn.execute(
-                "INSERT INTO data_dictionaries(id,project_id,filename,path,sha256,rows,columns,created_at) VALUES(?,?,?,?,?,?,?,?)",
-                (dictionary_id, project_id, filename, str(path), sha256, rows, columns, now_iso()),
+                "INSERT INTO data_dictionaries(id,project_id,filename,path,sha256,rows,columns,metadata_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                (dictionary_id, project_id, filename, str(path), sha256, rows, columns, dumps(metadata or {}), now_iso()),
             )
         return self.get_dictionary(dictionary_id) or {}
 
     def get_dictionary(self, dictionary_id: str) -> Optional[Dict[str, Any]]:
         with self.connect() as conn:
             row = conn.execute("SELECT * FROM data_dictionaries WHERE id=?", (dictionary_id,)).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        result = dict(row)
+        result["metadata"] = loads(result.pop("metadata_json", None), {})
+        return result
 
     def list_dictionaries(self, project_id: str) -> List[Dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM data_dictionaries WHERE project_id=? ORDER BY created_at DESC", (project_id,)).fetchall()
-        return [dict(row) for row in rows]
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["metadata"] = loads(item.pop("metadata_json", None), {})
+            result.append(item)
+        return result
+
+    def latest_dictionary(self, project_id: str) -> Optional[Dict[str, Any]]:
+        dictionaries = self.list_dictionaries(project_id)
+        return dictionaries[0] if dictionaries else None
 
     def list_decisions(self, run_id: str) -> List[Dict[str, Any]]:
         with self.connect() as conn:
@@ -290,6 +378,110 @@ class Store:
         with self.connect() as conn:
             rows = conn.execute("SELECT * FROM feedback WHERE run_id=? ORDER BY created_at", (run_id,)).fetchall()
         return [dict(row) for row in rows]
+
+    def list_provider_usage(self, run_id: str) -> List[Dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id,run_id,tokens,model,purpose,created_at FROM provider_usage WHERE run_id=? ORDER BY created_at",
+                (run_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_provider_request(
+        self,
+        run_id: str,
+        purpose: str,
+        model: str,
+        payload: Dict[str, Any],
+        status: str = "sent",
+        error_code: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        payload_json = dumps(payload)
+        request = {
+            "id": new_id("provider_req"),
+            "run_id": run_id,
+            "purpose": purpose,
+            "model": model,
+            "payload": _trace_redact(payload),
+            "payload_hash": hashlib.sha256(payload_json.encode("utf-8")).hexdigest(),
+            "policy_version": "provider-redaction/v1",
+            "status": status,
+            "error_code": error_code,
+            "created_at": now_iso(),
+        }
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO provider_requests(id,run_id,purpose,model,payload_json,payload_hash,policy_version,status,error_code,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (request["id"], run_id, purpose, model, dumps(request["payload"]), request["payload_hash"], request["policy_version"], status, error_code, request["created_at"]),
+            )
+        return request
+
+    def list_provider_requests(self, run_id: str) -> List[Dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id,run_id,purpose,model,payload_json,payload_hash,policy_version,status,error_code,created_at FROM provider_requests WHERE run_id=? ORDER BY created_at",
+                (run_id,),
+            ).fetchall()
+        return [
+            {
+                **{key: row[key] for key in ("id", "run_id", "purpose", "model", "payload_hash", "policy_version", "status", "error_code", "created_at")},
+                "payload": loads(row["payload_json"], {}),
+            }
+            for row in rows
+        ]
+
+    def trace_bundle(self, run_id: str) -> Dict[str, Any]:
+        """Return an evaluation-ready, local-only trace projection for a Run."""
+        run = self.get_run(run_id)
+        if not run:
+            raise KeyError(run_id)
+        run_view = {
+            key: run.get(key)
+            for key in (
+                "id",
+                "project_id",
+                "dataset_id",
+                "status",
+                "phase",
+                "mode",
+                "error",
+                "created_at",
+                "updated_at",
+            )
+        }
+        # The full state is useful for future evaluation (node decisions,
+        # screening funnel, reviews), but is recursively redacted first.
+        raw_trace = _trace_redact(
+            {
+                "schema_version": "risk-trace-bundle/v1",
+                "run": run_view,
+                "state": run.get("state") or {},
+                "events": self.list_events(run_id),
+                "decisions": self.list_decisions(run_id),
+                "feedback": self.list_feedback(run_id),
+                "provider_usage": self.list_provider_usage(run_id),
+                "provider_requests": self.list_provider_requests(run_id),
+                "manifest": {
+                    "raw_data_included": False,
+                    "raw_rows_included": False,
+                    "credentials_included": False,
+                    "local_paths_included": False,
+                    "event_chain_verified_by": "event_hash + previous_hash",
+                    "event_chain": self.verify_event_chain(run_id),
+                    "intended_use": "future evaluation harness input; not a production approval record",
+                },
+            }
+        )
+        profile_columns = ((run.get("state") or {}).get("profile") or {}).get("columns_detail") or []
+        aliases = {
+            str(item.get("name")): f"f_{index:04d}"
+            for index, item in enumerate(profile_columns, start=1)
+            if item.get("name")
+        }
+        trace = _trace_alias(raw_trace, aliases)
+        trace["manifest"]["original_column_names_included"] = False
+        trace["manifest"]["field_alias_policy"] = "stable f_#### aliases"
+        return trace
 
     def project_snapshot(self, project_id: str) -> Dict[str, Any]:
         project = self.get_project(project_id)
@@ -448,6 +640,26 @@ class Store:
             }
             for row in rows
         ]
+
+    def verify_event_chain(self, run_id: str) -> Dict[str, Any]:
+        events = self.list_events(run_id)
+        previous_hash = ""
+        for event in events:
+            canonical = dumps(
+                {
+                    "run_id": run_id,
+                    "sequence": event["sequence"],
+                    "event_type": event["event_type"],
+                    "payload": event["payload"],
+                    "created_at": event["created_at"],
+                    "previous_hash": previous_hash,
+                }
+            )
+            expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            if event.get("previous_hash") != previous_hash or event.get("event_hash") != expected:
+                return {"valid": False, "event_count": len(events), "failed_sequence": event.get("sequence")}
+            previous_hash = expected
+        return {"valid": True, "event_count": len(events), "last_hash": previous_hash}
 
     def add_decision(self, run_id: str, kind: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         decision = {"id": new_id("decision"), "run_id": run_id, "kind": kind, "payload": payload, "created_at": now_iso()}

@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 
 from app import agent as agent_module
-from app.agent import ProviderGateway, build_safe_evidence, generate_reproducible_code, propose_plan, repair_generated_code, review_generated_code, review_plan
+from app.agent import ProviderGateway, _safe_plan_payload, build_safe_evidence, generate_reproducible_code, propose_plan, repair_generated_code, review_generated_code, review_plan
 from app.tools import registry_manifest, require_tool
-from app.worker import build_cleaning_plan, evaluate_baseline, profile_table, quality_analysis, read_table, segment_analysis, select_features, split_frame, target_summary, train_candidates
+from app.worker import build_cleaning_plan, estimate_table_resources, evaluate_baseline, parse_data_dictionary, profile_table, quality_analysis, read_table, segment_analysis, select_features, split_frame, target_summary, train_candidates
 
 
 def make_frame(rows: int = 600) -> pd.DataFrame:
@@ -74,6 +74,36 @@ def test_csv_reader_accepts_gb18030(tmp_path: Path) -> None:
     assert frame["渠道"].tolist() == ["网点", "线上"]
 
 
+def test_resource_estimate_is_explicit_and_blocks_before_materialization(tmp_path: Path, monkeypatch) -> None:
+    import app.worker as worker_module
+
+    path = tmp_path / "bounded.csv"
+    path.write_text("bad_flag,income\n0,100\n1,50\n", encoding="utf-8")
+    estimate = estimate_table_resources(path)
+    assert estimate["rows"] == 2
+    assert estimate["columns"] == 2
+    assert estimate["risk"] == "ok"
+    assert estimate["exact"] is False
+
+    monkeypatch.setattr(worker_module, "MAX_ROWS", 1)
+    try:
+        read_table(path)
+    except ValueError as exc:
+        assert "ROW_LIMIT_EXCEEDED" in str(exc)
+    else:
+        raise AssertionError("resource guard must reject an oversized CSV before loading")
+
+
+def test_data_dictionary_maps_local_semantics_without_changing_source_columns() -> None:
+    dictionary = parse_data_dictionary(pd.DataFrame({"字段名": ["income", "bad_flag"], "中文名": ["收入", "是否违约"], "口径": ["申请月收入", "观察窗内坏样本"]}))
+    frame = pd.DataFrame({"income": [100, 200], "bad_flag": [0, 1]})
+    profile = profile_table(frame, dictionary)
+    assert dictionary["field_count"] == 2
+    assert profile["dictionary"]["matched_count"] == 2
+    assert profile["columns_detail"][0]["dictionary"]["display_name"] == "收入"
+    assert list(frame.columns) == ["income", "bad_flag"]
+
+
 def test_feature_selection_reports_funnel_and_blocks_leakage() -> None:
     frame = make_frame()
     selection = select_features(frame, "bad_flag", max_features=3)
@@ -115,6 +145,10 @@ def test_train_candidates_and_segment_analysis(tmp_path) -> None:
     assert result["scorecard"]["route"] == "woe_logistic"
     assert result["scorecard"]["points"]
     assert result["scorecard"]["base_score"] == 600.0
+    assert result["scorecard"]["score_mapping_check"]["passed"] is True
+    assert result["stability"]["schema_version"] == "risk-stability/v1"
+    assert result["champion"]["feature_importance"]
+    assert result["champion"]["validation"]["calibration"]
     assert result["champion"]["oof"]["status"] == "succeeded"
 
     analysis = segment_analysis(
@@ -214,6 +248,18 @@ def test_provider_gateway_sends_only_safe_payload(monkeypatch) -> None:
     assert "test-key" in captured["headers"]["Authorization"]
     assert "f_0001" in captured["json"]["messages"][1]["content"]
     assert "raw_rows" not in captured["json"]["messages"][1]["content"]
+
+
+def test_safe_plan_aliases_excluded_columns_before_provider_boundary() -> None:
+    profile = {"columns_detail": [{"name": "post_loan_overdue_days", "type": "numeric"}]}
+    payload = _safe_plan_payload(
+        {"target": "post_loan_overdue_days", "screening": {"excluded_columns": ["post_loan_overdue_days"]}},
+        profile,
+        {"target": "post_loan_overdue_days", "contract_ok": True},
+    )
+    serialized = json.dumps(payload, ensure_ascii=False)
+    assert "post_loan_overdue_days" not in serialized
+    assert "f_0001" in serialized
 
 
 def test_provider_gateway_budget_guard_fails_closed(monkeypatch) -> None:

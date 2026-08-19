@@ -65,6 +65,8 @@ def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
     assert report_payload["selection"]["funnel"]["fit_scope"] == "train"
     assert "generated_model_v1.py" in report_payload["manifest"]["artifacts"]
     assert report_payload["code_review"]["review_history"]
+    assert report_payload["stability"]["schema_version"] == "risk-stability/v1"
+    assert report_payload["champion"]["validation"]["calibration"]
     run_dir = store.run_dir(project["id"], run["id"])
     checksums = json.loads((run_dir / "checksums.json").read_text(encoding="utf-8"))
     assert checksums["report.json"] == hashlib.sha256((run_dir / "report.json").read_bytes()).hexdigest()
@@ -74,6 +76,25 @@ def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
     archive = client.get(f"/api/runs/{run['id']}/artifacts.zip")
     assert archive.status_code == 200
     assert archive.content[:2] == b"PK"
+    trace = client.get(f"/api/runs/{run['id']}/trace.json")
+    assert trace.status_code == 200
+    trace_payload = trace.json()
+    assert trace_payload["schema_version"] == "risk-trace-bundle/v1"
+    assert trace_payload["manifest"]["raw_rows_included"] is False
+    assert trace_payload["manifest"]["credentials_included"] is False
+    assert trace_payload["manifest"]["original_column_names_included"] is False
+    assert trace_payload["manifest"]["event_chain"]["valid"] is True
+    assert "prior_delinquencies" not in json.dumps(trace_payload, ensure_ascii=False)
+    store.record_provider_request(run["id"], "planning", "demo-model", {"evidence": {"fields": [{"alias": "f_0001"}], "raw_rows_included": False}})
+    requests = client.get(f"/api/runs/{run['id']}/provider-requests")
+    assert requests.status_code == 200
+    assert requests.json()["requests"][0]["payload"]["evidence"]["fields"][0]["alias"] == "f_0001"
+    assert all("path" not in json.dumps(event, ensure_ascii=False).lower() for event in trace_payload["events"])
+    trace_archive = client.get(f"/api/runs/{run['id']}/trace.zip")
+    assert trace_archive.status_code == 200
+    with zipfile.ZipFile(BytesIO(trace_archive.content)) as trace_zip:
+        assert trace_zip.namelist() == ["trace.json", "README.txt"]
+        assert b'"raw_rows": [' not in trace_zip.read("trace.json")
     events = client.get(f"/api/runs/{run['id']}/events").json()["events"]
     assert events[-1]["event_hash"]
     assert events[-1]["payload"]["status"] == "succeeded"
@@ -123,6 +144,7 @@ def test_dictionary_version_and_project_backup_exclude_raw_data_by_default() -> 
     )
     dictionary.raise_for_status()
     assert dictionary.json()["dictionary"]["filename"] == "dictionary.csv"
+    assert dictionary.json()["metadata"]["field_count"] == 1
     backup = client.get(f"/api/projects/{project['id']}/backup.zip")
     backup.raise_for_status()
     with zipfile.ZipFile(BytesIO(backup.content)) as archive:
