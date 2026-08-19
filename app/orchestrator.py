@@ -12,7 +12,7 @@ import pandas as pd
 from langgraph.graph import END, StateGraph
 
 from .agent import ProviderGateway, build_safe_evidence, generate_reproducible_code, propose_plan, review_generated_code, review_plan
-from .config import BASE_DIR, WORKER_TIMEOUT_SECONDS
+from .config import BASE_DIR, WORKER_TIMEOUT_SECONDS, load_config
 from .storage import Store, dumps, sha256_file, store
 from .worker import (
     build_cleaning_plan,
@@ -68,6 +68,15 @@ class RunContext:
     def save(self, state: GraphState, status: Optional[str] = None, phase: Optional[str] = None) -> None:
         clean = {key: value for key, value in state.items() if key not in {"profile_dataframe"}}
         self.store.update_run(self.run_id, status=status, phase=phase, state=clean)
+
+    def gateway(self, purpose: str) -> ProviderGateway:
+        config = load_config()
+        return ProviderGateway(
+            config=config,
+            budget_guard=lambda requested: self.store.provider_budget_error(self.run_id, requested, config),
+            usage_callback=lambda tokens, model: self.store.record_provider_usage(self.run_id, tokens, model, purpose),
+            purpose=purpose,
+        )
 
 
 def _report_html(report: Dict[str, Any]) -> str:
@@ -196,7 +205,7 @@ def _node_profile(context: RunContext, state: GraphState) -> GraphState:
 def _node_plan(context: RunContext, state: GraphState) -> GraphState:
     state["phase"] = "planning"
     context.event("agent_turn_started", "主 Agent 正在基于安全证据生成建模计划", node="planning", actor="main-agent")
-    gateway = ProviderGateway()
+    gateway = context.gateway("planning")
     plan = propose_plan(state["profile"], state["target"], state.get("mode", "auto"), gateway)
     evidence = build_safe_evidence(state["profile"], state["target"])
     review = review_plan(plan, state["profile"], state["target"], gateway=gateway)
@@ -429,8 +438,9 @@ def _node_report(context: RunContext, state: GraphState) -> GraphState:
     report["cleaning"] = state.get("cleaning", report["cleaning"])
     code = generate_reproducible_code(state["plan"], state["selection"]["selected"], state.get("profile"))
     (run_dir / "generated_model.py").write_text(code, encoding="utf-8")
-    code_review = review_generated_code(code, gateway=ProviderGateway(), profile=state.get("profile"))
+    code_review = review_generated_code(code, gateway=context.gateway("code_review"), profile=state.get("profile"))
     report["code_review"] = code_review
+    report["provider_usage"] = context.store.provider_usage_totals(state["run_id"])
     artifact_names = sorted(
         str(path.relative_to(run_dir))
         for path in run_dir.rglob("*")

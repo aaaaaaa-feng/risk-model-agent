@@ -14,10 +14,11 @@
 5. 报告写入与 checksums 的顺序原先可能导致报告自身哈希过期。现在先固定产物清单，再写 JSON/HTML/XLSX，最后生成 checksums。
 6. 多维画像原先可能先构造过大的笛卡尔积再截断。现在先做 Top-K/`<OTHER>`、分箱上限和组合数预估，超限返回 `GROUP_LIMIT_EXCEEDED`。
 7. CSV 导入增加 UTF-8/GB18030 解码回退；XLSX 多 Sheet 必须明确选择，不再静默使用第一张表。
+8. Provider 的单 Run/单月 token 预算不再只是界面字段：调用前检查额度，返回 usage 后写入本地 `provider_usage` 审计表，超限返回 `PROVIDER_BUDGET_EXCEEDED`。
 
 ## 已验证证据
 
-- `16 passed`：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP、报告导出、训练集筛选和高维分析守卫。
+- `17 passed`：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算、报告导出、训练集筛选和高维分析守卫。
 - `ruff check app tests`：通过。
 - `node --check app/static/app.js`：通过。
 - `git diff --check`：通过。

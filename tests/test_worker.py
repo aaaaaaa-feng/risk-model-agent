@@ -206,6 +206,16 @@ def test_provider_gateway_sends_only_safe_payload(monkeypatch) -> None:
     assert "raw_rows" not in captured["json"]["messages"][1]["content"]
 
 
+def test_provider_gateway_budget_guard_fails_closed(monkeypatch) -> None:
+    monkeypatch.setattr(agent_module, "provider_key", lambda: "test-key")
+    gateway = ProviderGateway(
+        config={"llm_enabled": True, "base_url": "https://provider.example/v1", "model": "main-model"},
+        budget_guard=lambda requested: "budget reached",
+    )
+    result = gateway.complete("system", {"schema_version": "risk-safe-evidence/v1"})
+    assert result.error_code == "PROVIDER_BUDGET_EXCEEDED"
+
+
 def test_plan_review_blocks_too_small_target_class() -> None:
     frame = make_frame(40)
     frame["bad_flag"] = 0

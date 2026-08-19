@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import httpx
 
@@ -77,9 +77,19 @@ class ProviderGateway:
     turn on ``llm_enabled`` in the local settings page.
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None, client_factory: Any = None):
+    def __init__(
+        self,
+        config: Optional[Dict[str, Any]] = None,
+        client_factory: Any = None,
+        budget_guard: Optional[Callable[[int], Optional[str]]] = None,
+        usage_callback: Optional[Callable[[int, str], None]] = None,
+        purpose: str = "agent",
+    ):
         self.config = config or load_config()
         self._client_factory = client_factory or httpx.Client
+        self._budget_guard = budget_guard
+        self._usage_callback = usage_callback
+        self._purpose = purpose
 
     @property
     def enabled(self) -> bool:
@@ -132,6 +142,10 @@ class ProviderGateway:
 
         token_budget = int(self.config.get("run_token_budget") or 0)
         selected_max_tokens = max_tokens or (min(token_budget, 4096) if token_budget else 2048)
+        if self._budget_guard:
+            budget_error = self._budget_guard(selected_max_tokens)
+            if budget_error:
+                return ProviderResult(ok=False, error_code="PROVIDER_BUDGET_EXCEEDED", error_message=budget_error)
         body = {
             "model": model or self.config.get("model"),
             "temperature": 0,
@@ -156,11 +170,17 @@ class ProviderGateway:
                 response.raise_for_status()
                 response_payload = response.json()
                 content = _extract_message_content(response_payload)
+                usage = response_payload.get("usage") if isinstance(response_payload, dict) else None
+                if self._usage_callback and isinstance(usage, dict):
+                    try:
+                        self._usage_callback(int(usage.get("total_tokens") or 0), str(body["model"]))
+                    except (TypeError, ValueError):
+                        pass
                 return ProviderResult(
                     ok=True,
                     content=content,
                     model=str(body["model"]),
-                    usage=response_payload.get("usage") if isinstance(response_payload, dict) else None,
+                    usage=usage,
                 )
         except httpx.HTTPStatusError as exc:
             return ProviderResult(ok=False, error_code="PROVIDER_HTTP_ERROR", error_message=f"HTTP {exc.response.status_code}")

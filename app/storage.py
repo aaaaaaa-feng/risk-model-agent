@@ -134,6 +134,14 @@ class Store:
                     reason TEXT,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS provider_usage (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+                    tokens INTEGER NOT NULL,
+                    model TEXT,
+                    purpose TEXT,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
             # Keep existing local databases forward-compatible after the demo label
@@ -375,6 +383,30 @@ class Store:
                 "INSERT INTO feedback(id,run_id,event_id,reaction,reason,created_at) VALUES(?,?,?,?,?,?)",
                 (new_id("feedback"), run_id, event_id, reaction, reason, now_iso()),
             )
+
+    def record_provider_usage(self, run_id: str, tokens: int, model: str = "", purpose: str = "") -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO provider_usage(id,run_id,tokens,model,purpose,created_at) VALUES(?,?,?,?,?,?)",
+                (new_id("usage"), run_id, max(0, int(tokens)), model, purpose, now_iso()),
+            )
+
+    def provider_usage_totals(self, run_id: str) -> Dict[str, int]:
+        month_prefix = now_iso()[:7]
+        with self.connect() as conn:
+            run_row = conn.execute("SELECT COALESCE(SUM(tokens),0) AS total FROM provider_usage WHERE run_id=?", (run_id,)).fetchone()
+            month_row = conn.execute("SELECT COALESCE(SUM(tokens),0) AS total FROM provider_usage WHERE substr(created_at,1,7)=?", (month_prefix,)).fetchone()
+        return {"run_tokens": int(run_row["total"]), "month_tokens": int(month_row["total"])}
+
+    def provider_budget_error(self, run_id: str, requested_tokens: int, config: Dict[str, Any]) -> Optional[str]:
+        totals = self.provider_usage_totals(run_id)
+        run_limit = int(config.get("run_token_budget") or 0)
+        month_limit = int(config.get("monthly_token_budget") or 0)
+        if run_limit and totals["run_tokens"] + requested_tokens > run_limit:
+            return f"单次 Run token 预算已到上限（{run_limit}）"
+        if month_limit and totals["month_tokens"] + requested_tokens > month_limit:
+            return f"本月 token 预算已到上限（{month_limit}）"
+        return None
 
     def run_dir(self, project_id: str, run_id: str) -> Path:
         path = self.project_dir(project_id) / "runs" / run_id
