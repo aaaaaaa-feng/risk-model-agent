@@ -4,9 +4,11 @@ import asyncio
 from copy import deepcopy
 import json
 import os
+import shutil
+import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -16,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .agent import ProviderGateway
-from .config import MAX_UPLOAD_BYTES, ensure_runtime, load_config, new_id, public_config, save_config
+from .config import MAX_BACKUP_BYTES, MAX_UPLOAD_BYTES, ensure_runtime, load_config, new_id, public_config, save_config
 from .orchestrator import resume_after_confirmation, resume_after_pause, start_run
 from .storage import sha256_file, store
 from .tools import registry_manifest, require_tool
@@ -785,6 +787,194 @@ def project_backup(project_id: str, include_data: bool = False) -> FileResponse:
         for item in files:
             handle.write(project_dir / item["path"], item["path"])
     return FileResponse(archive, media_type="application/zip", filename=f"{project_id}-backup.zip")
+
+
+def _safe_archive_path(name: str) -> Path:
+    normalized = str(name or "").replace("\\", "/")
+    path = Path(normalized)
+    if not normalized or normalized.startswith("/") or path.drive or any(part in {"", ".", ".."} for part in path.parts):
+        raise ValueError(f"BACKUP_PATH_INVALID: {name}")
+    return Path(*path.parts)
+
+
+def _remap_ids(value: Any, mapping: Dict[str, str]) -> Any:
+    if isinstance(value, str):
+        return mapping.get(value, value)
+    if isinstance(value, dict):
+        return {str(key): _remap_ids(item, mapping) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_remap_ids(item, mapping) for item in value]
+    return value
+
+
+@app.post("/api/projects/restore")
+async def restore_project(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """Restore a backup created by this app into a new, isolated local project."""
+    filename = Path(file.filename or "backup.zip").name
+    if Path(filename).suffix.lower() != ".zip":
+        raise HTTPException(400, "项目恢复只接受 ZIP 备份包")
+    temp_path: Optional[Path] = None
+    size = 0
+    try:
+        with tempfile.NamedTemporaryFile(prefix="risk-restore-", suffix=".zip", delete=False) as handle:
+            temp_path = Path(handle.name)
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_BACKUP_BYTES:
+                    raise HTTPException(413, "备份包超过本地恢复上限")
+                handle.write(chunk)
+        with zipfile.ZipFile(temp_path) as archive:
+            names = {str(info.filename).replace("\\", "/") for info in archive.infolist() if not info.is_dir()}
+            if "manifest.json" not in names:
+                raise HTTPException(400, "备份包缺少 manifest.json")
+            try:
+                manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise HTTPException(400, "备份包的 manifest.json 无法解析") from exc
+            if manifest.get("schema_version") != "risk-project-backup/v1":
+                raise HTTPException(400, "不支持的项目备份版本")
+            listed_files = manifest.get("files") or []
+            if not isinstance(listed_files, list):
+                raise HTTPException(400, "备份包 files 必须是列表")
+            expected = {str(item.get("path")) for item in listed_files if isinstance(item, dict) and item.get("path")}
+            for name in names - {"manifest.json"}:
+                _safe_archive_path(name)
+            if not (names - {"manifest.json"}).issubset(expected):
+                raise HTTPException(400, "备份包包含未登记的文件")
+            if not expected.issubset(names):
+                missing = sorted(expected - names)[:5]
+                raise HTTPException(400, f"备份包缺少登记文件：{missing}")
+            total_uncompressed = sum(int(info.file_size or 0) for info in archive.infolist())
+            if total_uncompressed > MAX_BACKUP_BYTES * 4:
+                raise HTTPException(413, "备份包解压后超过本地恢复上限")
+            source_project = manifest.get("project") or {}
+            source_project_id = str(source_project.get("id") or "")
+            source_name = str(source_project.get("name") or "恢复项目").strip()[:90] or "恢复项目"
+            project = store.create_project(f"{source_name}（恢复）")
+            project_id = project["id"]
+            try:
+                project_dir = store.project_dir(project_id)
+                for info in archive.infolist():
+                    if info.is_dir() or info.filename == "manifest.json":
+                        continue
+                    relative = _safe_archive_path(info.filename)
+                    destination = (project_dir / relative).resolve()
+                    if project_dir.resolve() not in destination.parents:
+                        raise ValueError("BACKUP_PATH_ESCAPE")
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(info) as source, destination.open("wb") as target:
+                        shutil.copyfileobj(source, target, length=1024 * 1024)
+
+                warnings: List[str] = []
+                dataset_map: Dict[str, str] = {}
+                dictionary_map: Dict[str, str] = {}
+                restored_datasets = 0
+                missing_datasets: List[str] = []
+                for item in manifest.get("datasets") or []:
+                    old_id = str(item.get("id") or "")
+                    relative = Path("datasets") / Path(str(item.get("filename") or "")).name
+                    source_path = project_dir / relative
+                    if not source_path.exists():
+                        missing_datasets.append(str(item.get("filename") or old_id))
+                        continue
+                    restored = store.create_dataset(
+                        project_id,
+                        relative.name,
+                        source_path,
+                        sha256_file(source_path),
+                        source_path.stat().st_size,
+                        item.get("rows"),
+                        item.get("columns"),
+                        item.get("sheet"),
+                        bool(item.get("is_demo")),
+                    )
+                    if item.get("profile"):
+                        store.update_dataset_profile(restored["id"], item["profile"])
+                    dataset_map[old_id] = restored["id"]
+                    restored_datasets += 1
+                for item in manifest.get("dictionaries") or []:
+                    old_id = str(item.get("id") or "")
+                    relative = Path("dictionaries") / Path(str(item.get("filename") or "")).name
+                    source_path = project_dir / relative
+                    if not source_path.exists():
+                        warnings.append(f"数据字典文件缺失：{relative.name}")
+                        continue
+                    restored = store.create_dictionary(
+                        project_id,
+                        relative.name,
+                        source_path,
+                        sha256_file(source_path),
+                        item.get("rows"),
+                        item.get("columns"),
+                        metadata=item.get("metadata") or {},
+                    )
+                    dictionary_map[old_id] = restored["id"]
+
+                run_entries = [item for item in (manifest.get("runs") or []) if isinstance(item, dict)]
+                run_map: Dict[str, str] = {}
+                restorable_runs = [item for item in run_entries if str(item.get("dataset_id") or "") in dataset_map]
+                for item in restorable_runs:
+                    old_run_id = str(item.get("id") or "")
+                    initial_state = _remap_ids(item.get("state") or {}, {source_project_id: project_id, **dataset_map})
+                    restored_run = store.create_run(
+                        project_id,
+                        dataset_map[str(item.get("dataset_id"))],
+                        str(item.get("mode") or "auto"),
+                        initial_state=initial_state,
+                        phase=str(item.get("phase") or "profiling"),
+                    )
+                    run_map[old_run_id] = restored_run["id"]
+                id_map = {source_project_id: project_id, **dataset_map, **dictionary_map, **run_map}
+                for item in restorable_runs:
+                    new_run_id = run_map[str(item.get("id") or "")]
+                    state = _remap_ids(item.get("state") or {}, id_map)
+                    store.update_run(new_run_id, status=str(item.get("status") or "failed"), phase=str(item.get("phase") or "profiling"), state=state, error=item.get("error"))
+                    old_run_dir = project_dir / "runs" / str(item.get("id") or "")
+                    new_run_dir = project_dir / "runs" / new_run_id
+                    if old_run_dir.exists() and old_run_dir != new_run_dir:
+                        new_run_dir.parent.mkdir(parents=True, exist_ok=True)
+                        if new_run_dir.exists():
+                            shutil.rmtree(new_run_dir)
+                        old_run_dir.rename(new_run_dir)
+                    for event in item.get("events") or []:
+                        payload = _remap_ids(event.get("payload") or {}, id_map)
+                        store.append_event(new_run_id, str(event.get("event_type") or "restored_event"), payload)
+                    for decision in item.get("decisions") or []:
+                        store.add_decision(new_run_id, str(decision.get("kind") or "restored_decision"), _remap_ids(decision.get("payload") or {}, id_map))
+                    for feedback in item.get("feedback") or []:
+                        store.add_feedback(new_run_id, str(feedback.get("reaction") or "dislike"), feedback.get("reason"), feedback.get("event_id"))
+                skipped_runs = len(run_entries) - len(restorable_runs)
+                for item in run_entries:
+                    if item not in restorable_runs:
+                        skipped_dir = project_dir / "runs" / str(item.get("id") or "")
+                        if skipped_dir.exists():
+                            shutil.rmtree(skipped_dir)
+                if missing_datasets:
+                    warnings.append("默认备份不含原始数据；缺失数据集未恢复，需重新上传后才能继续 Run。")
+                if skipped_runs:
+                    warnings.append(f"有 {skipped_runs} 个 Run 因数据集缺失未恢复。")
+                store.update_project_status(project_id, str(source_project.get("status") or "draft"))
+                return {
+                    "project": store.get_project(project_id),
+                    "restored_datasets": restored_datasets,
+                    "restored_runs": len(restorable_runs),
+                    "missing_datasets": missing_datasets,
+                    "warnings": warnings,
+                    "raw_data_included": bool(manifest.get("raw_data_included")),
+                }
+            except Exception:
+                store.delete_project(project_id)
+                raise
+    except HTTPException:
+        raise
+    except (OSError, zipfile.BadZipFile, ValueError) as exc:
+        raise HTTPException(400, f"项目恢复失败：{exc}") from exc
+    finally:
+        if temp_path:
+            temp_path.unlink(missing_ok=True)
 
 
 @app.post("/api/projects/{project_id}/analysis")

@@ -158,6 +158,28 @@ def test_dictionary_version_and_project_backup_exclude_raw_data_by_default() -> 
     assert manifest["raw_data_included"] is False
     assert manifest["dictionaries"]
 
+    portable = client.get(f"/api/projects/{project['id']}/backup.zip?include_data=true")
+    portable.raise_for_status()
+    restored = client.post(
+        "/api/projects/restore",
+        files={"file": ("portable-backup.zip", BytesIO(portable.content), "application/zip")},
+    )
+    restored.raise_for_status()
+    restored_payload = restored.json()
+    assert restored_payload["restored_datasets"] >= 1
+    restored_project = client.get(f"/api/projects/{restored_payload['project']['id']}")
+    restored_project.raise_for_status()
+    assert restored_project.json()["datasets"]
+
+    metadata_only = client.get(f"/api/projects/{project['id']}/backup.zip")
+    metadata_only.raise_for_status()
+    restored_without_data = client.post(
+        "/api/projects/restore",
+        files={"file": ("metadata-backup.zip", BytesIO(metadata_only.content), "application/zip")},
+    )
+    restored_without_data.raise_for_status()
+    assert restored_without_data.json()["missing_datasets"]
+
 
 def test_xlsx_multisheet_requires_explicit_sheet() -> None:
     project, _ = create_demo_project("XLSX Sheet 预检")

@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import re
+import shutil
 import numbers
 import sqlite3
 from datetime import datetime, timezone
@@ -246,6 +247,20 @@ class Store:
             )
         self.project_dir(project_id).mkdir(parents=True, exist_ok=True)
         return self.get_project(project_id)
+
+    def delete_project(self, project_id: str) -> None:
+        """Delete one explicitly addressed project and its local files.
+
+        This is used only to roll back a newly-created project when a validated
+        backup import fails; callers must never pass a broad directory target.
+        """
+        project_path = (DATA_DIR / project_id).resolve()
+        if DATA_DIR.resolve() not in project_path.parents:
+            raise ValueError("project path escaped data root")
+        with self.connect() as conn:
+            conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
+        if project_path.exists():
+            shutil.rmtree(project_path)
 
     def project_dir(self, project_id: str) -> Path:
         path = (DATA_DIR / project_id).resolve()
