@@ -16,6 +16,8 @@ MAX_UPLOAD_BYTES = int(os.getenv("RISK_AGENT_MAX_UPLOAD_MB", "50")) * 1024 * 102
 MAX_ROWS = int(os.getenv("RISK_AGENT_MAX_ROWS", "500000"))
 MAX_COLUMNS = int(os.getenv("RISK_AGENT_MAX_COLUMNS", "20000"))
 WORKER_TIMEOUT_SECONDS = int(os.getenv("RISK_AGENT_WORKER_TIMEOUT_SECONDS", "900"))
+KEYRING_SERVICE = "risk-model-agent"
+KEYRING_USERNAME = "provider-api-key"
 
 
 def ensure_runtime() -> None:
@@ -68,18 +70,11 @@ def save_config(payload: Dict[str, Any]) -> Dict[str, Any]:
     current.update({key: value for key, value in payload.items() if key in allowed})
     api_key = str(payload.get("api_key") or "").strip()
     if api_key:
-        secret_path = SECRETS_DIR / "provider_api_key"
-        secret_path.write_text(api_key, encoding="utf-8")
-        try:
-            secret_path.chmod(0o600)
-        except OSError:
-            pass
+        storage = _save_secret(api_key)
         current["api_key_configured"] = True
-        current["secret_storage"] = "local-protected-file"
+        current["secret_storage"] = storage
     elif payload.get("clear_api_key"):
-        secret_path = SECRETS_DIR / "provider_api_key"
-        if secret_path.exists():
-            secret_path.unlink()
+        _clear_secret()
         current["api_key_configured"] = False
         current["secret_storage"] = "not_configured"
     CONFIG_PATH.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -101,11 +96,62 @@ def provider_key() -> str:
     env_key = os.getenv("RISK_AGENT_API_KEY", "").strip()
     if env_key:
         return env_key
+    keyring_key = _read_keyring_secret()
+    if keyring_key:
+        return keyring_key
     secret_path = SECRETS_DIR / "provider_api_key"
     try:
         return secret_path.read_text(encoding="utf-8").strip()
     except OSError:
         return ""
+
+
+def _keyring_module() -> Any:
+    try:
+        import keyring
+
+        return keyring
+    except Exception:
+        return None
+
+
+def _read_keyring_secret() -> str:
+    keyring = _keyring_module()
+    if not keyring:
+        return ""
+    try:
+        return str(keyring.get_password(KEYRING_SERVICE, KEYRING_USERNAME) or "").strip()
+    except Exception:
+        return ""
+
+
+def _save_secret(api_key: str) -> str:
+    keyring = _keyring_module()
+    if keyring:
+        try:
+            keyring.set_password(KEYRING_SERVICE, KEYRING_USERNAME, api_key)
+            return "os-keychain"
+        except Exception:
+            pass
+    secret_path = SECRETS_DIR / "provider_api_key"
+    secret_path.write_text(api_key, encoding="utf-8")
+    try:
+        secret_path.chmod(0o600)
+    except OSError:
+        pass
+    return "local-protected-file"
+
+
+def _clear_secret() -> None:
+    keyring = _keyring_module()
+    if keyring:
+        try:
+            keyring.delete_password(KEYRING_SERVICE, KEYRING_USERNAME)
+        except Exception:
+            pass
+    secret_path = SECRETS_DIR / "provider_api_key"
+    if secret_path.exists():
+        secret_path.unlink()
 
 
 def new_id(prefix: str) -> str:

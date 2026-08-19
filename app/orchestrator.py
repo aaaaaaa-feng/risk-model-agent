@@ -4,6 +4,8 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Optional, TypedDict
@@ -14,6 +16,7 @@ from langgraph.graph import END, StateGraph
 from .agent import ProviderGateway, build_safe_evidence, generate_reproducible_code, propose_plan, repair_generated_code, review_generated_code, review_plan
 from .config import BASE_DIR, WORKER_TIMEOUT_SECONDS, load_config
 from .storage import Store, dumps, sha256_file, store
+from .tools import require_tool
 from .worker import (
     build_cleaning_plan,
     profile_table,
@@ -46,6 +49,14 @@ class GraphState(TypedDict, total=False):
     report: Dict[str, Any]
 
 
+class RunCancelled(Exception):
+    """The user cancelled a run at a safe orchestration boundary."""
+
+
+class RunPaused(Exception):
+    """The user paused a run; persisted state remains resumable."""
+
+
 class RunContext:
     def __init__(self, data_store: Store, state: GraphState):
         self.store = data_store
@@ -56,6 +67,11 @@ class RunContext:
         return self.state["run_id"]
 
     def event(self, event_type: str, message: str, **payload: Any) -> None:
+        self.ensure_active()
+        node = payload.get("node", self.state.get("phase", "run"))
+        tool = payload.get("tool")
+        if tool:
+            require_tool(str(tool), str(node))
         event_payload = {
             "node": payload.pop("node", self.state.get("phase", "run")),
             "status": payload.pop("status", "running"),
@@ -65,7 +81,18 @@ class RunContext:
         }
         self.store.append_event(self.run_id, event_type, event_payload)
 
+    def ensure_active(self) -> None:
+        current = self.store.get_run(self.run_id)
+        status = current.get("status") if current else None
+        if status == "cancelled":
+            raise RunCancelled("RUN_CANCELLED")
+        if status == "paused":
+            raise RunPaused("RUN_PAUSED")
+
     def save(self, state: GraphState, status: Optional[str] = None, phase: Optional[str] = None) -> None:
+        current = self.store.get_run(self.run_id)
+        if current and current.get("status") in {"cancelled", "paused"}:
+            return
         clean = {key: value for key, value in state.items() if key not in {"profile_dataframe"}}
         self.store.update_run(self.run_id, status=status, phase=phase, state=clean)
 
@@ -85,11 +112,20 @@ def _report_html(report: Dict[str, Any]) -> str:
         f"<tr><td>{item.get('name')}</td><td>{item.get('validation', {}).get('roc_auc', '-')}</td><td>{item.get('validation', {}).get('ks', '-')}</td><td>{item.get('status')}</td></tr>"
         for item in metrics
     )
+    baseline = report.get("baseline") or {}
+    baseline_row = ""
+    if baseline:
+        baseline_metrics = baseline.get("validation", {})
+        swap = baseline.get("swap_set", {}).get("groups", {})
+        swap_note = "；".join(f"{key}: {value.get('count', 0)} 条" for key, value in swap.items()) if swap else "未计算 swap set"
+        baseline_row = f"<tr><td>Baseline · {baseline.get('score_column', '-')}</td><td>{baseline_metrics.get('roc_auc', '-')}</td><td>{baseline_metrics.get('ks', '-')}</td><td>既有模型比较（{swap_note}）</td></tr>"
+    experiment_note = "<p><strong>实验 Run：</strong>本结果由 what-if 方案派生，默认未审核，不覆盖正式 Run。</p>" if report.get("manifest", {}).get("run_kind") == "experiment" else ""
     return f"""<!doctype html><html lang='zh-CN'><meta charset='utf-8'><title>风控建模报告</title>
     <style>body{{font-family:system-ui,sans-serif;max-width:1100px;margin:40px auto;color:#18332f}}table{{border-collapse:collapse;width:100%}}td,th{{padding:10px;border-bottom:1px solid #dce9e4;text-align:left}}.hero{{background:#eaf7f0;padding:24px;border-radius:18px}}</style>
-    <div class='hero'><h1>{report.get('title','风控建模报告')}</h1><p>{report.get('narrative','')}</p><p>事实边界：离线实验结果，不代表生产效果。</p></div>
-    <h2>模型比较</h2><table><thead><tr><th>模型</th><th>验证 ROC-AUC</th><th>验证 KS</th><th>状态</th></tr></thead><tbody>{rows}</tbody></table>
+    <div class='hero'><h1>{report.get('title','风控建模报告')}</h1><p>{report.get('narrative','')}</p><p>事实边界：离线实验结果，不代表生产效果。</p>{experiment_note}</div>
+    <h2>模型比较</h2><table><thead><tr><th>模型</th><th>验证 ROC-AUC</th><th>验证 KS</th><th>状态</th></tr></thead><tbody>{rows}{baseline_row}</tbody></table>
     <h2>探索与数据处理</h2><p>重复行：{report.get('quality', {}).get('duplicate_rows', 0)}；数值字段：{len(report.get('quality', {}).get('numeric', []))}；类别字段：{len(report.get('quality', {}).get('categorical', []))}</p><p>{report.get('cleaning', {}).get('note', '仅展示已记录的本地处理规则。')}</p>
+    {f"<h2>既有模型基线</h2><p>分数列：{baseline.get('score_column', '-')}；方向：{baseline.get('orientation', '-')}；验证阈值在验证集冻结，OOT 仅评估。固定通过率：{baseline.get('fixed_approval_rate', '-')}；swap set 已按冠军与基线的验证排序生成聚合比较。</p>" if baseline else ""}
     <h2>运行信息</h2><pre>{json.dumps(report.get('manifest',{}), ensure_ascii=False, indent=2)}</pre></html>"""
 
 
@@ -100,6 +136,7 @@ def _write_report_xlsx(report: Dict[str, Any], path: Path) -> None:
         validation = item.get("validation", {})
         train = item.get("train", {})
         oot = item.get("oot", {})
+        oof = item.get("oof", {})
         metrics.append(
             {
                 "model": item.get("name"),
@@ -109,9 +146,13 @@ def _write_report_xlsx(report: Dict[str, Any], path: Path) -> None:
                 "validation_pr_auc": validation.get("pr_auc"),
                 "validation_ks": validation.get("ks"),
                 "validation_brier": validation.get("brier"),
+                "oof_status": oof.get("status"),
+                "oof_roc_auc": (oof.get("metrics") or {}).get("roc_auc"),
                 "train_roc_auc": train.get("roc_auc"),
                 "oot_roc_auc": oot.get("roc_auc"),
                 "oot_ks": oot.get("ks"),
+                "validation_bad_capture_at_fixed_rate": (item.get("validation_fixed_rate") or {}).get("bad_capture_rate"),
+                "oot_bad_capture_at_fixed_rate": (item.get("oot_fixed_rate") or {}).get("bad_capture_rate"),
                 "error": item.get("error"),
             }
         )
@@ -135,6 +176,28 @@ def _write_report_xlsx(report: Dict[str, Any], path: Path) -> None:
         pd.DataFrame(lift_rows).to_excel(writer, sheet_name="lift", index=False)
         pd.DataFrame(cleaning.get("actions", [])).to_excel(writer, sheet_name="cleaning", index=False)
         pd.DataFrame((report.get("scorecard") or {}).get("points", [])).to_excel(writer, sheet_name="scorecard", index=False)
+        baseline = report.get("baseline") or {}
+        if baseline:
+            pd.DataFrame(
+                [
+                    {
+                        "score_column": baseline.get("score_column"),
+                        "orientation": baseline.get("orientation"),
+                        "validation_roc_auc": (baseline.get("validation") or {}).get("roc_auc"),
+                        "validation_ks": (baseline.get("validation") or {}).get("ks"),
+                        "validation_pr_auc": (baseline.get("validation") or {}).get("pr_auc"),
+                        "train_roc_auc": (baseline.get("train") or {}).get("roc_auc"),
+                        "oot_roc_auc": (baseline.get("oot") or {}).get("roc_auc"),
+                        "oot_ks": (baseline.get("oot") or {}).get("ks"),
+                        "validation_bad_capture_at_fixed_rate": (baseline.get("validation_fixed_rate") or {}).get("bad_capture_rate"),
+                        "oot_bad_capture_at_fixed_rate": (baseline.get("oot_fixed_rate") or {}).get("bad_capture_rate"),
+                        "protocol": baseline.get("protocol"),
+                        "oot_used_for_selection": baseline.get("oot_used_for_selection"),
+                    }
+                ]
+            ).to_excel(writer, sheet_name="baseline", index=False)
+            swap_rows = [{"group": key, **value} for key, value in (baseline.get("swap_set", {}).get("groups", {}) or {}).items()]
+            pd.DataFrame(swap_rows).to_excel(writer, sheet_name="swap_set", index=False)
 
 
 def _write_checksums(run_dir: Path) -> Dict[str, str]:
@@ -161,7 +224,7 @@ def build_graph(context: RunContext, start: str = "profile"):
     graph.set_entry_point(start)
     if start == "profile":
         graph.add_edge("profile", "plan")
-        graph.add_conditional_edges("plan", _after_plan, {"wait": "wait", "blocked": "blocked", "eda": "eda"})
+    graph.add_conditional_edges("plan", _after_plan, {"wait": "wait", "blocked": "blocked", "eda": "eda"})
     graph.add_edge("eda", "cleaning")
     graph.add_conditional_edges("cleaning", _after_cleaning, {"wait": "wait", "screen": "screen"})
     graph.add_edge("screen", "train")
@@ -344,6 +407,8 @@ def _node_train(context: RunContext, state: GraphState) -> GraphState:
         split=split,
         output_dir=output_dir,
         models=state.get("plan", {}).get("models"),
+        baseline_column=state.get("plan", {}).get("baseline_column"),
+        should_stop=lambda: (context.store.get_run(state["run_id"]) or {}).get("status"),
     )
     state["training"] = training
     successful = len([item for item in training["candidates"] if item["status"] == "succeeded"])
@@ -362,6 +427,8 @@ def _run_training_worker(
     split: Dict[str, Any],
     output_dir: Path,
     models: Optional[list[str]] = None,
+    baseline_column: Optional[str] = None,
+    should_stop: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Run model fitting outside the Web process with a scrubbed environment."""
     payload = {
@@ -372,6 +439,7 @@ def _run_training_worker(
         "split": split,
         "output_dir": str(output_dir),
         "models": models,
+        "baseline_column": baseline_column,
     }
     env = {
         "PATH": os.environ.get("PATH", ""),
@@ -386,24 +454,51 @@ def _run_training_worker(
         if key in os.environ:
             env[key] = os.environ[key]
     command = [sys.executable, "-m", "app.worker_runner"]
-    try:
-        completed = subprocess.run(
+    def stop_process() -> None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+    # Use temporary files rather than PIPEs: a high-dimensional selection or
+    # scorecard can exceed the OS pipe buffer, and the parent must remain able
+    # to poll pause/cancel while the Worker is writing its JSON result.
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stdout_file, tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr_file:
+        process = subprocess.Popen(
             command,
             cwd=str(BASE_DIR),
-            input=json.dumps(payload, ensure_ascii=False),
-            text=True,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=stdout_file,
+            stderr=stderr_file,
             env=env,
-            timeout=WORKER_TIMEOUT_SECONDS,
-            check=False,
+            text=True,
         )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"WORKER_TIMEOUT: 超过 {WORKER_TIMEOUT_SECONDS} 秒，训练进程已终止") from exc
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or "worker exited without details").strip()[-1000:]
+        process.stdin.write(json.dumps(payload, ensure_ascii=False))
+        process.stdin.close()
+        started = time.monotonic()
+        while process.poll() is None:
+            status = should_stop() if should_stop else None
+            if status == "cancelled":
+                stop_process()
+                raise RunCancelled("RUN_CANCELLED")
+            if status == "paused":
+                stop_process()
+                raise RunPaused("RUN_PAUSED")
+            if time.monotonic() - started > WORKER_TIMEOUT_SECONDS:
+                stop_process()
+                raise RuntimeError(f"WORKER_TIMEOUT: 超过 {WORKER_TIMEOUT_SECONDS} 秒，训练进程已终止")
+            time.sleep(0.1)
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout = stdout_file.read()
+        stderr = stderr_file.read()
+    if process.returncode != 0:
+        detail = (stderr or stdout or "worker exited without details").strip()[-1000:]
         raise RuntimeError(f"WORKER_FAILED: {detail}")
     try:
-        return json.loads(completed.stdout)
+        return json.loads(stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError("WORKER_INVALID_RESULT: Worker 返回不是合法 JSON") from exc
 
@@ -412,9 +507,12 @@ def _node_report(context: RunContext, state: GraphState) -> GraphState:
     context.event("node_started", "正在生成模型比较与专业报告", node="reporting", tool="render_report")
     training = state["training"]
     champion = training.get("champion") or {}
+    run_kind = state.get("run_kind", "formal")
+    title = "风控建模 Agent · what-if 实验报告" if run_kind == "experiment" else "风控建模 Agent · 离线模型报告"
+    narrative_prefix = "这是从已完成 Run 派生的 what-if 实验，默认未审核；" if run_kind == "experiment" else "本次运行"
     report = {
-        "title": "风控建模 Agent · 离线模型报告",
-        "narrative": f"本次运行完成了本地画像、训练集变量筛选和 {len(training.get('candidates', []))} 个候选模型比较。当前冠军建议为 {champion.get('name', '暂无')}，结论仅适用于本次冻结数据与验证协议。",
+        "title": title,
+        "narrative": f"{narrative_prefix}完成了本地画像、训练集变量筛选和 {len(training.get('candidates', []))} 个候选模型比较。当前冠军建议为 {champion.get('name', '暂无')}，结论仅适用于本次冻结数据与验证协议。",
         "metrics": training.get("candidates", []),
         "champion": champion,
         "selection": state.get("selection", {}),
@@ -432,7 +530,17 @@ def _node_report(context: RunContext, state: GraphState) -> GraphState:
             "note": "V0.1 使用固定训练/验证/OOT 留出协议作候选排序，不将 OOT 结果用于调参；生产上线仍需独立模型审批。",
         },
         "scorecard": training.get("scorecard"),
-        "manifest": {"run_id": state["run_id"], "dataset_id": state["dataset_id"], "protocol": "train_fit → validation_select → oot_once", "raw_data_uploaded": False},
+        "baseline": training.get("baseline"),
+        "manifest": {
+            "run_id": state["run_id"],
+            "dataset_id": state["dataset_id"],
+            "run_kind": run_kind,
+            "parent_run_id": state.get("parent_run_id"),
+            "experimental_unreviewed": run_kind == "experiment",
+            "protocol": "train_only_oof_diagnostic → validation_select → oot_once",
+            "raw_data_uploaded": False,
+            "oof_policy": f"3-fold when train rows <= {10000}; otherwise explicit skip",
+        },
     }
     run_dir = context.store.run_dir(state["project_id"], state["run_id"])
     report["cleaning"] = state.get("cleaning", report["cleaning"])
@@ -442,6 +550,7 @@ def _node_report(context: RunContext, state: GraphState) -> GraphState:
     repair_history = []
     reviewer_gateway = context.gateway("code_review")
     for review_round in range(1, 4):
+        context.ensure_active()
         (run_dir / f"generated_model_v{review_round}.py").write_text(code, encoding="utf-8")
         code_review = review_generated_code(code, gateway=reviewer_gateway, profile=state.get("profile"))
         code_review["review_round"] = review_round
@@ -465,6 +574,7 @@ def _node_report(context: RunContext, state: GraphState) -> GraphState:
     code_review["review_history"] = review_history
     code_review["repair_history"] = repair_history
     code_review["max_review_rounds"] = 3
+    context.ensure_active()
     (run_dir / "generated_model.py").write_text(code, encoding="utf-8")
     report["code_review"] = code_review
     report["provider_usage"] = context.store.provider_usage_totals(state["run_id"])
@@ -495,22 +605,32 @@ def _node_report(context: RunContext, state: GraphState) -> GraphState:
         return state
     context.event("artifact_validated", "报告与代码交付物已保存，生成代码未在产品内执行", node="reporting", tool="render_report", progress=100, status="succeeded", artifacts=report["manifest"].get("artifacts", []) + ["checksums.json"], code_review=code_review)
     context.save(state, status="succeeded", phase="reporting")
-    context.store.update_project_status(state["project_id"], "completed")
+    if run_kind != "experiment":
+        context.store.update_project_status(state["project_id"], "completed")
     return state
 
 
 def run_graph(state: GraphState, start: str = "profile") -> None:
     context = RunContext(store, state)
     try:
+        current = store.get_run(state["run_id"])
+        if current and current.get("status") in {"cancelled", "paused"}:
+            return
         start_phase = {"profile": "profiling", "eda": "eda", "screen": "screening"}.get(start, start)
         store.update_run(state["run_id"], status="running", phase=start_phase, state=state)
         context.event("run_started", "Run 已启动，本地 Worker 和 Agent 状态将持续写入事件流", node=start, status="running")
         graph = build_graph(context, start=start)
         result = graph.invoke(state)
         context.save(result, status=store.get_run(state["run_id"])["status"], phase=store.get_run(state["run_id"])["phase"])
+    except (RunCancelled, RunPaused):
+        # The API already persisted the terminal control state and event. Do
+        # not overwrite it with a synthetic failure.
+        return
     except Exception as exc:
         message = f"{type(exc).__name__}: {exc}"
         current_phase = (store.get_run(state["run_id"]) or {}).get("phase", "unknown")
+        if (store.get_run(state["run_id"]) or {}).get("status") in {"cancelled", "paused"}:
+            return
         store.update_run(state["run_id"], status="failed", phase=current_phase, state=state, error=message)
         context.event("run_failed", "Run 失败，未把半成品当作成功结果", node=current_phase, status="failed", error=message)
 
@@ -518,7 +638,7 @@ def run_graph(state: GraphState, start: str = "profile") -> None:
 EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="risk-agent")
 
 
-def start_run(run: Dict[str, Any]) -> None:
+def start_run(run: Dict[str, Any], initial_state: Optional[GraphState] = None, start: str = "profile") -> None:
     state: GraphState = {
         "run_id": run["id"],
         "project_id": run["project_id"],
@@ -526,7 +646,12 @@ def start_run(run: Dict[str, Any]) -> None:
         "mode": run["mode"],
         "confirmed": False,
     }
-    EXECUTOR.submit(run_graph, state, "profile")
+    if initial_state:
+        state.update(initial_state)
+    # Seeded experiment state may originate from a parent Run; the child
+    # durable identity always wins over any copied metadata.
+    state.update({"run_id": run["id"], "project_id": run["project_id"], "dataset_id": run["dataset_id"], "mode": run["mode"]})
+    EXECUTOR.submit(run_graph, state, start)
 
 
 def resume_after_confirmation(run: Dict[str, Any]) -> None:
@@ -534,3 +659,23 @@ def resume_after_confirmation(run: Dict[str, Any]) -> None:
     state["confirmed"] = True
     state["mode"] = run["mode"]
     EXECUTOR.submit(run_graph, state, "screen")
+
+
+def resume_after_pause(run: Dict[str, Any]) -> None:
+    state = dict(run.get("state") or {})
+    state["mode"] = run["mode"]
+    if not state.get("profile"):
+        start = "profile"
+    elif not state.get("plan"):
+        start = "plan"
+    elif not state.get("quality"):
+        start = "eda"
+    elif not state.get("cleaning"):
+        start = "cleaning"
+    elif not state.get("selection"):
+        start = "screen"
+    elif not state.get("training"):
+        start = "train"
+    else:
+        start = "report"
+    EXECUTOR.submit(run_graph, state, start)

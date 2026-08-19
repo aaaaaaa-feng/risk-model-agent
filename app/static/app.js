@@ -48,7 +48,7 @@ function renderProject() {
   $('#dataset-version').textContent = state.datasets.length ? 'v' + state.datasets.length : '—';
   $('#run-version').textContent = state.run ? state.run.id.slice(-6) : '—';
   renderDataset(); renderRun(); renderStages(); renderAnalysisControls();
-  $('#start-run').disabled = !state.datasets.length || ['queued', 'running', 'awaiting_confirmation'].includes(state.run && state.run.status);
+  $('#start-run').disabled = !state.datasets.length || ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run && state.run.status);
 }
 function renderDataset() {
   const dataset = state.datasets[0]; const card = $('#dataset-card');
@@ -74,9 +74,9 @@ function renderRun() {
   $('#progress-label').textContent = status === 'succeeded' ? '已完成' : status === 'awaiting_confirmation' ? '等待确认' : status === 'failed' ? '需要处理' : status === 'idle' ? '尚未开始' : '运行中';
   renderActionCard();
 }
-function statusText(status) { return ({ idle: '先选择自己的文件，或者用演示数据启动本地流程。', queued: 'Run 已排队，等待本地 Worker。', running: '本地 Worker 正在处理。', awaiting_confirmation: '计划已生成，等待你确认关键业务决定。', succeeded: '报告和模型比较已保存到本机。', failed: '运行失败，旧产物不会被当作新结果。', blocked: '安全或数据契约阻断，训练尚未启动。' })[status] || '等待下一步'; }
-function statusLabel(status) { return ({ idle: '等待', queued: '排队', running: '运行中', awaiting_confirmation: '待确认', succeeded: '已完成', failed: '失败', blocked: '已阻断' })[status] || status; }
-function statusClass(status) { return ({ running: 'running', queued: 'running', awaiting_confirmation: 'warn', failed: 'block', blocked: 'block', succeeded: 'safe' })[status] || 'neutral'; }
+function statusText(status) { return ({ idle: '先选择自己的文件，或者用演示数据启动本地流程。', queued: 'Run 已排队，等待本地 Worker。', running: '本地 Worker 正在处理。', paused: 'Run 已暂停，已保存到最近安全节点。', awaiting_confirmation: '计划已生成，等待你确认关键业务决定。', succeeded: '报告和模型比较已保存到本机。', failed: '运行失败，旧产物不会被当作新结果。', blocked: '安全或数据契约阻断，训练尚未启动。', cancelled: 'Run 已取消，未完成产物不会被当作正式结果。' })[status] || '等待下一步'; }
+function statusLabel(status) { return ({ idle: '等待', queued: '排队', running: '运行中', paused: '已暂停', awaiting_confirmation: '待确认', succeeded: '已完成', failed: '失败', blocked: '已阻断', cancelled: '已取消' })[status] || status; }
+function statusClass(status) { return ({ running: 'running', queued: 'running', awaiting_confirmation: 'warn', paused: 'warn', failed: 'block', blocked: 'block', cancelled: 'block', succeeded: 'safe' })[status] || 'neutral'; }
 function renderStages() {
   const current = state.run && state.run.phase; const phases = [['profiling', '数据画像'], ['planning', 'Y 与计划'], ['eda', '探索分析'], ['cleaning', '数据清洗'], ['screening', '变量筛选'], ['training', '模型训练'], ['reporting', '报告与产物']]; const order = phases.map(function (item) { return item[0]; }); const currentIndex = order.indexOf(current);
   $('#stage-list').innerHTML = phases.map(function (item, index) {
@@ -125,11 +125,15 @@ function renderActionCard() {
     const runState = run.state || {}; const plan = runState.plan || {}; const target = runState.target || {}; const review = runState.plan_review || {}; const cleaning = runState.cleaning || {};
     const split = plan.split || {}; const models = (plan.models || []).map(escapeHtml).join('、') || '待定';
     const targetCandidates = (runState.profile && runState.profile.target_candidates) || [];
+    const profileColumns = (runState.profile && runState.profile.columns_detail) || [];
+    const baselineCandidates = profileColumns.filter(function (item) { return item.type === 'numeric' && item.name !== (plan.target || target.target); });
+    const baselineOptions = ['<option value="">不导入既有模型基线</option>'].concat(baselineCandidates.map(function (item) { return '<option value="' + escapeHtml(item.name) + '" ' + (item.name === plan.baseline_column ? 'selected' : '') + '>' + escapeHtml(item.name) + '</option>'; })).join('');
     const targetOptions = targetCandidates.map(function (candidate) { return '<option value="' + escapeHtml(candidate) + '" ' + (candidate === (plan.target || target.target) ? 'selected' : '') + '>' + escapeHtml(candidate) + '</option>'; }).join('');
     const splitOptions = ['time_holdout', 'stratified_holdout'].map(function (method) { return '<option value="' + method + '" ' + (method === (split.method || 'stratified_holdout') ? 'selected' : '') + '>' + (method === 'time_holdout' ? '时间留出' : '分层留出') + '</option>'; }).join('');
-    const modelOptions = ['logistic_regression', 'random_forest', 'hist_gradient_boosting', 'xgboost'].map(function (model) { return '<label class="model-option"><input type="checkbox" data-confirm-model="' + model + '" ' + ((plan.models || []).includes(model) ? 'checked' : '') + ' />' + model + '</label>'; }).join('');
+    const modelOptions = ['woe_logistic_scorecard', 'logistic_regression', 'random_forest', 'hist_gradient_boosting', 'xgboost'].map(function (model) { return '<label class="model-option"><input type="checkbox" data-confirm-model="' + model + '" ' + ((plan.models || []).includes(model) ? 'checked' : '') + ' />' + model + '</label>'; }).join('');
     const findings = (review.findings || []).map(function (item) { return '<li>' + escapeHtml(item.message || item.code || '需关注') + '</li>'; }).join('');
     const cleaningFindings = (cleaning.requires_confirmation || []).map(function (item) { return '<li>' + escapeHtml(item.message || item.code || '需关注') + '</li>'; }).join('');
+    const cleaningButton = run.phase === 'cleaning' && (cleaning.requires_confirmation || []).length && !cleaning.execution ? '<button class="secondary-button action-button" id="apply-cleaning">批准并生成新数据版本</button>' : '';
     card.innerHTML = '<h3>需要你的确认</h3><p>Reviewer 已完成计划审核。确认的是业务方案，不需要阅读生成代码。</p>' +
       '<div class="decision-summary"><div><span>Y 字段</span><strong>' + escapeHtml(plan.target || target.target || '待确定') + '</strong></div>' +
       '<div><span>正类比例</span><strong>' + (target.positive_rate == null ? '—' : escapeHtml((target.positive_rate * 100).toFixed(2) + '%')) + '</strong></div>' +
@@ -139,12 +143,17 @@ function renderActionCard() {
       (cleaningFindings ? '<div class="review-findings"><span>清洗提示</span><ul>' + cleaningFindings + '</ul></div>' : '') +
       '<div class="decision-controls"><label>确认 Y 字段<select id="confirm-target">' + targetOptions + '</select></label>' +
       '<label>确认样本切分<select id="confirm-split">' + splitOptions + '</select></label>' +
+      '<label>既有模型基线（可选）<select id="confirm-baseline">' + baselineOptions + '</select></label>' +
       '<div><span class="control-label">本次候选模型</span><div class="model-options">' + modelOptions + '</div></div></div>' +
-      '<button class="primary-button action-button" id="confirm-plan">确认并继续</button>';
+      cleaningButton + '<button class="primary-button action-button" id="confirm-plan">确认并继续</button>';
     $('#confirm-plan').addEventListener('click', confirmPlan);
+    if ($('#apply-cleaning')) $('#apply-cleaning').addEventListener('click', applyCleaning);
   }
-  else if (run.status === 'succeeded') { card.innerHTML = '<h3>本次 Run 已完成</h3><p>模型、代码交付物和报告已保存在本机。你可以打开 HTML 报告。</p><a class="secondary-button action-button" href="/api/runs/' + run.id + '/report.html" target="_blank">打开报告</a>'; }
+  else if (run.status === 'succeeded') { card.innerHTML = '<h3>本次 Run 已完成</h3><p>模型、代码交付物和报告已保存在本机。你可以打开 HTML 报告，或从当前方案派生隔离的 what-if 实验。</p><a class="secondary-button action-button" href="/api/runs/' + run.id + '/report.html" target="_blank">打开报告</a><button class="secondary-button action-button" id="what-if-run">派生 what-if 实验</button>'; $('#what-if-run').addEventListener('click', createWhatIf); }
+  else if (run.status === 'paused') { card.innerHTML = '<h3>Run 已暂停</h3><p>已保存最近安全节点，不会把半成品当作成功结果。</p><button class="primary-button action-button" id="resume-run">恢复运行</button><button class="secondary-button action-button" id="cancel-run">取消 Run</button>'; $('#resume-run').addEventListener('click', resumeRun); $('#cancel-run').addEventListener('click', cancelRun); }
+  else if (run.status === 'queued' || run.status === 'running') { card.innerHTML = '<h3>正在运行</h3><p>页面会持续接收节点和工具事件。你可以暂停到最近安全节点，或取消本次 Run。</p><button class="secondary-button action-button" id="pause-run">暂停</button><button class="secondary-button action-button" id="cancel-run">取消 Run</button>'; $('#pause-run').addEventListener('click', pauseRun); $('#cancel-run').addEventListener('click', cancelRun); }
   else if (run.status === 'failed' || run.status === 'blocked') card.innerHTML = '<h3>需要处理</h3><p>' + escapeHtml(run.error || '查看时间线中的结构化问题。') + '</p>';
+  else if (run.status === 'cancelled') card.innerHTML = '<h3>Run 已取消</h3><p>未完成产物已与正式结果隔离。可以修改方案后新建一次 Run。</p>';
   else card.innerHTML = '<h3>正在运行</h3><p>页面会持续接收节点和工具事件。可以离开后回来继续查看。</p>';
 }
 function renderReport(report) {
@@ -165,7 +174,7 @@ function connectStream() {
     if (!state.events.some(function (item) { return item.sequence === event.sequence; })) state.events.push(event);
     renderTimeline(); renderRun(); await syncRun();
   };
-  state.eventSource.onerror = function () { if (state.run && !['succeeded', 'failed', 'blocked'].includes(state.run.status)) setTimeout(connectStream, 1200); };
+  state.eventSource.onerror = function () { if (state.run && !['succeeded', 'failed', 'blocked', 'cancelled', 'paused'].includes(state.run.status)) setTimeout(connectStream, 1200); };
 }
 async function syncRun() {
   if (!state.run) return; const data = await api('/api/runs/' + state.run.id); state.run = data.run; renderRun(); renderStages();
@@ -201,13 +210,38 @@ async function confirmPlan() {
   if (!state.run) return;
   const target = $('#confirm-target') && $('#confirm-target').value;
   const splitMethod = $('#confirm-split') && $('#confirm-split').value;
+  const baselineColumn = $('#confirm-baseline') && $('#confirm-baseline').value;
   const models = Array.from(document.querySelectorAll('[data-confirm-model]:checked')).map(function (input) { return input.dataset.confirmModel; });
   if (!target || !splitMethod || !models.length) { showNotice('请先确认 Y、样本切分，并至少选择一个候选模型。', 'block'); return; }
   try {
-    await api('/api/runs/' + state.run.id + '/decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'plan_confirmation', values: { target: target, split_method: splitMethod, models: models, reviewed_without_code_reading: true } }) });
+    await api('/api/runs/' + state.run.id + '/decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'plan_confirmation', values: { target: target, split_method: splitMethod, models: models, baseline_column: baselineColumn || null, reviewed_without_code_reading: true } }) });
     showNotice('已记录正式确认，继续本地筛选与训练。'); await syncRun(); connectStream();
   } catch (error) { showNotice(error.message, 'block'); }
 }
+async function applyCleaning() {
+  if (!state.run) return;
+  const cleaning = state.run.state && state.run.state.cleaning || {};
+  const actions = (cleaning.requires_confirmation || []).map(function (item) { return { code: item.code, columns: item.columns || [] }; });
+  if (!actions.length || !window.confirm('确认按当前方案执行清洗？系统会保留原数据并创建新的本地数据版本。')) return;
+  try { await api('/api/runs/' + state.run.id + '/clean', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actions: actions }) }); showNotice('清洗已执行并生成新的本地数据版本。'); await syncRun(); } catch (error) { showNotice(error.message, 'block'); }
+}
+async function createWhatIf() {
+  if (!state.project || !state.run) return;
+  const currentPlan = state.run.state && state.run.state.plan || {};
+  const currentScreening = currentPlan.screening || {};
+  const rawIv = window.prompt('what-if：新的最小 IV 阈值（留空表示沿用当前值）', String(currentScreening.min_iv == null ? 0.005 : currentScreening.min_iv));
+  if (rawIv === null) return;
+  const minIv = Number(rawIv);
+  if (!Number.isFinite(minIv) || minIv < 0 || minIv > 10) { showNotice('IV 阈值必须是 0—10 的数值。', 'block'); return; }
+  try {
+    const result = await api('/api/projects/' + state.project.id + '/what-if', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base_run_id: state.run.id, changes: { min_iv: minIv } }) });
+    showNotice('what-if 实验已隔离启动，不会覆盖正式 Run。');
+    state.run = result.run; state.events = []; renderProject(); connectStream();
+  } catch (error) { showNotice(error.message, 'block'); }
+}
+async function pauseRun() { if (!state.run) return; try { await api('/api/runs/' + state.run.id + '/pause', { method: 'POST' }); await syncRun(); if (state.eventSource) state.eventSource.close(); } catch (error) { showNotice(error.message, 'block'); } }
+async function resumeRun() { if (!state.run) return; try { await api('/api/runs/' + state.run.id + '/resume', { method: 'POST' }); await syncRun(); connectStream(); } catch (error) { showNotice(error.message, 'block'); } }
+async function cancelRun() { if (!state.run || !window.confirm('确认取消当前 Run？未完成产物不会作为正式结果。')) return; try { await api('/api/runs/' + state.run.id + '/cancel', { method: 'POST' }); await syncRun(); if (state.eventSource) state.eventSource.close(); } catch (error) { showNotice(error.message, 'block'); } }
 async function loadSettings() {
   const data = await api('/api/config'); state.config = data.config; $('#provider-chip').textContent = data.provider.enabled ? 'LLM 已启用' : data.provider.configured ? 'API 已配置 · 确定性' : '未配置 LLM'; $('#provider-chip').className = 'chip ' + (data.provider.enabled ? 'safe' : 'neutral'); $('#evidence-provider').textContent = data.provider.enabled ? '外部 API · 仅 SafeEvidence' : data.provider.configured ? '已配置 · 当前仍确定性' : '确定性降级';
   const form = $('#settings-form'); Object.entries(data.config || {}).forEach(function (entry) { if (form.elements[entry[0]] && entry[0] !== 'api_key') { if (form.elements[entry[0]].type === 'checkbox') form.elements[entry[0]].checked = Boolean(entry[1]); else form.elements[entry[0]].value = entry[1] == null ? '' : entry[1]; } });

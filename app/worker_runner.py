@@ -46,6 +46,7 @@ def execute(payload: Dict[str, Any]) -> Dict[str, Any]:
         payload["split"],
         Path(payload["output_dir"]),
         payload.get("models"),
+        payload.get("baseline_column"),
     )
 
 

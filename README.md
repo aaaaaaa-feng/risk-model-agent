@@ -39,10 +39,10 @@
 
 ## 当前已实现与边界
 
-- 已实现：本地 FastAPI Web 服务、CSV/XLSX 导入（多 Sheet 需明确选择）、数据画像与本地 EDA、Y 契约检查、半信任确认卡、LangGraph 状态编排、训练集范围内 IV/缺失/ID/泄漏筛选、Logistic/Random Forest/HistGradientBoosting/XGBoost 候选比较、评分卡代理产物、HTML/JSON/XLSX/Python/哈希清单交付物、SSE 进度与 Trace、点赞/点踩、API 配置入口、多维 1—4 维本地分析。
+- 已实现：本地 FastAPI Web 服务、CSV/XLSX 导入（多 Sheet 需明确选择）、数据画像与本地 EDA、Y 契约检查、半信任确认卡、LangGraph 状态编排、训练集范围内 IV/缺失/ID/泄漏筛选、WOE + Logistic 评分卡、Logistic/Random Forest/HistGradientBoosting/XGBoost 候选比较、HTML/JSON/XLSX/Python/哈希清单交付物、SSE 进度与 Trace、点赞/点踩、API 配置入口、多维 1—4 维本地分析。
 - 已实现：Provider Gateway 的 OpenAI-compatible 接口和显式 `llm_enabled` 开关。外部请求只允许别名化 SafeEvidence；计划、代码审核失败会保留结构化原因并阻断；单 Run/单月 token 预算在本地调用前熔断并记录 usage。没有 Provider 时仍走确定性本地流程。
-- 已验证：本地单元、集成和端到端测试；变量筛选的 IV 只从训练分区拟合；生成代码只作为交付物，不在产品内执行；Reviewer 阻断不会被标成成功；JSON、HTML、XLSX 由同一次 Run 产物生成并写入 checksums。
-- 尚未宣称：真实供应商 API 的生产连通性/费用验证、训练集内交叉验证/超参搜索、macOS/Windows 安装包、跨平台安装验收、删除/截断类清洗执行回路、Baseline/what-if、XLSX 大文件低内存实测和独立评测 Harness。Reviewer 现在支持最多三轮“冻结方案 → 受控模板重生成 → 重审”，但不是任意自然语言代码的语义修复器。
+- 已验证：本地单元、集成和端到端测试；变量筛选的 IV、WOE 和 OOF 诊断只从训练分区拟合（OOF 按折重新拟合 WOE）；生成代码只作为交付物，不在产品内执行；Reviewer 阻断不会被标成成功；JSON、HTML、XLSX 由同一次 Run 产物生成并写入 checksums；批准的去重/异常值动作会创建新的本地数据版本；Baseline 会在同一冻结样本上输出固定通过率和 swap set 聚合比较；what-if 会隔离为实验 Run。
+- 尚未宣称：真实供应商 API 的生产连通性/费用验证、超参数搜索、macOS/Windows 安装包的真实构建与跨平台安装验收、OS Keychain/Credential Manager 在目标机器上的真实验收、XLSX 大文件低内存实测、PSI/相关性/树模型解释和独立评测 Harness。可选 `.[secure]` 依赖会优先使用系统凭据存储，失败时回退到 600 权限本地文件。训练分区提供受资源上限约束的 3-fold OOF 诊断，但冠军仍只按冻结验证集选择。Reviewer 现在支持最多三轮“冻结方案 → 受控模板重生成 → 重审”，但不是任意自然语言代码的语义修复器。
 
 ## 本机运行
 

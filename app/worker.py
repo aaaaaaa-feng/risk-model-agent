@@ -18,7 +18,8 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.base import clone
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -32,6 +33,7 @@ except Exception:  # pragma: no cover - optional wheel/platform issue
 
 LEAKAGE_RE = re.compile(r"(?:post|after|repay|collection|writeoff|settle).*(?:overdue|delinq|default|bad)", re.I)
 ID_RE = re.compile(r"(?:^id$|_id$|uuid|phone|mobile|card|identity|身份证|手机号)", re.I)
+OOF_MAX_ROWS = 10000
 
 
 def _parse_datetime(series: pd.Series) -> pd.Series:
@@ -256,6 +258,57 @@ def build_cleaning_plan(frame: pd.DataFrame, profile: Dict[str, Any], quality: D
     }
 
 
+def apply_cleaning_plan(frame: pd.DataFrame, plan: Dict[str, Any], approved_actions: Sequence[Any]) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """Apply only explicitly approved, parameterized cleaning actions.
+
+    The original frame is never mutated. Every non-trivial action is recorded
+    with before/after evidence so a new DatasetVersion can be created by the
+    API without replacing the source file.
+    """
+    requested = list(approved_actions or [])
+    allowed = {item.get("code"): item for item in plan.get("requires_confirmation", []) if item.get("code")}
+    unknown = []
+    normalized: List[Dict[str, Any]] = []
+    for item in requested:
+        code = item.get("code") if isinstance(item, dict) else item
+        if code not in allowed:
+            unknown.append(code)
+            continue
+        normalized.append(item if isinstance(item, dict) else {"code": code})
+    if unknown:
+        raise ValueError(f"CLEANING_ACTION_NOT_APPROVED: {unknown}")
+    result = frame.copy(deep=True)
+    evidence: List[Dict[str, Any]] = []
+    for action in normalized:
+        code = action["code"]
+        if code == "DUPLICATE_ROWS_REVIEW":
+            before = len(result)
+            result = result.drop_duplicates(keep="first").reset_index(drop=True)
+            evidence.append({"code": code, "rows_before": before, "rows_after": len(result), "rows_removed": before - len(result)})
+        elif code == "OUTLIER_REVIEW":
+            columns = action.get("columns") or allowed[code].get("columns") or []
+            lower = float(action.get("lower_quantile", 0.01))
+            upper = float(action.get("upper_quantile", 0.99))
+            if not 0 <= lower < upper <= 1:
+                raise ValueError("CLEANING_QUANTILE_INVALID: 分位点必须满足 0 <= lower < upper <= 1")
+            clipped: List[Dict[str, Any]] = []
+            for column in columns:
+                if column not in result.columns or not pd.api.types.is_numeric_dtype(result[column]):
+                    raise ValueError(f"CLEANING_COLUMN_INVALID: 异常值处理字段必须是数值列：{column}")
+                low, high = result[column].quantile([lower, upper]).tolist()
+                changed = int(((result[column] < low) | (result[column] > high)).sum())
+                result[column] = result[column].clip(lower=low, upper=high)
+                clipped.append({"column": column, "lower": float(low), "upper": float(high), "cells_changed": changed})
+            evidence.append({"code": code, "lower_quantile": lower, "upper_quantile": upper, "columns": clipped})
+    result.attrs["cleaning_audit"] = {
+        **(frame.attrs.get("cleaning_audit") or {}),
+        "approved_actions": evidence,
+        "rows_removed": int(len(frame) - len(result)),
+        "columns_removed": 0,
+    }
+    return result, {"status": "applied", "actions": evidence, "rows_before": len(frame), "rows_after": len(result), "rows_removed": len(frame) - len(result), "columns_before": len(frame.columns), "columns_after": len(result.columns), "rule_version": plan.get("rule_version", "cleaning-rules/v1")}
+
+
 def _profile_warnings(frame: pd.DataFrame, columns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     warnings: List[Dict[str, Any]] = []
     if len(frame) < 200:
@@ -447,15 +500,54 @@ def _metrics(y_true: np.ndarray, probabilities: np.ndarray, threshold: float) ->
     ks_values = np.where(finite_mask, tpr - fpr, -np.inf)
     chosen = float(threshold if threshold is not None else (thresholds[int(np.argmax(ks_values))] if finite_mask.any() else 0.5))
     matrix = confusion_matrix(y_true, (probabilities >= chosen).astype(int), labels=[0, 1]).tolist()
+    brier = None
+    if np.isfinite(probabilities).all() and np.all((probabilities >= 0) & (probabilities <= 1)):
+        brier = round(float(brier_score_loss(y_true, probabilities)), 6)
     return {
         "roc_auc": round(float(roc_auc_score(y_true, probabilities)), 6),
         "pr_auc": round(float(average_precision_score(y_true, probabilities)), 6),
         "ks": round(ks, 6),
         "gini": round(float(2 * roc_auc_score(y_true, probabilities) - 1), 6),
-        "brier": round(float(brier_score_loss(y_true, probabilities)), 6),
+        "brier": brier,
         "threshold": round(chosen, 6),
         "positive_rate": round(float(np.mean(y_true)), 6),
         "confusion_matrix": matrix,
+    }
+
+
+def evaluate_baseline(frame: pd.DataFrame, target: str, score_column: str, split: Dict[str, Any]) -> Dict[str, Any]:
+    """Evaluate an existing probability/score column on the frozen split."""
+    if score_column not in frame.columns:
+        raise ValueError(f"BASELINE_COLUMN_NOT_FOUND: {score_column}")
+    values = pd.to_numeric(frame.iloc[split["positions"]][score_column], errors="coerce").to_numpy(dtype=float)
+    y = frame.iloc[split["positions"]][target].map(_to_binary).astype(int).to_numpy()
+    if not np.isfinite(values).all():
+        raise ValueError("BASELINE_SCORE_INVALID: 基线分数必须全部是可解析数值")
+    train_idx = np.asarray(split["train"], dtype=int)
+    valid_idx = np.asarray(split["valid"], dtype=int)
+    oot_idx = np.asarray(split["oot"], dtype=int)
+    # A baseline may be a score where larger means safer. Choose orientation
+    # once on the validation portion and freeze it before OOT evaluation.
+    direct = _metrics(y[valid_idx], values[valid_idx], None)
+    inverse = _metrics(y[valid_idx], -values[valid_idx], None)
+    orientation = "higher_is_bad" if (direct.get("roc_auc") or -1) >= (inverse.get("roc_auc") or -1) else "higher_is_good"
+    probabilities = values if orientation == "higher_is_bad" else -values
+    threshold = _metrics(y[valid_idx], probabilities[valid_idx], None)["threshold"]
+    approval_rate = 0.8
+    return {
+        "name": "baseline",
+        "score_column": score_column,
+        "orientation": orientation,
+        "validation": _metrics(y[valid_idx], probabilities[valid_idx], threshold),
+        "train": _metrics(y[train_idx], probabilities[train_idx], threshold),
+        "oot": _metrics(y[oot_idx], probabilities[oot_idx], threshold),
+        "validation_lift": _lift_table(y[valid_idx], probabilities[valid_idx]),
+        "oot_lift": _lift_table(y[oot_idx], probabilities[oot_idx]),
+        "validation_fixed_rate": _fixed_rate_metrics(y[valid_idx], probabilities[valid_idx], approval_rate),
+        "oot_fixed_rate": _fixed_rate_metrics(y[oot_idx], probabilities[oot_idx], approval_rate),
+        "fixed_approval_rate": approval_rate,
+        "protocol": "risk-validation/holdout-v1",
+        "oot_used_for_selection": False,
     }
 
 
@@ -487,6 +579,109 @@ def _lift_table(y_true: np.ndarray, probabilities: np.ndarray, bins: int = 10) -
     return rows
 
 
+def _fixed_rate_metrics(y_true: np.ndarray, risk_scores: np.ndarray, approval_rate: float = 0.8) -> Dict[str, Any]:
+    """Aggregate approval/rejection evidence at a frozen approval rate."""
+    if len(y_true) == 0:
+        return {"approval_rate": approval_rate, "approved_count": 0, "rejected_count": 0, "bad_capture_rate": None, "approved_bad_rate": None}
+    count = min(len(y_true), max(0, int(round(len(y_true) * approval_rate))))
+    order = np.argsort(np.asarray(risk_scores, dtype=float))
+    approved = np.zeros(len(y_true), dtype=bool)
+    approved[order[:count]] = True
+    rejected = ~approved
+    bad_total = int(np.sum(y_true))
+    return {
+        "approval_rate": round(float(count / len(y_true)), 6),
+        "approved_count": int(np.sum(approved)),
+        "rejected_count": int(np.sum(rejected)),
+        "approved_bad_rate": round(float(np.mean(y_true[approved])) if approved.any() else 0.0, 6),
+        "rejected_bad_rate": round(float(np.mean(y_true[rejected])) if rejected.any() else 0.0, 6),
+        "bad_capture_rate": round(float(np.sum(y_true[rejected]) / bad_total), 6) if bad_total else None,
+    }
+
+
+def _swap_set(y_true: np.ndarray, baseline_scores: np.ndarray, candidate_scores: np.ndarray, approval_rate: float = 0.8) -> Dict[str, Any]:
+    def approved(scores: np.ndarray) -> np.ndarray:
+        count = min(len(scores), max(0, int(round(len(scores) * approval_rate))))
+        mask = np.zeros(len(scores), dtype=bool)
+        mask[np.argsort(scores)[:count]] = True
+        return mask
+
+    baseline_approved = approved(baseline_scores)
+    candidate_approved = approved(candidate_scores)
+    groups = {
+        "both_approved": baseline_approved & candidate_approved,
+        "both_rejected": ~baseline_approved & ~candidate_approved,
+        "baseline_approved_candidate_rejected": baseline_approved & ~candidate_approved,
+        "baseline_rejected_candidate_approved": ~baseline_approved & candidate_approved,
+    }
+    result: Dict[str, Any] = {"approval_rate": approval_rate, "groups": {}}
+    for name, mask in groups.items():
+        count = int(np.sum(mask))
+        result["groups"][name] = {"count": count, "bad_count": int(np.sum(y_true[mask])) if count else 0, "bad_rate": round(float(np.mean(y_true[mask])), 6) if count else None}
+    return result
+
+
+def _oof_diagnostic(
+    pipeline: Pipeline,
+    X: pd.DataFrame,
+    y: np.ndarray,
+    train_idx: np.ndarray,
+    folds: int = 3,
+) -> Dict[str, Any]:
+    """Fit preprocessing independently inside train-only folds.
+
+    This is diagnostic OOF evidence, never a replacement for the frozen
+    validation set used to choose the champion. Large datasets skip it with an
+    explicit reason so an 8GB machine does not silently overcommit memory.
+    """
+    y_train = y[train_idx]
+    if len(train_idx) > OOF_MAX_ROWS:
+        return {"status": "skipped", "reason": "OOF_ROW_CAP", "max_rows": OOF_MAX_ROWS}
+    if min(int(np.sum(y_train == 0)), int(np.sum(y_train == 1))) < folds:
+        return {"status": "skipped", "reason": "OOF_CLASS_COUNT_TOO_SMALL", "folds": folds}
+    splitter = StratifiedKFold(n_splits=folds, shuffle=True, random_state=42)
+    probabilities = np.full(len(train_idx), np.nan, dtype=float)
+    for fit_rel, eval_rel in splitter.split(train_idx, y_train):
+        fold = clone(pipeline)
+        fold.fit(X.iloc[train_idx[fit_rel]], y_train[fit_rel])
+        probabilities[eval_rel] = fold.predict_proba(X.iloc[train_idx[eval_rel]])[:, 1]
+    metrics = _metrics(y_train, probabilities, None)
+    return {"status": "succeeded", "folds": folds, "coverage": round(float(np.isfinite(probabilities).mean()), 6), "metrics": metrics}
+
+
+def _woe_oof_diagnostic(
+    frame: pd.DataFrame,
+    target: str,
+    features: Sequence[str],
+    y: np.ndarray,
+    train_idx: np.ndarray,
+    folds: int = 3,
+) -> Dict[str, Any]:
+    """OOF diagnostic with WOE bins refit inside every train-only fold."""
+    y_train = y[train_idx]
+    if len(train_idx) > OOF_MAX_ROWS:
+        return {"status": "skipped", "reason": "OOF_ROW_CAP", "max_rows": OOF_MAX_ROWS}
+    if min(int(np.sum(y_train == 0)), int(np.sum(y_train == 1))) < folds:
+        return {"status": "skipped", "reason": "OOF_CLASS_COUNT_TOO_SMALL", "folds": folds}
+    splitter = StratifiedKFold(n_splits=folds, shuffle=True, random_state=42)
+    probabilities = np.full(len(train_idx), np.nan, dtype=float)
+    for fit_rel, eval_rel in splitter.split(train_idx, y_train):
+        fit_idx = train_idx[fit_rel]
+        eval_idx = train_idx[eval_rel]
+        specs = _fit_woe_specs(frame, target, features, fit_idx)
+        transformed = pd.DataFrame(
+            {
+                feature: _woe_labels(frame[feature], spec).map(spec["woe"]).fillna(0.0)
+                for feature, spec in specs.items()
+            }
+        )
+        model = LogisticRegression(max_iter=500, class_weight="balanced", random_state=42)
+        model.fit(transformed.iloc[fit_idx], y[fit_idx])
+        probabilities[eval_rel] = model.predict_proba(transformed.iloc[eval_idx])[:, 1]
+    metrics = _metrics(y_train, probabilities, None)
+    return {"status": "succeeded", "folds": folds, "coverage": round(float(np.isfinite(probabilities).mean()), 6), "metrics": metrics}
+
+
 def train_candidates(
     frame: pd.DataFrame,
     target: str,
@@ -494,6 +689,7 @@ def train_candidates(
     split: Dict[str, Any],
     output_dir: Path,
     model_names: Optional[Sequence[str]] = None,
+    baseline_column: Optional[str] = None,
 ) -> Dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     valid_frame = frame.iloc[split["positions"]].reset_index(drop=True)
@@ -514,21 +710,53 @@ def train_candidates(
             True,
         )
     )
-    requested = list(dict.fromkeys(model_names or [name for name, _, _ in all_models]))
-    allowed = {name for name, _, _ in all_models}
+    requested = list(dict.fromkeys(model_names or [name for name, _, _ in all_models] + ["woe_logistic_scorecard"]))
+    allowed = {name for name, _, _ in all_models} | {"woe_logistic_scorecard"}
     unknown = [name for name in requested if name not in allowed]
     if unknown:
         raise ValueError(f"UNKNOWN_MODEL: 不支持的候选模型 {unknown}")
     models = [(name, estimator, dense) for name, estimator, dense in all_models if name in requested]
+    scorecard_enabled = "woe_logistic_scorecard" in requested
     candidates: List[Dict[str, Any]] = []
-    scorecard: Optional[Dict[str, Any]] = None
+    validation_probabilities: Dict[str, np.ndarray] = {}
+    scorecard = _scorecard_from_woe(valid_frame, target, features, train_idx, valid_idx, oot_idx)
+    if scorecard_enabled and scorecard.get("route") == "woe_logistic":
+        validation_probabilities["woe_logistic_scorecard"] = np.asarray(scorecard.get("_validation_probability", []), dtype=float)
+        candidates.append(
+            {
+                "name": "woe_logistic_scorecard",
+                "status": "succeeded",
+                "features": len(features),
+                "validation_protocol": {
+                    "version": "risk-validation/holdout-v1",
+                    "fit_scope": "train",
+                    "tuning_scope": "none",
+                    "validation_eval_scope": "validation",
+                    "oot_eval_scope": "oot",
+                    "oot_used_for_selection": False,
+                },
+                "validation": scorecard["validation"],
+                "train": scorecard["train"],
+                "oot": scorecard["oot"],
+                "validation_lift": scorecard["validation_lift"],
+                "oot_lift": scorecard["oot_lift"],
+                "validation_fixed_rate": _fixed_rate_metrics(y[valid_idx], validation_probabilities["woe_logistic_scorecard"]),
+                "oot_fixed_rate": _fixed_rate_metrics(y[oot_idx], np.asarray(scorecard.get("_oot_probability", []), dtype=float)),
+                "oof": scorecard.get("oof"),
+                "params": scorecard.get("params", {}),
+            }
+        )
+        scorecard.pop("_validation_probability", None)
+        scorecard.pop("_oot_probability", None)
     for name, estimator, dense in models:
         try:
             if estimator is None:
                 raise RuntimeError("XGBOOST_UNAVAILABLE: 当前 Python 环境未安装可用的 XGBoost")
             pipeline = Pipeline([("preprocess", _preprocessor(X, features, dense=dense)), ("model", estimator)])
+            oof = _oof_diagnostic(pipeline, X, y, train_idx)
             pipeline.fit(X.iloc[train_idx], y[train_idx])
             valid_probability = pipeline.predict_proba(X.iloc[valid_idx])[:, 1]
+            validation_probabilities[name] = valid_probability
             threshold_metrics = _metrics(y[valid_idx], valid_probability, None)
             threshold = threshold_metrics["threshold"] if threshold_metrics["threshold"] is not None else 0.5
             train_probability = pipeline.predict_proba(X.iloc[train_idx])[:, 1]
@@ -550,6 +778,9 @@ def train_candidates(
                 "oot": _metrics(y[oot_idx], oot_probability, threshold),
                 "validation_lift": _lift_table(y[valid_idx], valid_probability),
                 "oot_lift": _lift_table(y[oot_idx], oot_probability),
+                "validation_fixed_rate": _fixed_rate_metrics(y[valid_idx], valid_probability),
+                "oot_fixed_rate": _fixed_rate_metrics(y[oot_idx], oot_probability),
+                "oof": oof,
                 "params": estimator.get_params(deep=False),
             }
             candidates.append(item)
@@ -559,31 +790,143 @@ def train_candidates(
                 joblib.dump(pipeline, output_dir / f"{name}.joblib")
             except Exception:
                 pass
-            if name == "logistic_regression":
-                scorecard = _scorecard_from_pipeline(pipeline, X, features)
         except Exception as exc:  # candidate isolation is intentional
             candidates.append({"name": name, "status": "failed", "error": f"{type(exc).__name__}: {exc}", "features": len(features)})
     succeeded = [item for item in candidates if item["status"] == "succeeded"]
     champion = max(succeeded, key=lambda item: (item["validation"]["roc_auc"] or -1, item["validation"]["ks"] or -1), default=None)
+    baseline = None
+    if baseline_column:
+        baseline = evaluate_baseline(valid_frame, target, baseline_column, split)
+        if champion and champion.get("name") in validation_probabilities:
+            baseline_scores = pd.to_numeric(valid_frame[baseline_column], errors="coerce").to_numpy(dtype=float)
+            if baseline.get("orientation") == "higher_is_good":
+                baseline_scores = -baseline_scores
+            baseline["swap_set"] = _swap_set(y[valid_idx], baseline_scores[valid_idx], validation_probabilities[champion["name"]], baseline.get("fixed_approval_rate", 0.8))
     return {
         "split": {key: value for key, value in split.items() if key != "positions"},
         "models_requested": requested,
         "candidates": candidates,
         "champion": champion,
         "scorecard": scorecard,
+        "baseline": baseline,
     }
 
 
-def _scorecard_from_pipeline(pipeline: Pipeline, frame: pd.DataFrame, features: Sequence[str]) -> Dict[str, Any]:
+def _woe_labels(series: pd.Series, spec: Dict[str, Any]) -> pd.Series:
+    if spec["kind"] == "numeric":
+        labels = pd.cut(series.astype(float), bins=spec["edges"], include_lowest=True, duplicates="drop").astype("string")
+        return labels.fillna("<MISSING>")
+    values = series.fillna("<MISSING>").astype(str)
+    categories = set(spec.get("categories", []))
+    return values.map(lambda value: value if value in categories else "<OTHER>")
+
+
+def _fit_woe_specs(frame: pd.DataFrame, target: str, features: Sequence[str], train_idx: np.ndarray) -> Dict[str, Any]:
+    train = frame.iloc[train_idx]
+    y = train[target].map(_to_binary).astype(int)
+    specs: Dict[str, Any] = {}
+    for feature in features:
+        series = train[feature]
+        if pd.api.types.is_numeric_dtype(series):
+            finite = series.dropna().astype(float)
+            if finite.nunique() > 1:
+                quantiles = np.nanquantile(finite.to_numpy(), np.linspace(0, 1, min(11, finite.nunique() + 1)))
+                edges = np.unique(quantiles).astype(float).tolist()
+                if len(edges) < 2:
+                    edges = [float(finite.min()), float(finite.max())]
+                edges[0] = -np.inf
+                edges[-1] = np.inf
+            else:
+                edges = [-np.inf, np.inf]
+            kind = "numeric"
+            categories: List[str] = []
+        else:
+            values = series.fillna("<MISSING>").astype(str)
+            counts = values.value_counts()
+            categories = [str(item) for item in counts.head(50).index]
+            if "<MISSING>" not in categories and values.eq("<MISSING>").any():
+                categories.append("<MISSING>")
+            edges = []
+            kind = "categorical"
+        spec = {"kind": kind, "edges": edges, "categories": categories}
+        labels = _woe_labels(series, spec)
+        table = pd.DataFrame({"group": labels, "y": y.to_numpy()}).groupby("group", observed=False)["y"].agg(["count", "sum"])
+        good_total = max(float((y == 0).sum()), 1.0)
+        bad_total = max(float((y == 1).sum()), 1.0)
+        mapping: Dict[str, float] = {}
+        rows: List[Dict[str, Any]] = []
+        for row in table.itertuples():
+            good = float(row.count - row.sum)
+            bad = float(row.sum)
+            good_dist = (good + 0.5) / (good_total + 0.5 * len(table))
+            bad_dist = (bad + 0.5) / (bad_total + 0.5 * len(table))
+            woe = float(math.log(good_dist / bad_dist))
+            iv = float((good_dist - bad_dist) * woe)
+            label = str(row.Index)
+            mapping[label] = woe
+            rows.append({"bin": label, "count": int(row.count), "good_count": int(good), "bad_count": int(bad), "bad_rate": round(bad / max(float(row.count), 1.0), 6), "woe": round(woe, 6), "iv": round(iv, 6)})
+        spec["woe"] = mapping
+        spec["iv"] = round(sum(item["iv"] for item in rows), 6)
+        spec["rows"] = rows
+        specs[feature] = spec
+    return specs
+
+
+def _scorecard_from_woe(
+    frame: pd.DataFrame,
+    target: str,
+    features: Sequence[str],
+    train_idx: np.ndarray,
+    valid_idx: np.ndarray,
+    oot_idx: np.ndarray,
+) -> Dict[str, Any]:
     try:
-        preprocessor = pipeline.named_steps["preprocess"]
-        model = pipeline.named_steps["model"]
-        names = list(preprocessor.get_feature_names_out())
-        coefficients = model.coef_[0].tolist()
-        points = [{"feature": name, "coefficient": round(float(coef), 6), "direction": "higher_score" if coef < 0 else "higher_risk"} for name, coef in zip(names, coefficients)]
-        return {"route": "woe_logistic_proxy", "base_score": 600, "pdo": 20, "odds": 50, "points": points[:200], "note": "MVP uses one-hot logistic coefficients; production WOE binning is a follow-up gate."}
+        y = frame[target].map(_to_binary).astype(int).to_numpy()
+        specs = _fit_woe_specs(frame, target, features, train_idx)
+        transformed = pd.DataFrame({feature: _woe_labels(frame[feature], spec).map(spec["woe"]).fillna(0.0) for feature, spec in specs.items()})
+        model = LogisticRegression(max_iter=500, class_weight="balanced", random_state=42)
+        model.fit(transformed.iloc[train_idx], y[train_idx])
+        train_probability = model.predict_proba(transformed.iloc[train_idx])[:, 1]
+        valid_probability = model.predict_proba(transformed.iloc[valid_idx])[:, 1]
+        oot_probability = model.predict_proba(transformed.iloc[oot_idx])[:, 1] if len(oot_idx) else np.array([])
+        threshold = _metrics(y[valid_idx], valid_probability, None)["threshold"]
+        base_score = 600.0
+        pdo = 20.0
+        odds = 50.0
+        factor = pdo / math.log(2)
+        intercept = float(model.intercept_[0])
+        coefficients = {feature: float(coef) for feature, coef in zip(features, model.coef_[0])}
+        base_points = base_score + factor * (-intercept - math.log(odds))
+        points: List[Dict[str, Any]] = []
+        for feature in features:
+            coefficient = coefficients[feature]
+            for row in specs[feature]["rows"]:
+                points.append({"feature": feature, **row, "coefficient": round(coefficient, 6), "points": round(-factor * coefficient * specs[feature]["woe"][row["bin"]], 4)})
+        return {
+            "route": "woe_logistic",
+            "base_score": base_score,
+            "pdo": pdo,
+            "odds": odds,
+            "factor": round(factor, 6),
+            "base_points": round(base_points, 4),
+            "formula": "score = base_points + sum(bin_points); odds_good_to_bad = odds * 2 ** ((score - base_score) / pdo)",
+            "features": list(features),
+            "bins": {feature: {key: value for key, value in spec.items() if key not in {"woe", "rows"}} | {"iv": spec["iv"], "rows": spec["rows"]} for feature, spec in specs.items()},
+            "points": points,
+            "params": {"max_iter": 500, "class_weight": "balanced", "random_state": 42},
+            "validation": _metrics(y[valid_idx], valid_probability, threshold),
+            "train": _metrics(y[train_idx], train_probability, threshold),
+            "oot": _metrics(y[oot_idx], oot_probability, threshold),
+            "validation_lift": _lift_table(y[valid_idx], valid_probability),
+            "oot_lift": _lift_table(y[oot_idx], oot_probability),
+            "_validation_probability": valid_probability,
+            "_oot_probability": oot_probability,
+            "oof": _woe_oof_diagnostic(frame, target, features, y, train_idx),
+            "fit_scope": "train",
+            "note": "WOE 分箱和 Logistic 系数只在训练分区拟合；验证/OOT 仅用于评估。",
+        }
     except Exception as exc:
-        return {"route": "unavailable", "error": str(exc)}
+        return {"route": "unavailable", "error": f"{type(exc).__name__}: {exc}"}
 
 
 def segment_analysis(frame: pd.DataFrame, spec: Dict[str, Any]) -> Dict[str, Any]:

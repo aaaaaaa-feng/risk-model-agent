@@ -142,6 +142,16 @@ class Store:
                     purpose TEXT,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS data_dictionaries (
+                    id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                    filename TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    rows INTEGER,
+                    columns INTEGER,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
             # Keep existing local databases forward-compatible after the demo label
@@ -244,6 +254,66 @@ class Store:
             result.append(item)
         return result
 
+    def create_dictionary(
+        self,
+        project_id: str,
+        filename: str,
+        path: Path,
+        sha256: str,
+        rows: Optional[int],
+        columns: Optional[int],
+    ) -> Dict[str, Any]:
+        dictionary_id = new_id("dict")
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO data_dictionaries(id,project_id,filename,path,sha256,rows,columns,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (dictionary_id, project_id, filename, str(path), sha256, rows, columns, now_iso()),
+            )
+        return self.get_dictionary(dictionary_id) or {}
+
+    def get_dictionary(self, dictionary_id: str) -> Optional[Dict[str, Any]]:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM data_dictionaries WHERE id=?", (dictionary_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_dictionaries(self, project_id: str) -> List[Dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM data_dictionaries WHERE project_id=? ORDER BY created_at DESC", (project_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_decisions(self, run_id: str) -> List[Dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM decisions WHERE run_id=? ORDER BY created_at", (run_id,)).fetchall()
+        return [{**dict(row), "payload": loads(row["payload_json"], {})} for row in rows]
+
+    def list_feedback(self, run_id: str) -> List[Dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM feedback WHERE run_id=? ORDER BY created_at", (run_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def project_snapshot(self, project_id: str) -> Dict[str, Any]:
+        project = self.get_project(project_id)
+        if not project:
+            raise KeyError(project_id)
+        runs = self.list_runs(project_id)
+        return {
+            "schema_version": "risk-project-backup/v1",
+            "project": project,
+            "datasets": [{key: value for key, value in item.items() if key != "path"} for item in self.list_datasets(project_id)],
+            "dictionaries": [{key: value for key, value in item.items() if key != "path"} for item in self.list_dictionaries(project_id)],
+            "runs": [
+                {
+                    **{key: value for key, value in run.items() if key != "state"},
+                    "state": run.get("state", {}),
+                    "events": self.list_events(run["id"]),
+                    "decisions": self.list_decisions(run["id"]),
+                    "feedback": self.list_feedback(run["id"]),
+                }
+                for run in runs
+            ],
+            "raw_data_included": False,
+        }
+
     def update_dataset_profile(self, dataset_id: str, profile: Dict[str, Any]) -> None:
         with self.connect() as conn:
             conn.execute(
@@ -256,7 +326,14 @@ class Store:
                 ),
             )
 
-    def create_run(self, project_id: str, dataset_id: str, mode: str) -> Dict[str, Any]:
+    def create_run(
+        self,
+        project_id: str,
+        dataset_id: str,
+        mode: str,
+        initial_state: Optional[Dict[str, Any]] = None,
+        phase: str = "profiling",
+    ) -> Dict[str, Any]:
         run_id = new_id("run")
         timestamp = now_iso()
         with self.connect() as conn:
@@ -264,7 +341,7 @@ class Store:
                 """INSERT INTO runs
                 (id,project_id,dataset_id,status,phase,mode,state_json,created_at,updated_at)
                 VALUES(?,?,?,?,?,?,?,?,?)""",
-                (run_id, project_id, dataset_id, "queued", "profiling", mode, "{}", timestamp, timestamp),
+                (run_id, project_id, dataset_id, "queued", phase, mode, dumps(initial_state or {}), timestamp, timestamp),
             )
         self.update_project_status(project_id, "active")
         return self.get_run(run_id)
@@ -313,6 +390,10 @@ class Store:
                     run_id,
                 ),
             )
+
+    def update_run_dataset(self, run_id: str, dataset_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute("UPDATE runs SET dataset_id=?,updated_at=? WHERE id=?", (dataset_id, now_iso(), run_id))
 
     def append_event(self, run_id: str, event_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         with self.connect() as conn:

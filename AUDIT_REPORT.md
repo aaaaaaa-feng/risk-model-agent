@@ -10,15 +10,16 @@
 1. 变量筛选原先可能在整表上计算 IV。现在筛选先冻结切分，再通过 `fit_positions` 只使用训练行，并在结果中写入 `fit_scope=train` 与 `fit_rows`。
 2. 半信任流程原先在清洗确认后可能把界面阶段回写成 `planning`。现在清洗确认保持 `cleaning` 阶段，确认后从冻结状态进入 `screening`。
 3. 确认卡原先只记录确认动作。现在 Y、切分方式和候选模型会校验、写入版本化方案，并实际影响筛选/训练；不支持的模型或不合规 Y 会拒绝。
-4. 报告协议原先写成未实现的 `train_cv`。现在明确为 `train_fit → validation_select → oot_once`，指标协议版本为 `risk-validation/holdout-v1`。
+4. 报告协议原先写成未实现的 `train_cv`。现在明确为 `train_only_oof_diagnostic → validation_select → oot_once`，OOF 按训练折重新拟合预处理/WOE，冠军仍只由冻结验证集选择，指标协议版本为 `risk-validation/holdout-v1`。
 5. 报告写入与 checksums 的顺序原先可能导致报告自身哈希过期。现在先固定产物清单，再写 JSON/HTML/XLSX，最后生成 checksums。
 6. 多维画像原先可能先构造过大的笛卡尔积再截断。现在先做 Top-K/`<OTHER>`、分箱上限和组合数预估，超限返回 `GROUP_LIMIT_EXCEEDED`。
 7. CSV 导入增加 UTF-8/GB18030 解码回退；XLSX 多 Sheet 必须明确选择，不再静默使用第一张表。
 8. Provider 的单 Run/单月 token 预算不再只是界面字段：调用前检查额度，返回 usage 后写入本地 `provider_usage` 审计表，超限返回 `PROVIDER_BUDGET_EXCEEDED`。
+9. Baseline、what-if 和清洗执行已进入本地 API/报告链路：Baseline 在同一冻结样本上输出固定通过率和 swap set 聚合比较；what-if 从已完成 Run fork 独立实验 Run；批准的去重/IQR 动作创建不可变新 DatasetVersion。
 
 ## 已验证证据
 
-- `17 passed`：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算、报告导出、训练集筛选和高维分析守卫。
+- `24 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算、报告导出、训练集筛选、高维分析守卫、Tool Registry、清洗版本、Baseline 和 what-if 隔离。
 - `ruff check app tests`：通过。
 - `node --check app/static/app.js`：通过。
 - `git diff --check`：通过。
@@ -31,12 +32,12 @@
 
 ## 仍明确未完成、不能宣称的事项
 
-- 尚未用真实供应商 API 做连通性、限流、费用和服务条款验收；`llm_enabled` 是显式开关。
+- 尚未用真实供应商 API 做连通性、限流、费用和服务条款验收；`llm_enabled` 是显式开关。可选 `.[secure]` 依赖会优先使用 macOS Keychain/Windows Credential Manager 等系统后端，当前环境未做目标系统验收，失败时回退到 600 权限本地文件。
 - Reviewer 已实现最多三轮“冻结方案 → 受控模板重生成 → 重审”，并保留 `generated_model_v1/v2/v3.py`；它不是任意自然语言代码的语义修复器，三轮仍未通过就阻断。
-- 当前是固定训练/验证/OOT 留出协议，不是训练集内交叉验证或超参数搜索。
-- 清洗目前自动执行的只有安全标准化；去重、异常截断、稀有类别合并、删除样本仍只生成方案并等待策略实现。
-- 评分卡是 one-hot Logistic 代理产物，不是生产级 WOE 分箱评分卡；Baseline/what-if、PSI、相关性和数据字典仍属后续版本。
-- 尚未生成或验收 macOS/Windows 安装包，也没有把普通 Web 启动方式冒充“拿来即用”的桌面发行版。
+- 当前不做超参数搜索；训练分区在 10,000 行以内提供 3-fold OOF 诊断，冠军仍按冻结验证集选择，超过资源上限会显式跳过。
+- 清洗目前自动执行的只有安全标准化；去重和 IQR 分位截断可在确认节点显式批准并产生新数据版本，稀有类别合并和样本删除仍未实现。
+- 评分卡已是 WOE + Logistic 路线，包含训练集分箱、WOE/IV、PDO/Base Score/Odds、分箱分值和训练/验证/OOT 指标；单调性、校准、PSI 和模型包加载安全仍属后续版本。
+- 已提供 PyInstaller spec、macOS/Windows 启动和构建脚本，但尚未在两个目标系统真实构建、签名、安装、升级/卸载验收，也没有把普通 Web 启动方式冒充“拿来即用”的桌面发行版。
 - 独立评测 Harness 按约定后置；当前仅保留 Trace 和普通软件回归测试。
 
 ## GitHub 尝试结果

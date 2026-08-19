@@ -8,7 +8,8 @@ import pandas as pd
 
 from app import agent as agent_module
 from app.agent import ProviderGateway, build_safe_evidence, generate_reproducible_code, propose_plan, repair_generated_code, review_generated_code, review_plan
-from app.worker import build_cleaning_plan, profile_table, quality_analysis, read_table, segment_analysis, select_features, split_frame, target_summary, train_candidates
+from app.tools import registry_manifest, require_tool
+from app.worker import build_cleaning_plan, evaluate_baseline, profile_table, quality_analysis, read_table, segment_analysis, select_features, split_frame, target_summary, train_candidates
 
 
 def make_frame(rows: int = 600) -> pd.DataFrame:
@@ -111,7 +112,10 @@ def test_train_candidates_and_segment_analysis(tmp_path) -> None:
     assert result["champion"] is not None
     assert result["champion"]["validation"]["roc_auc"] is not None
     assert result["champion"]["validation_lift"]
-    assert result["scorecard"]["route"] == "woe_logistic_proxy"
+    assert result["scorecard"]["route"] == "woe_logistic"
+    assert result["scorecard"]["points"]
+    assert result["scorecard"]["base_score"] == 600.0
+    assert result["champion"]["oof"]["status"] == "succeeded"
 
     analysis = segment_analysis(
         frame,
@@ -148,6 +152,9 @@ def test_generated_code_review_blocks_network_and_allows_reference_code() -> Non
     code = generate_reproducible_code({"target": "bad_flag"}, ["income", "channel"], profile)
     compile(code, "generated_model.py", "exec")
     assert "OneHotEncoder" in code
+    scorecard_code = generate_reproducible_code({"target": "bad_flag", "models": ["woe_logistic_scorecard"]}, ["income", "channel"], profile)
+    compile(scorecard_code, "generated_scorecard.py", "exec")
+    assert "BASE_SCORE = 600.0" in scorecard_code and "_fit_specs" in scorecard_code
     repaired, metadata = repair_generated_code("import requests", {"target": "bad_flag"}, ["income"], [{"code": "DANGEROUS_NETWORK"}], profile)
     assert "requests" not in repaired
     assert metadata["generated_code_executed"] is False
@@ -229,3 +236,30 @@ def test_plan_review_blocks_too_small_target_class() -> None:
     review = review_plan(plan, profile, summary)
     assert review["verdict"] == "block"
     assert any(item["code"] == "TARGET_CLASS_TOO_SMALL" for item in review["findings"])
+
+
+def test_tool_registry_is_allowlisted_and_node_scoped() -> None:
+    assert any(item["name"] == "train_candidate" for item in registry_manifest())
+    assert require_tool("train_candidate", "training").execution_class == "sandboxed_process"
+    try:
+        require_tool("unknown_tool", "training")
+    except ValueError as exc:
+        assert "TOOL_NOT_REGISTERED" in str(exc)
+    else:
+        raise AssertionError("unregistered tools must be rejected")
+
+
+def test_baseline_uses_validation_orientation_and_freezes_oot_threshold() -> None:
+    frame = pd.DataFrame(
+        {
+            "bad_flag": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+            "existing_score": [900, 100, 850, 120, 800, 150, 780, 180, 760, 200, 740, 220],
+        }
+    )
+    split = {"positions": list(range(len(frame))), "train": [0, 1, 2, 3, 4, 5], "valid": [6, 7, 8, 9], "oot": [10, 11]}
+    result = evaluate_baseline(frame, "bad_flag", "existing_score", split)
+    assert result["orientation"] == "higher_is_good"
+    assert result["validation"]["roc_auc"] == 1.0
+    assert result["oot"]["threshold"] == result["validation"]["threshold"]
+    assert result["oot_used_for_selection"] is False
+    assert result["validation_fixed_rate"]["approval_rate"] == 0.75

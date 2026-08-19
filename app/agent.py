@@ -284,7 +284,8 @@ def propose_plan(profile: Dict[str, Any], target: Dict[str, Any], mode: str, gat
         "target_meaning": "待用户确认：1 代表坏样本还是好样本",
         "time_column_suggestion": time_candidates[0] if time_candidates else None,
         "split": {"method": "time_holdout" if time_candidates else "stratified_holdout", "train": 0.6, "validation": 0.2, "oot": 0.2},
-        "models": ["logistic_regression", "random_forest", "hist_gradient_boosting", "xgboost"],
+        "baseline_column": None,
+        "models": ["woe_logistic_scorecard", "logistic_regression", "random_forest", "hist_gradient_boosting", "xgboost"],
         "screening": {"max_features": 50, "missing_rate_max": 0.95, "min_iv": 0.005, "train_only": True},
         "mode": mode,
         "provider": gateway.status(),
@@ -452,6 +453,67 @@ def generate_reproducible_code(plan: Dict[str, Any], selected: List[str], profil
     columns = ", ".join(repr(column) for column in selected)
     numeric_columns = ", ".join(repr(column) for column in numeric)
     categorical_columns = ", ".join(repr(column) for column in categorical)
+    if "woe_logistic_scorecard" in (plan.get("models") or []):
+        return f'''"""Generated WOE + Logistic scorecard reference artifact; not executed in V1."""
+import math
+from typing import Dict, Tuple
+
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+
+TARGET = {plan.get("target")!r}
+FEATURES = [{columns}]
+NUMERIC_FEATURES = [{numeric_columns}]
+CATEGORICAL_FEATURES = [{categorical_columns}]
+BASE_SCORE = 600.0
+PDO = 20.0
+ODDS = 50.0
+
+def _labels(series: pd.Series, spec: Dict[str, object]) -> pd.Series:
+    if spec["kind"] == "numeric":
+        return pd.cut(series.astype(float), bins=spec["edges"], include_lowest=True, duplicates="drop").astype("string").fillna("<MISSING>")
+    values = series.fillna("<MISSING>").astype(str)
+    categories = set(spec.get("categories", []))
+    return values.map(lambda value: value if value in categories else "<OTHER>")
+
+def _fit_specs(train: pd.DataFrame, y: pd.Series) -> Dict[str, Dict[str, object]]:
+    specs = {{}}
+    good_total = max(float((y == 0).sum()), 1.0)
+    bad_total = max(float((y == 1).sum()), 1.0)
+    for feature in FEATURES:
+        series = train[feature]
+        if feature in NUMERIC_FEATURES:
+            finite = series.dropna().astype(float)
+            edges = np.unique(np.nanquantile(finite, np.linspace(0, 1, min(11, finite.nunique() + 1)))).tolist() if finite.nunique() > 1 else [-np.inf, np.inf]
+            if len(edges) < 2: edges = [-np.inf, np.inf]
+            edges[0], edges[-1] = -np.inf, np.inf
+            spec = {{"kind": "numeric", "edges": edges, "categories": []}}
+        else:
+            values = series.fillna("<MISSING>").astype(str)
+            spec = {{"kind": "categorical", "edges": [], "categories": values.value_counts().head(50).index.tolist()}}
+        groups = _labels(series, spec)
+        table = pd.DataFrame({{"group": groups, "y": y.to_numpy()}}).groupby("group", observed=False)["y"].agg(["count", "sum"])
+        mapping = {{}}
+        for row in table.itertuples():
+            good = float(row.count - row.sum); bad = float(row.sum)
+            good_dist = (good + 0.5) / (good_total + 0.5 * len(table))
+            bad_dist = (bad + 0.5) / (bad_total + 0.5 * len(table))
+            mapping[str(row.Index)] = math.log(good_dist / bad_dist)
+        spec["woe"] = mapping
+        specs[feature] = spec
+    return specs
+
+def fit_reference(frame: pd.DataFrame, train_indices) -> Tuple[LogisticRegression, Dict[str, object]]:
+    train = frame.iloc[list(train_indices)]
+    y = train[TARGET].astype(int)
+    specs = _fit_specs(train, y)
+    transformed = pd.DataFrame({{feature: _labels(frame[feature], spec).map(spec["woe"]).fillna(0.0) for feature, spec in specs.items()}})
+    model = LogisticRegression(max_iter=500, class_weight="balanced", random_state=42).fit(transformed.iloc[list(train_indices)], y)
+    factor = PDO / math.log(2)
+    scorecard = {{"base_score": BASE_SCORE, "pdo": PDO, "odds": ODDS, "factor": factor, "specs": specs, "coefficients": dict(zip(FEATURES, model.coef_[0]))}}
+    return model, scorecard
+'''
     return f'''"""Generated reproducibility artifact; not executed by the product in V1."""
 import pandas as pd
 from sklearn.compose import ColumnTransformer

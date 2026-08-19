@@ -22,6 +22,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
+package = ["pyinstaller>=6.0"]
+secure = ["keyring>=25.0"]
 
 [project.scripts]
 risk-model-agent = "app.main:run"
