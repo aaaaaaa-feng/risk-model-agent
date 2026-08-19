@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="本地优先的风控建模 Agent 工作台" />
+  <title>风控建模 Agent</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">RM</div>
+        <div>
+          <strong>Risk Model</strong>
+          <span>本地建模工作台</span>
+        </div>
+      </div>
+      <div class="sidebar-label">项目</div>
+      <div id="project-list" class="project-list"></div>
+      <button id="new-project" class="ghost-button full-width">＋ 新建项目</button>
+      <div class="sidebar-spacer"></div>
+      <div class="privacy-card">
+        <span class="privacy-dot"></span>
+        <div><strong>本地优先</strong><small>原始数据不会上传云端</small></div>
+      </div>
+      <button id="open-settings" class="settings-link">⚙ 本机设置</button>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">风控建模 Agent · V0.1</div>
+          <h1 id="project-title">选择一个项目开始</h1>
+        </div>
+        <div class="top-actions">
+          <span id="provider-chip" class="chip neutral">未配置 LLM</span>
+          <button id="mode-toggle" class="mode-toggle" title="自动运行仍保留安全硬门禁">自动运行模式</button>
+          <button id="start-run" class="primary-button" disabled>开始分析</button>
+        </div>
+      </header>
+
+      <section id="empty-state" class="empty-state">
+        <div class="empty-illustration"><span>✦</span><span>◎</span><span>◌</span></div>
+        <h2>把一次建模，变成一条可追溯的工作流</h2>
+        <p>上传 CSV/XLSX，或用合成演示数据体验：数据体检 → Y 契约 → 变量筛选 → 多模型比较 → 专业报告。</p>
+        <div class="empty-actions">
+          <button id="empty-new-project" class="primary-button">创建第一个项目</button>
+          <button id="empty-demo" class="secondary-button">直接体验演示数据</button>
+        </div>
+        <small class="quiet-note">演示数据为合成样本，只证明流程可以运行，不代表真实业务效果。</small>
+      </section>
+
+      <section id="workspace" class="workspace hidden">
+        <nav class="stage-rail">
+          <div class="rail-heading">建模流程</div>
+          <div id="stage-list"></div>
+          <div class="rail-bottom">
+            <div class="mini-stat"><span>数据版本</span><strong id="dataset-version">—</strong></div>
+            <div class="mini-stat"><span>当前 Run</span><strong id="run-version">—</strong></div>
+          </div>
+        </nav>
+
+        <section class="content-column">
+          <div id="notice" class="notice hidden"></div>
+          <div class="hero-card">
+            <div>
+              <span class="section-kicker">当前节点</span>
+              <h2 id="current-node">等待导入数据</h2>
+              <p id="current-message">先选择自己的文件，或者用演示数据启动本地流程。</p>
+            </div>
+            <div class="hero-progress">
+              <div class="progress-ring"><span id="progress-value">0%</span></div>
+              <span id="progress-label">尚未开始</span>
+            </div>
+          </div>
+
+          <div class="panel-grid">
+            <section class="panel data-panel">
+              <div class="panel-heading"><div><span class="section-kicker">数据准备</span><h3>数据集</h3></div><span id="dataset-badge" class="chip neutral">未导入</span></div>
+              <div id="dataset-card" class="dataset-card empty-panel">
+                <div class="drop-icon">↑</div>
+                <strong>拖入 CSV / XLSX</strong>
+                <span>文件只写入本机项目目录</span>
+                <button id="choose-file" class="secondary-button small">选择文件</button>
+                <input id="file-input" type="file" accept=".csv,.xlsx" hidden />
+              </div>
+            </section>
+
+            <section class="panel evidence-panel">
+              <div class="panel-heading"><div><span class="section-kicker">安全证据</span><h3>Agent 看到的内容</h3></div><span class="chip safe">已脱敏</span></div>
+              <div id="evidence-card" class="evidence-card">
+                <div class="evidence-row"><span>原始行</span><strong>未包含</strong></div>
+                <div class="evidence-row"><span>客户级记录</span><strong>未包含</strong></div>
+                <div class="evidence-row"><span>字段名</span><strong>本地别名</strong></div>
+                <div class="evidence-row"><span>LLM 状态</span><strong id="evidence-provider">确定性降级</strong></div>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel timeline-panel">
+            <div class="panel-heading"><div><span class="section-kicker">可观察过程</span><h3>Agent 时间线</h3></div><span id="timeline-count" class="muted">0 条事件</span></div>
+            <div id="timeline" class="timeline empty-timeline"><div class="timeline-placeholder">运行开始后，这里会显示节点、工具、审核和产物事件。</div></div>
+          </section>
+
+          <section id="report-panel" class="panel report-panel hidden">
+            <div class="panel-heading"><div><span class="section-kicker">已验证产物</span><h3>模型比较</h3></div><a id="report-link" class="text-link" target="_blank">打开 HTML 报告</a></div>
+            <div id="metric-grid" class="metric-grid"></div>
+            <div id="report-narrative" class="report-narrative"></div>
+            <div id="report-details" class="report-details"></div>
+          </section>
+        </section>
+
+        <aside class="inspector">
+          <div class="inspector-heading"><span class="section-kicker">行动面板</span><span id="inspector-status" class="chip neutral">等待</span></div>
+          <div id="action-card" class="action-card">
+            <h3>从数据开始</h3>
+            <p>导入数据后，系统会先做本地画像，再提出需要确认的业务问题。</p>
+          </div>
+          <div class="inspector-block">
+            <div class="inspector-title">本次运行</div>
+            <div class="detail-list">
+              <div><span>模式</span><strong id="run-mode">自动运行</strong></div>
+              <div><span>数据安全</span><strong class="green-text">本地处理</strong></div>
+              <div><span>Reviewer</span><strong>结构化审核</strong></div>
+              <div><span>修复上限</span><strong>3 轮</strong></div>
+            </div>
+          </div>
+          <div class="inspector-block">
+            <div class="inspector-title">反馈</div>
+            <div class="feedback-row"><button class="feedback-button" data-reaction="like">👍 有帮助</button><button class="feedback-button" data-reaction="dislike">👎 需改进</button></div>
+            <small class="muted">点赞不会代替正式确认。</small>
+          </div>
+        </aside>
+      </section>
+    </main>
+  </div>
+
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <section class="modal-card">
+      <div class="modal-header"><div><span class="section-kicker">本机设置</span><h2>Provider 配置</h2></div><button id="close-settings" class="icon-button">×</button></div>
+      <p class="modal-intro">API Key 只提交到本地服务，界面不会回显完整 Key。未配置时，流程继续使用确定性本地 Agent。</p>
+      <form id="settings-form" class="settings-form">
+        <label>供应商<input name="provider" placeholder="OpenAI-compatible" /></label>
+        <div class="form-two"><label>Base URL<input name="base_url" placeholder="https://api.example.com/v1" /></label><label>主模型<input name="model" placeholder="model-name" /></label></div>
+        <div class="form-two"><label>Reviewer 模型<input name="reviewer_model" placeholder="reviewer-model" /></label><label>HTTP 代理<input name="proxy" placeholder="可选" /></label></div>
+        <label>API Key<input name="api_key" type="password" placeholder="留空表示不修改" autocomplete="off" /></label>
+        <div class="form-two"><label>单次 Token 预算<input name="run_token_budget" type="number" min="0" placeholder="0 = 不启用" /></label><label>单月 Token 预算<input name="monthly_token_budget" type="number" min="0" placeholder="0 = 不启用" /></label></div>
+        <div id="settings-status" class="form-status"></div>
+        <div class="modal-actions"><button type="button" id="cancel-settings" class="secondary-button">取消</button><button type="submit" class="primary-button">保存到本机</button></div>
+      </form>
+    </section>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # 风控建模 Agent
 
-当前仓库处于“产品定义完成、等待研发实现”的阶段。
+当前仓库包含可在本机启动的 V0.1 风控建模 Agent 工作台，以及 1—12 份产品与研发基线文档。
 
 2026-08-20 已清除上一版原型的源码、运行数据库和旧产品文档，并依据最新讨论重新生成 1—10 项 AI 产品经理产出。上一版受 Git 跟踪的内容仍可从提交 `63349c0` 恢复，但不再作为当前方案依据。
 
@@ -37,6 +37,26 @@
 
 产品、设计和研发共同先阅读 01、02、03、04、05；前端重点阅读 06；算法与报告开发重点阅读 07；测试重点阅读 08；未来评测平台开发阅读 09；项目排期与实施以 10 为准。11、12 是已吸收的审阅输入，用于追溯本轮修订依据。
 
-## 当前不应被误解为已完成
+## 当前已实现与边界
 
-仓库当前没有可运行产品、没有真实 LLM 接入、没有 LangGraph 工作流、没有安装包，也没有独立评测 Harness。文档描述的是已经确认的产品与实施合同，不是已验证的功能或生产证据。
+- 已实现：本地 FastAPI Web 服务、CSV/XLSX 导入、数据画像、Y 契约检查、半信任确认卡、LangGraph 状态编排、变量筛选、Logistic/Random Forest/HistGradientBoosting/XGBoost 候选比较、评分卡代理产物、HTML/JSON/Python 交付物、SSE 进度与 Trace、点赞/点踩、API 配置入口。
+- 已验证：本地单元、集成和端到端测试；生成代码只作为交付物，不在产品内执行；Reviewer 阻断不会被标成成功。
+- 尚未宣称：真实 LLM Provider 调用、macOS/Windows 安装包、跨平台安装验收、完整清洗回路、Baseline/what-if、XLSX 大文件低内存实测和独立评测 Harness。这些需要下一阶段单独实现和验证。
+
+## 本机运行
+
+```bash
+python3.9 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/risk-model-agent
+```
+
+浏览器打开 `http://127.0.0.1:8765`。如果暂时不配置外部 Provider，页面会明确显示“确定性降级”，仍可使用本地 Worker 完成演示流程。
+
+测试命令：
+
+```bash
+.venv/bin/python -m pytest -q
+.venv/bin/ruff check app tests
+node --check app/static/app.js
+```

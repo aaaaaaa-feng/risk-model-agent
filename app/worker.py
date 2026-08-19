@@ -1,0 +1,421 @@
+from __future__ import annotations
+
+import math
+import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    average_precision_score,
+    brier_score_loss,
+    confusion_matrix,
+    roc_auc_score,
+    roc_curve,
+)
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+from .config import MAX_COLUMNS, MAX_ROWS, MAX_UPLOAD_BYTES
+
+try:
+    from xgboost import XGBClassifier
+except Exception:  # pragma: no cover - optional wheel/platform issue
+    XGBClassifier = None  # type: ignore[assignment,misc]
+
+
+LEAKAGE_RE = re.compile(r"(?:post|after|repay|collection|writeoff|settle).*(?:overdue|delinq|default|bad)", re.I)
+ID_RE = re.compile(r"(?:^id$|_id$|uuid|phone|mobile|card|identity|身份证|手机号)", re.I)
+
+
+def read_table(path: Path, sheet: Optional[str] = None) -> pd.DataFrame:
+    if path.stat().st_size > MAX_UPLOAD_BYTES:
+        raise ValueError("FILE_TOO_LARGE: 文件超过本地配置的导入上限")
+    suffix = path.suffix.lower()
+    if suffix == ".xlsx":
+        frame = pd.read_excel(path, sheet_name=sheet or 0, engine="openpyxl")
+    elif suffix == ".csv":
+        frame = pd.read_csv(path, nrows=MAX_ROWS, low_memory=True)
+    else:
+        raise ValueError("UNSUPPORTED_FILE: 仅支持 CSV 和 XLSX")
+    if len(frame) > MAX_ROWS:
+        raise ValueError("ROW_LIMIT_EXCEEDED: 行数超过当前实测支持上限")
+    if len(frame.columns) > MAX_COLUMNS:
+        raise ValueError("COLUMN_LIMIT_EXCEEDED: 字段数超过当前设计上限")
+    frame.columns = [str(column).strip() or f"unnamed_{index}" for index, column in enumerate(frame.columns)]
+    if len(set(frame.columns)) != len(frame.columns):
+        raise ValueError("DUPLICATE_COLUMNS: 字段名重复，请先修正表头")
+    # Safe, reversible normalization: whitespace-only cells and surrounding
+    # whitespace are standardized before profiling. No rows are silently removed.
+    object_columns = frame.select_dtypes(include=["object", "string"]).columns
+    for column in object_columns:
+        frame[column] = frame[column].map(lambda value: value.strip() if isinstance(value, str) else value)
+    if len(object_columns):
+        frame[object_columns] = frame[object_columns].replace(r"^\s*$", pd.NA, regex=True)
+    return frame
+
+
+def infer_type(series: pd.Series) -> str:
+    if pd.api.types.is_bool_dtype(series):
+        return "boolean"
+    if pd.api.types.is_numeric_dtype(series):
+        return "numeric"
+    if pd.api.types.is_datetime64_any_dtype(series):
+        return "datetime"
+    parsed = pd.to_datetime(series.dropna().head(100), errors="coerce")
+    if len(parsed) and parsed.notna().mean() > 0.8:
+        return "datetime"
+    return "categorical" if series.nunique(dropna=True) < min(100, max(10, len(series) // 20)) else "text"
+
+
+def profile_table(frame: pd.DataFrame) -> Dict[str, Any]:
+    columns: List[Dict[str, Any]] = []
+    for column in frame.columns:
+        series = frame[column]
+        unique_count = int(series.nunique(dropna=True))
+        missing = float(series.isna().mean())
+        candidates = False
+        values = set(series.dropna().unique().tolist())
+        if values and len(values) <= 2 and values.issubset({0, 1, True, False, "0", "1"}):
+            candidates = True
+        columns.append(
+            {
+                "name": str(column),
+                "type": infer_type(series),
+                "missing_rate": round(missing, 6),
+                "unique_count": unique_count,
+                "unique_ratio": round(unique_count / max(len(series), 1), 6),
+                "target_candidate": candidates,
+                "constant": unique_count <= 1,
+            }
+        )
+    return {
+        "rows": int(len(frame)),
+        "columns": int(len(frame.columns)),
+        "memory_bytes": int(frame.memory_usage(deep=True).sum()),
+        "duplicate_rows": int(frame.duplicated().sum()),
+        "target_candidates": [item["name"] for item in columns if item["target_candidate"]],
+        "columns_detail": columns,
+        "warnings": _profile_warnings(frame, columns),
+        "cleaning": {
+            "status": "safe_normalization_only",
+            "automatic_actions": ["trim_text_whitespace", "standardize_blank_cells_as_missing"],
+            "destructive_actions": [],
+            "note": "未自动删除样本、截断异常值或改写 Y；训练期填补只在训练分区拟合。",
+        },
+    }
+
+
+def _profile_warnings(frame: pd.DataFrame, columns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    warnings: List[Dict[str, Any]] = []
+    if len(frame) < 200:
+        warnings.append({"code": "SMALL_SAMPLE", "severity": "warn", "message": "样本量小于 200，指标波动需要谨慎解释。"})
+    if not any(item["target_candidate"] for item in columns):
+        warnings.append({"code": "TARGET_NOT_OBVIOUS", "severity": "block", "message": "未发现明确的 0/1 Y 候选字段。"})
+    for item in columns:
+        if item["missing_rate"] >= 0.95:
+            warnings.append({"code": "HIGH_MISSING", "severity": "warn", "column": item["name"], "message": "字段缺失率达到 95% 以上。"})
+        if LEAKAGE_RE.search(item["name"]):
+            warnings.append({"code": "SUSPECTED_POST_OUTCOME_FEATURE", "severity": "block", "column": item["name"], "message": "字段名疑似包含贷后结果信息，需要业务确认。"})
+    return warnings
+
+
+def target_summary(frame: pd.DataFrame, target: str) -> Dict[str, Any]:
+    values = frame[target].value_counts(dropna=False)
+    normalized = frame[target].map(_to_binary)
+    valid = normalized.notna()
+    return {
+        "target": target,
+        "raw_value_counts": {str(key): int(value) for key, value in values.items()},
+        "valid_binary_rows": int(valid.sum()),
+        "invalid_rows": int((~valid).sum()),
+        "positive_count": int((normalized == 1).sum()),
+        "negative_count": int((normalized == 0).sum()),
+        "positive_rate": round(float((normalized == 1).mean()), 6),
+        "contract_ok": bool(valid.all() and normalized.nunique() == 2),
+    }
+
+
+def _to_binary(value: Any) -> Optional[int]:
+    if pd.isna(value):
+        return None
+    if value in (1, True, "1", "1.0"):
+        return 1
+    if value in (0, False, "0", "0.0"):
+        return 0
+    return None
+
+
+def calculate_iv(frame: pd.DataFrame, target: str, feature: str) -> float:
+    y = frame[target].map(_to_binary)
+    valid = y.notna()
+    x = frame.loc[valid, feature]
+    y = y.loc[valid]
+    if y.nunique() < 2 or x.nunique(dropna=True) <= 1:
+        return 0.0
+    if pd.api.types.is_numeric_dtype(x):
+        try:
+            grouped = pd.qcut(x, q=min(10, max(2, x.nunique())), duplicates="drop")
+        except ValueError:
+            grouped = x.astype(str)
+    else:
+        grouped = x.fillna("<MISSING>").astype(str)
+        counts = grouped.value_counts()
+        small = set(counts[counts < max(10, len(grouped) * 0.01)].index)
+        grouped = grouped.map(lambda item: "<OTHER>" if item in small else item)
+    table = pd.DataFrame({"group": grouped, "y": y}).groupby("group", observed=False)["y"].agg(["count", "sum"])
+    good_total = max(float((y == 0).sum()), 1.0)
+    bad_total = max(float((y == 1).sum()), 1.0)
+    iv = 0.0
+    for row in table.itertuples():
+        good_dist = (row.count - row.sum + 0.5) / (good_total + 0.5 * len(table))
+        bad_dist = (row.sum + 0.5) / (bad_total + 0.5 * len(table))
+        woe = math.log(good_dist / bad_dist)
+        iv += (good_dist - bad_dist) * woe
+    return float(max(iv, 0.0))
+
+
+def select_features(frame: pd.DataFrame, target: str, max_features: int = 50) -> Dict[str, Any]:
+    decisions: List[Dict[str, Any]] = []
+    candidates: List[Tuple[str, float]] = []
+    for column in frame.columns:
+        if column == target:
+            continue
+        series = frame[column]
+        missing = float(series.isna().mean())
+        unique_ratio = float(series.nunique(dropna=True) / max(len(series), 1))
+        reasons: List[str] = []
+        status = "included"
+        if series.nunique(dropna=True) <= 1:
+            status, reasons = "excluded", ["CONSTANT"]
+        elif missing >= 0.95:
+            status, reasons = "excluded", ["HIGH_MISSING"]
+        elif ID_RE.search(str(column)) or (
+            unique_ratio > 0.995 and not pd.api.types.is_numeric_dtype(series)
+        ):
+            status, reasons = "excluded", ["SUSPECTED_IDENTIFIER"]
+        elif LEAKAGE_RE.search(str(column)):
+            status, reasons = "blocked", ["SUSPECTED_POST_OUTCOME_FEATURE"]
+        else:
+            iv = calculate_iv(frame, target, column)
+            candidates.append((column, iv))
+        decisions.append(
+            {
+                "column": str(column),
+                "status": status,
+                "missing_rate": round(missing, 6),
+                "unique_ratio": round(unique_ratio, 6),
+                "iv": None if status != "included" else round(candidates[-1][1], 6),
+                "reasons": reasons,
+            }
+        )
+    candidates.sort(key=lambda item: item[1], reverse=True)
+    selected = {column for column, _ in candidates[:max_features]}
+    for decision in decisions:
+        if decision["status"] == "included" and decision["column"] not in selected:
+            decision["status"] = "excluded"
+            decision["reasons"] = ["IV_RANK_CAPPED"]
+    return {
+        "selected": [column for column, _ in candidates[:max_features]],
+        "decisions": decisions,
+        "funnel": {
+            "raw": len(frame.columns) - 1,
+            "included_after_rules": len(candidates),
+            "final": len(selected),
+            "blocked": sum(item["status"] == "blocked" for item in decisions),
+        },
+    }
+
+
+def split_frame(frame: pd.DataFrame, target: str, time_column: Optional[str] = None) -> Dict[str, Any]:
+    y = frame[target].map(_to_binary)
+    valid_positions = np.flatnonzero(y.notna().to_numpy())
+    work = frame.iloc[valid_positions].copy()
+    y = y.iloc[valid_positions].astype(int).to_numpy()
+    if time_column and time_column in work.columns:
+        parsed = pd.to_datetime(work[time_column], errors="coerce")
+        if parsed.notna().mean() > 0.8:
+            order = np.argsort(parsed.fillna(parsed.min()).to_numpy())
+            ordered = np.arange(len(work))[order]
+            train_end = max(1, int(len(ordered) * 0.6))
+            valid_end = max(train_end + 1, int(len(ordered) * 0.8))
+            train, valid, oot = ordered[:train_end], ordered[train_end:valid_end], ordered[valid_end:]
+            return {"positions": valid_positions.tolist(), "train": train.tolist(), "valid": valid.tolist(), "oot": oot.tolist(), "method": "time_holdout", "time_column": time_column}
+    positions = np.arange(len(work))
+    train, remaining = train_test_split(positions, test_size=0.4, random_state=42, stratify=y)
+    valid, oot = train_test_split(remaining, test_size=0.5, random_state=42, stratify=y[remaining])
+    return {"positions": valid_positions.tolist(), "train": train.tolist(), "valid": valid.tolist(), "oot": oot.tolist(), "method": "stratified_holdout", "time_column": None}
+
+
+def _preprocessor(frame: pd.DataFrame, features: Sequence[str], dense: bool = False) -> ColumnTransformer:
+    numeric = [column for column in features if pd.api.types.is_numeric_dtype(frame[column])]
+    categorical = [column for column in features if column not in numeric]
+    transformers = []
+    if numeric:
+        transformers.append(("numeric", Pipeline([("impute", SimpleImputer(strategy="median")), ("scale", StandardScaler())]), numeric))
+    if categorical:
+        transformers.append(("categorical", Pipeline([("impute", SimpleImputer(strategy="most_frequent")), ("onehot", OneHotEncoder(handle_unknown="ignore", sparse_output=not dense))]), categorical))
+    return ColumnTransformer(transformers=transformers, remainder="drop", sparse_threshold=0.2 if not dense else 0.0)
+
+
+def _metrics(y_true: np.ndarray, probabilities: np.ndarray, threshold: float) -> Dict[str, Any]:
+    if len(y_true) == 0 or len(np.unique(y_true)) < 2:
+        return {"roc_auc": None, "pr_auc": None, "ks": None, "gini": None, "brier": None, "threshold": threshold, "positive_rate": round(float(np.mean(y_true)) if len(y_true) else 0.0, 6), "confusion_matrix": None}
+    fpr, tpr, thresholds = roc_curve(y_true, probabilities)
+    ks = float(np.max(tpr - fpr))
+    finite_mask = np.isfinite(thresholds)
+    ks_values = np.where(finite_mask, tpr - fpr, -np.inf)
+    chosen = float(threshold if threshold is not None else (thresholds[int(np.argmax(ks_values))] if finite_mask.any() else 0.5))
+    matrix = confusion_matrix(y_true, (probabilities >= chosen).astype(int), labels=[0, 1]).tolist()
+    return {
+        "roc_auc": round(float(roc_auc_score(y_true, probabilities)), 6),
+        "pr_auc": round(float(average_precision_score(y_true, probabilities)), 6),
+        "ks": round(ks, 6),
+        "gini": round(float(2 * roc_auc_score(y_true, probabilities) - 1), 6),
+        "brier": round(float(brier_score_loss(y_true, probabilities)), 6),
+        "threshold": round(chosen, 6),
+        "positive_rate": round(float(np.mean(y_true)), 6),
+        "confusion_matrix": matrix,
+    }
+
+
+def _lift_table(y_true: np.ndarray, probabilities: np.ndarray, bins: int = 10) -> List[Dict[str, Any]]:
+    if len(y_true) == 0:
+        return []
+    order = np.argsort(-probabilities, kind="stable")
+    chunks = np.array_split(order, min(bins, len(order)))
+    total_bad = int(np.sum(y_true))
+    base_rate = float(np.mean(y_true)) if len(y_true) else 0.0
+    cumulative_bad = 0
+    rows: List[Dict[str, Any]] = []
+    for index, chunk in enumerate(chunks, start=1):
+        if len(chunk) == 0:
+            continue
+        bad_count = int(np.sum(y_true[chunk]))
+        cumulative_bad += bad_count
+        response_rate = bad_count / len(chunk)
+        rows.append(
+            {
+                "bucket": index,
+                "row_count": int(len(chunk)),
+                "bad_count": bad_count,
+                "response_rate": round(response_rate, 6),
+                "lift": round(response_rate / base_rate, 6) if base_rate else None,
+                "cumulative_capture": round(cumulative_bad / total_bad, 6) if total_bad else None,
+            }
+        )
+    return rows
+
+
+def train_candidates(
+    frame: pd.DataFrame,
+    target: str,
+    features: Sequence[str],
+    split: Dict[str, Any],
+    output_dir: Path,
+) -> Dict[str, Any]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    valid_frame = frame.iloc[split["positions"]].reset_index(drop=True)
+    y = valid_frame[target].map(_to_binary).astype(int).to_numpy()
+    X = valid_frame[list(features)].copy()
+    train_idx = np.asarray(split["train"], dtype=int)
+    valid_idx = np.asarray(split["valid"], dtype=int)
+    oot_idx = np.asarray(split["oot"], dtype=int)
+    models: List[Tuple[str, Any, bool]] = [
+        ("logistic_regression", LogisticRegression(max_iter=500, class_weight="balanced", random_state=42), False),
+        ("random_forest", RandomForestClassifier(n_estimators=120, max_depth=8, min_samples_leaf=3, class_weight="balanced_subsample", n_jobs=1, random_state=42), True),
+        ("hist_gradient_boosting", HistGradientBoostingClassifier(max_iter=120, learning_rate=0.06, max_leaf_nodes=15, random_state=42), True),
+    ]
+    if XGBClassifier is not None:
+        models.append(("xgboost", XGBClassifier(n_estimators=140, max_depth=4, learning_rate=0.07, subsample=0.85, colsample_bytree=0.85, n_jobs=1, eval_metric="logloss", random_state=42), True))
+    candidates: List[Dict[str, Any]] = []
+    scorecard: Optional[Dict[str, Any]] = None
+    for name, estimator, dense in models:
+        try:
+            pipeline = Pipeline([("preprocess", _preprocessor(X, features, dense=dense)), ("model", estimator)])
+            pipeline.fit(X.iloc[train_idx], y[train_idx])
+            valid_probability = pipeline.predict_proba(X.iloc[valid_idx])[:, 1]
+            threshold_metrics = _metrics(y[valid_idx], valid_probability, None)
+            threshold = threshold_metrics["threshold"] if threshold_metrics["threshold"] is not None else 0.5
+            train_probability = pipeline.predict_proba(X.iloc[train_idx])[:, 1]
+            oot_probability = pipeline.predict_proba(X.iloc[oot_idx])[:, 1] if len(oot_idx) else np.array([])
+            item = {
+                "name": name,
+                "status": "succeeded",
+                "features": len(features),
+                "validation_protocol": {
+                    "version": "risk-validation/v1",
+                    "fit_scope": "train",
+                    "validation_eval_scope": "validation",
+                    "oot_eval_scope": "oot",
+                    "oot_used_for_selection": False,
+                },
+                "validation": _metrics(y[valid_idx], valid_probability, threshold),
+                "train": _metrics(y[train_idx], train_probability, threshold),
+                "oot": _metrics(y[oot_idx], oot_probability, threshold),
+                "validation_lift": _lift_table(y[valid_idx], valid_probability),
+                "oot_lift": _lift_table(y[oot_idx], oot_probability),
+                "params": estimator.get_params(deep=False),
+            }
+            candidates.append(item)
+            try:
+                import joblib
+
+                joblib.dump(pipeline, output_dir / f"{name}.joblib")
+            except Exception:
+                pass
+            if name == "logistic_regression":
+                scorecard = _scorecard_from_pipeline(pipeline, X, features)
+        except Exception as exc:  # candidate isolation is intentional
+            candidates.append({"name": name, "status": "failed", "error": f"{type(exc).__name__}: {exc}", "features": len(features)})
+    succeeded = [item for item in candidates if item["status"] == "succeeded"]
+    champion = max(succeeded, key=lambda item: (item["validation"]["roc_auc"] or -1, item["validation"]["ks"] or -1), default=None)
+    return {"split": {key: value for key, value in split.items() if key != "positions"}, "candidates": candidates, "champion": champion, "scorecard": scorecard}
+
+
+def _scorecard_from_pipeline(pipeline: Pipeline, frame: pd.DataFrame, features: Sequence[str]) -> Dict[str, Any]:
+    try:
+        preprocessor = pipeline.named_steps["preprocess"]
+        model = pipeline.named_steps["model"]
+        names = list(preprocessor.get_feature_names_out())
+        coefficients = model.coef_[0].tolist()
+        points = [{"feature": name, "coefficient": round(float(coef), 6), "direction": "higher_score" if coef < 0 else "higher_risk"} for name, coef in zip(names, coefficients)]
+        return {"route": "woe_logistic_proxy", "base_score": 600, "pdo": 20, "odds": 50, "points": points[:200], "note": "MVP uses one-hot logistic coefficients; production WOE binning is a follow-up gate."}
+    except Exception as exc:
+        return {"route": "unavailable", "error": str(exc)}
+
+
+def segment_analysis(frame: pd.DataFrame, spec: Dict[str, Any]) -> Dict[str, Any]:
+    dimensions = spec.get("dimensions") or []
+    if not 1 <= len(dimensions) <= 4:
+        raise ValueError("INVALID_ANALYSIS_SPEC: 维度必须为 1—4 个")
+    columns = [item.get("column") for item in dimensions]
+    missing = [column for column in columns if column not in frame.columns]
+    if missing:
+        raise ValueError(f"INVALID_ANALYSIS_SPEC: 字段不存在 {missing}")
+    target = spec.get("target", {}).get("column")
+    work = frame.copy()
+    if target in work.columns:
+        work["__target__"] = work[target].map(_to_binary)
+    for item in dimensions:
+        column = item["column"]
+        if item.get("transform") in ("quantile_bins", "numeric_bins") and pd.api.types.is_numeric_dtype(work[column]):
+            work[f"__dim_{column}"] = pd.qcut(work[column], q=int(item.get("bins", 10)), duplicates="drop")
+        else:
+            work[f"__dim_{column}"] = work[column].fillna("<MISSING>").astype(str)
+    group_cols = [f"__dim_{column}" for column in columns]
+    grouped = work.groupby(group_cols, observed=False)
+    result = grouped.size().reset_index(name="row_count")
+    if "__target__" in work:
+        target_group = grouped["__target__"].agg(["sum", "mean"]).reset_index().rename(columns={"sum": "bad_count", "mean": "bad_rate"})
+        result = result.merge(target_group, on=group_cols, how="left")
+    result = result[result["row_count"] >= int(spec.get("min_group_size", 50))]
+    result = result.sort_values("row_count", ascending=False).head(int(spec.get("max_groups", 1000)))
+    records = result.to_dict(orient="records")
+    return {"dimensions": columns, "rows": records, "suppressed_groups": max(0, int(len(grouped)) - len(records)), "spec": spec}
