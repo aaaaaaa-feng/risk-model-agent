@@ -97,6 +97,9 @@ button { cursor: pointer; }
 .dataset-filled { align-items: flex-start; padding: 18px; justify-content: flex-start; border-style: solid; background: #f5fbf8; }
 .dataset-filled .file-title { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 13px; }
 .dataset-filled .file-meta { color: var(--muted); font-size: 11px; line-height: 1.8; margin: 8px 0 0 32px; }
+.dataset-picker { display: grid; gap: 5px; margin: 12px 0 2px 32px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.dataset-picker select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px; background: white; color: var(--ink); font-size: 11px; }
+.dataset-picker select:disabled { color: var(--muted); background: #f2f7f4; cursor: not-allowed; }
 .evidence-card { display: grid; gap: 3px; }
 .evidence-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 11px; background: #f6faf8; border-radius: 9px; font-size: 11px; }
 .evidence-row span { color: var(--muted); }

@@ -50,6 +50,7 @@ def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
     assert "风控建模 Agent" in root.text
     assert "provider-request-list" in root.text
     assert "selection-table-panel" in root.text
+    assert 'name="clear_api_key"' in root.text
 
     project, dataset = create_demo_project("API 自动流程")
     run_response = client.post(
@@ -136,6 +137,9 @@ def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
     assert provider_check.status_code == 200
     assert provider_check.json()["ok"] is False
     assert provider_check.json()["error_code"] == "PROVIDER_DISABLED"
+    cleared = client.put("/api/config", json={"clear_api_key": True})
+    cleared.raise_for_status()
+    assert cleared.json()["config"]["api_key"] == ""
 
 
 def test_demo_label_and_reupload_preserve_dataset_versions() -> None:

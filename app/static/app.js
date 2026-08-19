@@ -1,4 +1,4 @@
-const state = { projects: [], project: null, datasets: [], dictionaries: [], runs: [], run: null, events: [], conversation: null, messages: [], mode: 'auto', eventSource: null, config: null, providerRequests: [], confirmationRunId: null, confirmationFeatures: [], confirmationExcluded: new Set(), selectionExcluded: new Set() };
+const state = { projects: [], project: null, datasets: [], selectedDatasetId: null, dictionaries: [], runs: [], run: null, events: [], conversation: null, messages: [], mode: 'auto', eventSource: null, config: null, providerRequests: [], confirmationRunId: null, confirmationFeatures: [], confirmationExcluded: new Set(), selectionExcluded: new Set() };
 const $ = function (selector) { return document.querySelector(selector); };
 const projectList = $('#project-list');
 const escapeHtml = function (value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]; }); };
@@ -30,7 +30,7 @@ async function loadProjects() {
 }
 async function selectProject(projectId) {
   const data = await api('/api/projects/' + projectId);
-  state.project = data.project; state.datasets = data.datasets || []; state.dictionaries = data.dictionaries || []; state.runs = data.runs || []; state.run = state.runs[0] || null; state.mode = state.run ? state.run.mode : state.mode; state.events = []; state.providerRequests = []; state.selectionExcluded = new Set();
+  state.project = data.project; state.datasets = data.datasets || []; state.dictionaries = data.dictionaries || []; state.runs = data.runs || []; state.run = state.runs[0] || null; state.selectedDatasetId = (state.run && state.run.dataset_id) || (state.datasets[0] && state.datasets[0].id) || null; state.mode = state.run ? state.run.mode : state.mode; state.events = []; state.providerRequests = []; state.selectionExcluded = new Set();
   await loadConversation();
   renderProjects(); renderProject();
   await loadProviderRequests();
@@ -41,6 +41,16 @@ async function selectProject(projectId) {
       try { renderReport(await api('/api/runs/' + state.run.id + '/report')); } catch (error) { /* report may still be flushing */ }
     }
   }
+}
+function activeDataset() {
+  const runLocksDataset = state.run && ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run.status);
+  const preferred = runLocksDataset && state.run.dataset_id ? state.run.dataset_id : (state.selectedDatasetId || (state.run && state.run.dataset_id));
+  return state.datasets.find(function (item) { return item.id === preferred; }) || state.datasets[0] || null;
+}
+function activeProfile() {
+  const dataset = activeDataset();
+  if (state.run && dataset && state.run.dataset_id === dataset.id && state.run.state && state.run.state.profile) return state.run.state.profile;
+  return (dataset && dataset.profile) || {};
 }
 async function loadProviderRequests() {
   const block = $('#provider-audit-block');
@@ -83,7 +93,7 @@ function renderProject() {
   $('#start-run').disabled = !state.datasets.length || ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run && state.run.status);
 }
 function renderDataset() {
-  const dataset = state.datasets[0]; const card = $('#dataset-card');
+  const dataset = activeDataset(); const card = $('#dataset-card');
   if (!dataset) {
     card.className = 'dataset-card empty-panel';
     card.innerHTML = '<div class="drop-icon">↑</div><strong>拖入 CSV / XLSX</strong><span>文件只写入本机项目目录</span><button id="choose-file" class="secondary-button small">选择文件</button>';
@@ -92,8 +102,11 @@ function renderDataset() {
   card.className = 'dataset-card dataset-filled';
   const resource = dataset.profile && dataset.profile.resource_estimate || {};
   const resourceNote = resource.risk === 'warn' ? '<br/><span class="warn-text">资源预估接近本机预算</span>' : resource.risk === 'block' ? '<br/><span class="error-text">资源预估超过当前边界</span>' : '';
-  card.innerHTML = '<div class="file-title"><span class="drop-icon">✓</span>' + escapeHtml(dataset.filename) + '</div><div class="file-meta">大小 ' + (dataset.bytes / 1024).toFixed(1) + ' KB<br/>' + (dataset.rows || '—') + ' 行 · ' + (dataset.columns || '—') + ' 列<br/>SHA-256 ' + escapeHtml(dataset.sha256.slice(0, 16)) + '…' + resourceNote + '</div><button id="replace-file" class="secondary-button small" type="button">重新导入版本</button>';
+  const runActive = state.run && ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run.status);
+  const datasetOptions = state.datasets.length > 1 ? '<label class="dataset-picker"><span>当前数据版本</span><select id="dataset-select"' + (runActive ? ' disabled' : '') + '>' + state.datasets.map(function (item) { return '<option value="' + escapeHtml(item.id) + '" ' + (item.id === dataset.id ? 'selected' : '') + '>' + escapeHtml(item.filename) + (item.is_demo ? ' · 演示' : '') + '</option>'; }).join('') + '</select></label>' : '';
+  card.innerHTML = '<div class="file-title"><span class="drop-icon">✓</span>' + escapeHtml(dataset.filename) + '</div><div class="file-meta">大小 ' + (dataset.bytes / 1024).toFixed(1) + ' KB<br/>' + (dataset.rows || '—') + ' 行 · ' + (dataset.columns || '—') + ' 列<br/>SHA-256 ' + escapeHtml(dataset.sha256.slice(0, 16)) + '…' + resourceNote + '</div>' + datasetOptions + '<button id="replace-file" class="secondary-button small" type="button">重新导入版本</button>';
   $('#replace-file').addEventListener('click', function () { $('#file-input').click(); });
+  if ($('#dataset-select')) $('#dataset-select').addEventListener('change', function () { state.selectedDatasetId = $('#dataset-select').value; renderProject(); });
   $('#dataset-badge').textContent = dataset.is_demo ? '合成演示' : '本地已导入';
   $('#dataset-badge').className = 'chip ' + (dataset.is_demo ? 'warn' : 'safe');
 }
@@ -128,7 +141,7 @@ function renderStages() {
 function renderAnalysisControls() {
   const control = $('#analysis-controls'); const button = $('#run-analysis');
   if (!control || !button) return;
-  const profile = state.run && state.run.state && state.run.state.profile || (state.datasets[0] && state.datasets[0].profile) || {};
+  const profile = activeProfile();
   const columns = profile.columns_detail || [];
   if (!columns.length) { control.innerHTML = '<span class="muted">开始一次分析后，这里会出现可选字段。</span>'; button.disabled = true; return; }
   const options = columns.map(function (item) { return '<option value="' + escapeHtml(item.name) + '">' + escapeHtml(item.name) + ' · ' + escapeHtml(item.type || '') + '</option>'; }).join('');
@@ -178,13 +191,16 @@ function renderConversation() {
   container.querySelectorAll('[data-chat-feedback]').forEach(function (button) { button.addEventListener('click', function () { sendMessageFeedback(button.dataset.messageId, button.dataset.chatFeedback); }); });
 }
 async function runAnalysis() {
-  if (!state.project || !state.datasets[0]) return;
+  const dataset = activeDataset();
+  if (!state.project || !dataset) return;
   const selects = Array.from(document.querySelectorAll('.analysis-select')).map(function (select) { return select.value; }).filter(Boolean);
   if (!selects.length) return;
-  const profile = state.run && state.run.state && state.run.state.profile || {};
+  const profile = activeProfile();
   const details = Object.fromEntries((profile.columns_detail || []).map(function (item) { return [item.name, item]; }));
+  const target = state.run && state.run.dataset_id === dataset.id && state.run.state && state.run.state.plan && state.run.state.plan.target;
+  const targetColumn = target || (profile.target_candidates || [])[0] || null;
   try {
-    const result = await api('/api/projects/' + state.project.id + '/analysis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: state.datasets[0].id, spec: { dimensions: selects.map(function (column) { return { column: column, transform: details[column] && details[column].type === 'numeric' ? 'quantile_bins' : 'category', bins: 10 }; }), target: { column: state.run && state.run.state && state.run.state.plan && state.run.state.plan.target }, min_group_size: 50, max_groups: 1000 } }) });
+    const result = await api('/api/projects/' + state.project.id + '/analysis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: dataset.id, spec: { dimensions: selects.map(function (column) { return { column: column, transform: details[column] && details[column].type === 'numeric' ? 'quantile_bins' : 'category', bins: 10 }; }), target: { column: targetColumn }, min_group_size: 50, max_groups: 1000 } }) });
     const rows = (result.analysis && result.analysis.rows) || [];
     $('#analysis-result').innerHTML = rows.length ? '<div class="analysis-meta">返回 ' + rows.length + ' 个组合，隐藏 ' + (result.analysis.suppressed_groups || 0) + ' 个小样本组合</div><div class="analysis-table-wrap"><table><thead><tr>' + selects.map(function (column) { return '<th>' + escapeHtml(column) + '</th>'; }).join('') + '<th>样本</th><th>坏样本率</th></tr></thead><tbody>' + rows.slice(0, 30).map(function (row) { return '<tr>' + selects.map(function (column) { return '<td>' + escapeHtml(row['__dim_' + column] || row[column] || '') + '</td>'; }).join('') + '<td>' + escapeHtml(row.row_count) + '</td><td>' + escapeHtml(row.bad_rate == null ? '—' : (row.bad_rate * 100).toFixed(2) + '%') + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<span class="muted">没有达到最小样本量的组合。</span>';
   } catch (error) { showNotice(error.message, 'block'); }
@@ -358,15 +374,19 @@ async function uploadDictionary(file) {
   if (!state.project || !file) return;
   const form = new FormData(); form.append('file', file);
   try {
+    const inspectionForm = new FormData(); inspectionForm.append('file', file);
+    const inspection = await api('/api/projects/' + state.project.id + '/datasets/inspect', { method: 'POST', body: inspectionForm });
+    if (inspection.requires_sheet) { const sheet = window.prompt('请选择数据字典 Sheet：' + inspection.sheets.join('、'), inspection.sheets[0]); if (!sheet) return; form.append('sheet', sheet); }
     const result = await api('/api/projects/' + state.project.id + '/dictionaries', { method: 'POST', body: form });
     showNotice(result.message || '数据字典已保存到本机。');
     await selectProject(state.project.id);
   } catch (error) { showNotice(error.message, 'block'); }
 }
 async function startRun() {
-  if (!state.project || !state.datasets[0]) return;
+  const dataset = activeDataset();
+  if (!state.project || !dataset) return;
   try {
-    const data = await api('/api/projects/' + state.project.id + '/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: state.datasets[0].id, mode: state.mode }) });
+    const data = await api('/api/projects/' + state.project.id + '/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: dataset.id, mode: state.mode }) });
     state.run = data.run; state.events = []; state.providerRequests = []; await loadConversation(); renderProject(); await loadProviderRequests(); connectStream();
   } catch (error) { showNotice(error.message, 'block'); }
 }
@@ -441,7 +461,7 @@ async function loadSettings() {
   const form = $('#settings-form'); Object.entries(data.config || {}).forEach(function (entry) { if (form.elements[entry[0]] && entry[0] !== 'api_key') { if (form.elements[entry[0]].type === 'checkbox') form.elements[entry[0]].checked = Boolean(entry[1]); else form.elements[entry[0]].value = entry[1] == null ? '' : entry[1]; } });
 }
 async function saveSettings(event) {
-  event.preventDefault(); const formElement = event.target; const form = new FormData(formElement); const payload = Object.fromEntries(form.entries()); payload.llm_enabled = formElement.elements.llm_enabled.checked; payload.run_token_budget = Number(payload.run_token_budget || 0); payload.monthly_token_budget = Number(payload.monthly_token_budget || 0);
+  event.preventDefault(); const formElement = event.target; const form = new FormData(formElement); const payload = Object.fromEntries(form.entries()); payload.llm_enabled = formElement.elements.llm_enabled.checked; payload.clear_api_key = formElement.elements.clear_api_key.checked; payload.run_token_budget = Number(payload.run_token_budget || 0); payload.monthly_token_budget = Number(payload.monthly_token_budget || 0);
   try { await api('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); $('#settings-status').textContent = '已保存到本机安全目录。'; await loadSettings(); setTimeout(function () { $('#settings-modal').classList.add('hidden'); }, 700); }
   catch (error) { $('#settings-status').textContent = error.message; }
 }

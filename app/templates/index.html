@@ -171,6 +171,7 @@
         <div class="form-two"><label>Base URL<input name="base_url" placeholder="https://api.example.com/v1" /></label><label>主模型<input name="model" placeholder="model-name" /></label></div>
         <div class="form-two"><label>Reviewer 模型<input name="reviewer_model" placeholder="reviewer-model" /></label><label>HTTP 代理<input name="proxy" placeholder="可选" /></label></div>
         <label>API Key<input name="api_key" type="password" placeholder="留空表示不修改" autocomplete="off" /></label>
+        <label class="toggle-line"><input name="clear_api_key" type="checkbox" />清除本机已保存的 API Key</label>
         <label class="toggle-line"><input name="llm_enabled" type="checkbox" />启用外部 LLM（仅发送本地 SafeEvidence）</label>
         <div class="form-two"><label>单次 Token 预算<input name="run_token_budget" type="number" min="0" placeholder="0 = 不启用" /></label><label>单月 Token 预算<input name="monthly_token_budget" type="number" min="0" placeholder="0 = 不启用" /></label></div>
         <div id="settings-status" class="form-status"></div>
