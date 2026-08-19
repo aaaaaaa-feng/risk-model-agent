@@ -168,7 +168,7 @@ async function confirmPlan() {
   } catch (error) { showNotice(error.message, 'block'); }
 }
 async function loadSettings() {
-  const data = await api('/api/config'); state.config = data.config; $('#provider-chip').textContent = data.provider.configured ? '已配置 ' + data.provider.model : '未配置 LLM'; $('#provider-chip').className = 'chip ' + (data.provider.configured ? 'safe' : 'neutral'); $('#evidence-provider').textContent = data.provider.configured ? '外部 API 可用 · 仅安全证据' : '确定性降级';
+  const data = await api('/api/config'); state.config = data.config; $('#provider-chip').textContent = data.provider.configured ? 'API 已配置 · 确定性' : '未配置 LLM'; $('#provider-chip').className = 'chip ' + (data.provider.configured ? 'safe' : 'neutral'); $('#evidence-provider').textContent = data.provider.configured ? '已配置 · 当前仍确定性' : '确定性降级';
   const form = $('#settings-form'); Object.entries(data.config || {}).forEach(function (entry) { if (form.elements[entry[0]] && entry[0] !== 'api_key') form.elements[entry[0]].value = entry[1] == null ? '' : entry[1]; });
 }
 async function saveSettings(event) {
