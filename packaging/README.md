@@ -1,6 +1,6 @@
 # 跨平台打包入口
 
-仓库提供同一份 PyInstaller spec 和两个本机启动脚本，目标是把本地 FastAPI Web 服务打成可双击启动的目录发行版。这里的构建脚本是可复现入口，不代表当前机器已经完成 macOS 与 Windows 的真实安装验收。
+仓库提供同一份 PyInstaller spec 和两个本机启动脚本，目标是把本地 FastAPI Web 服务打成可双击启动的目录发行版。当前已在本机 macOS arm64 用 PyInstaller 6.22.2 真实构建，并启动包后验证 `/api/health` 与首页返回 200；这不代表 Windows 构建、签名、安装、升级/卸载验收已完成。
 
 在没有安装 PyInstaller 的环境中，可以先运行不依赖打包工具的契约检查：
 

@@ -4,7 +4,10 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
 
-ROOT = Path(SPECPATH).resolve().parent.parent
+# PyInstaller exposes ``SPECPATH`` as the directory containing this spec.
+# The repository root is therefore its direct parent; walking two levels up
+# would silently point at the enclosing "8、新项目" folder.
+ROOT = Path(SPECPATH).resolve().parent
 datas = [
     (str(ROOT / "app" / "templates"), "app/templates"),
     (str(ROOT / "app" / "static"), "app/static"),

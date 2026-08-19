@@ -32,7 +32,8 @@
 - `ruff check app tests scripts/*.py`：通过。
 - `node --check app/static/app.js`：通过。
 - `git diff --check`：通过。
-- `python scripts/verify_packaging.py`：通过；这是入口和资源契约检查，不等价于目标平台真实打包。
+- `python scripts/verify_packaging.py`：通过；同时修复并覆盖了 spec 的仓库根目录计算。
+- 当前 Mac 真实构建：PyInstaller 6.22.2、macOS arm64，`dist/risk-model-agent/risk-model-agent` 构建成功；启动发行包后 `/api/health` 和首页均返回 200。该证据只覆盖当前 Mac 的 onedir 构建与启动，不覆盖 Windows、签名、安装、升级/卸载。
 - `.venv/bin/python scripts/run_golden_cases.py`：5/5 通过；这是最小确定性回归门禁，不等价于独立评测 Harness。
 - 真实本机回环烟测（短暂启动 Uvicorn）：`GET /api/health` 返回 200 且明确 `runtime=local`/确定性降级，首页返回 200，并包含项目生命周期、变量明细和 API Key 清除入口；这证明服务可启动和 HTML 可返回，但不替代目标系统安装验收或完整浏览器视觉验收。
 - 本地 Git 最新提交：
@@ -74,7 +75,7 @@
 - 当前不做超参数搜索；训练分区在 10,000 行以内提供 3-fold OOF 诊断，冠军仍按冻结验证集选择，超过资源上限会显式跳过。报告新增校准分箱、训练集拟合的 PSI/相关性复核和模型变量重要性，但这些证据不自动替代人工/治理判断。
 - 清洗目前自动执行的只有安全标准化；去重和 IQR 分位截断可在确认节点显式批准并产生新数据版本，稀有类别合并和样本删除仍未实现。
 - 评分卡已是 WOE + Logistic 路线，包含训练集分箱、WOE/IV、PDO/Base Score/Odds、分箱分值、评分—概率映射校验和训练/验证/OOT 指标；单调性、模型包跨版本加载验收和目标规模实测仍属后续版本。
-- 已提供 PyInstaller spec、macOS/Windows 启动和构建脚本，但尚未在两个目标系统真实构建、签名、安装、升级/卸载验收，也没有把普通 Web 启动方式冒充“拿来即用”的桌面发行版。
+- 已完成当前 Mac arm64 的 PyInstaller onedir 构建和发行包级健康/首页烟测；Windows 构建、两端签名、安装、升级/卸载和目标机器验收仍未完成，不能把当前包宣称为跨平台发行版。
 - 独立评测 Harness 按约定后置；当前仅保留 Trace 和普通软件回归测试。
 
 ## GitHub 同步结果

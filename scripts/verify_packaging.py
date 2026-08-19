@@ -37,6 +37,7 @@ def main() -> int:
         "spec_has_onedir_collect": "COLLECT(" in spec,
         "spec_has_local_assets": "app/templates" in spec and "app/static" in spec,
         "spec_has_launcher": "run_local.py" in spec,
+        "spec_uses_repository_root": "ROOT = Path(SPECPATH).resolve().parent\n" in spec,
         "pyinstaller_optional_dependency": "pyinstaller" in pyproject.lower(),
     }
     contract["valid"] = not missing and all(
@@ -45,6 +46,7 @@ def main() -> int:
             "spec_has_onedir_collect",
             "spec_has_local_assets",
             "spec_has_launcher",
+            "spec_uses_repository_root",
             "pyinstaller_optional_dependency",
         )
     )
