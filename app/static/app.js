@@ -206,6 +206,28 @@ function renderReport(report) {
   const calibrationGap = calibration.length ? Math.max.apply(null, calibration.map(function (item) { return Number(item.absolute_gap || 0); })).toFixed(4) : '—';
   const highPsi = stability.filter(function (item) { return ['review', 'high'].includes(item.validation && item.validation.review_flag) || ['review', 'high'].includes(item.oot && item.oot.review_flag); }).length;
   $('#report-details').innerHTML = '<div class="report-facts"><span>校准最大绝对差</span><strong>' + calibrationGap + '</strong><span>需稳定性复核变量</span><strong>' + highPsi + '</strong></div>' + (excluded.length ? '<strong>字段处理摘要</strong><ul>' + excluded.map(function (item) { return '<li><code>' + escapeHtml(item.column) + '</code> · ' + escapeHtml(item.status) + ' · ' + escapeHtml((item.reasons || []).join('、') || '规则排除') + '</li>'; }).join('') + '</ul>' : '<strong>字段处理摘要</strong><span>没有字段被规则排除。</span>');
+  renderNarrativeEditor(report);
+}
+function renderNarrativeEditor(report) {
+  const panel = $('#report-narrative-editor'); if (!panel) return;
+  const narrative = report.narrative_sections || {}; const sections = narrative.sections || [];
+  if (!sections.length) { panel.innerHTML = ''; return; }
+  if (narrative.locked) {
+    panel.innerHTML = '<div class="narrative-lock"><strong>报告叙事已锁定</strong><span>revision ' + escapeHtml(narrative.revision || 0) + ' · 文本已纳入 checksums</span></div>';
+    return;
+  }
+  panel.innerHTML = '<div class="narrative-editor-heading"><div><strong>报告叙事编辑</strong><small>只修改文字；指标、样本、模型和评分卡仍来自确定性产物。</small></div><span class="chip neutral">未锁定</span></div>' + sections.map(function (item) { return '<label class="narrative-edit-row"><span>' + escapeHtml(item.title || item.id) + '</span><textarea data-narrative-id="' + escapeHtml(item.id) + '" maxlength="3000">' + escapeHtml(item.text || '') + '</textarea><small>证据：' + escapeHtml((item.evidence_refs || []).join('、')) + '</small></label>'; }).join('') + '<div class="narrative-editor-actions"><button type="button" class="secondary-button small" id="save-narrative-draft">保存叙事草稿</button><button type="button" class="primary-button small" id="lock-narrative">保存并锁定</button></div>';
+  $('#save-narrative-draft').addEventListener('click', function () { saveNarrative(false); });
+  $('#lock-narrative').addEventListener('click', function () { saveNarrative(true); });
+}
+async function saveNarrative(lock) {
+  const panel = $('#report-narrative-editor'); if (!state.run || !panel) return;
+  const sections = Array.from(panel.querySelectorAll('[data-narrative-id]')).map(function (textarea) { return { id: textarea.dataset.narrativeId, text: textarea.value }; });
+  try {
+    const result = await api('/api/runs/' + state.run.id + '/report/narrative', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sections: sections, lock: lock }) });
+    showNotice(lock ? '报告叙事已锁定并写入哈希清单。' : '报告叙事草稿已保存。');
+    renderReport(result.report);
+  } catch (error) { showNotice(error.message, 'block'); }
 }
 function connectStream() {
   if (state.eventSource) state.eventSource.close(); if (!state.run) return;

@@ -134,6 +134,17 @@ button { cursor: pointer; }
 .report-details { margin-top: 13px; padding: 13px 15px; color: #46625c; font-size: 12px; line-height: 1.7; background: #f8fbfa; border-radius: 11px; }
 .report-details ul { margin: 8px 0 0; padding-left: 18px; }
 .report-details code { color: #14796d; }
+.report-narrative-editor { margin-top: 14px; padding: 14px 15px; border: 1px solid var(--line); border-radius: 12px; background: #fbfefc; }
+.narrative-editor-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+.narrative-editor-heading strong { display: block; font-size: 12px; }
+.narrative-editor-heading small { display: block; color: var(--muted); font-size: 10px; margin-top: 4px; }
+.narrative-edit-row { display: grid; gap: 5px; margin-top: 10px; color: var(--muted); font-size: 10px; font-weight: 750; }
+.narrative-edit-row textarea { width: 100%; min-height: 54px; resize: vertical; border: 1px solid var(--line); border-radius: 9px; padding: 8px 9px; background: white; color: var(--ink); font-size: 11px; line-height: 1.55; outline: none; }
+.narrative-edit-row textarea:focus { border-color: #7abda7; box-shadow: 0 0 0 3px #e5f5ed; }
+.narrative-edit-row small { color: var(--muted); font-size: 9px; font-weight: 400; }
+.narrative-editor-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 12px; }
+.narrative-lock { display: flex; justify-content: space-between; gap: 10px; padding: 9px 10px; border-radius: 9px; background: #e7f6ef; color: var(--teal); font-size: 11px; }
+.narrative-lock span { color: var(--muted); font-size: 10px; }
 .report-facts { display: flex; gap: 8px 14px; flex-wrap: wrap; margin-bottom: 10px; color: var(--muted); }
 .report-facts strong { color: var(--teal); }
 .text-link { color: var(--teal); font-size: 11px; text-decoration: none; }
