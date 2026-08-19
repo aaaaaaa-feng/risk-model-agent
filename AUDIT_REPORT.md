@@ -51,6 +51,14 @@
 - 代码 Reviewer 已覆盖 AST 语法、依赖白名单、危险调用、网络/凭据模式，并给出结构化位置；项目对话只向 Provider 发送别名化上下文，Trace 不导出聊天原文。
 - 当前验证使用 FastAPI TestClient 和本地 Worker 子进程；本环境不把一次受限沙箱端口绑定失败当作应用功能失败，也未把它包装成真实浏览器/跨平台验收。
 
+## 11/12 号文档吸收核对
+
+- 11 号 P0-1/P0-6 已落到 `docs/02`、`docs/04`、`docs/07`：Worker 按风险分层，验证协议冻结为 `train_only_oof_diagnostic → validation_select → oot_once`，并有黄金回归断言。
+- 11 号 P0-2/P0-3/P0-4 已落到 `docs/02`、`docs/06`：Project 与 Run 分层，补充合法迁移矩阵，Y 选择和切分在画像完成后的确认卡中绑定，失效以 `input_refs` 依赖闭包为准。
+- 11 号 P0-5 与 12 号安全建议已落到 `docs/05`、`app/agent.py`、Trace/Provider 审计：外发代码、方案和字典只使用别名，原始列名、逐行数据和密钥有负向测试。
+- 11 号 P1 与 12 号专家工作流建议中，已实现本地无 LLM 降级、预算熔断、低内存 XLSX 预检、训练集不平衡策略、模型序列化策略、项目备份恢复、数据字典、Baseline/固定通过率 swap set、what-if 隔离、报告叙事编辑锁定、出站请求查看和最小黄金回归。
+- 12 号明确后置的独立评测 Harness 没有混入当前产品；当前只提供可脱敏导出的 Trace、结构化事件链和 5 个确定性黄金案例。
+
 ## 仍明确未完成、不能宣称的事项
 
 - 尚未用真实供应商 API 做连通性、限流、费用和服务条款验收；`llm_enabled` 是显式开关。可选 `.[secure]` 依赖会优先使用 macOS Keychain/Windows Credential Manager 等系统后端，当前环境未做目标系统验收，失败时回退到 600 权限本地文件。
