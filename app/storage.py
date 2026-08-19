@@ -110,7 +110,8 @@ def _trace_alias(value: Any, aliases: Dict[str, str]) -> Any:
     if isinstance(value, str):
         result = value
         for original, alias in sorted(aliases.items(), key=lambda item: len(item[0]), reverse=True):
-            result = re.sub(re.escape(original), alias, result)
+            pattern = rf"(?<![A-Za-z0-9_]){re.escape(original)}(?![A-Za-z0-9_])"
+            result = re.sub(pattern, alias, result)
         return result
     return value
 

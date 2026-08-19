@@ -389,7 +389,8 @@ def _alias_code(code: str, profile: Optional[Dict[str, Any]]) -> str:
         return code
     aliased = code
     for original, alias in sorted(alias_fields(profile).items(), key=lambda item: len(item[0]), reverse=True):
-        aliased = re.sub(re.escape(original), alias, aliased)
+        pattern = rf"(?<![A-Za-z0-9_]){re.escape(original)}(?![A-Za-z0-9_])"
+        aliased = re.sub(pattern, alias, aliased)
     return aliased
 
 
