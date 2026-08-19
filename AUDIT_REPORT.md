@@ -83,8 +83,7 @@
 
 - 地址：[aaaaaaa-feng/risk-model-agent](https://github.com/aaaaaaa-feng/risk-model-agent)
 - 可见性：`PUBLIC`；默认分支：`main`
-- 本地 HEAD：`b2c8a9b8829589b3a12a62350fd9a9ce3bf38829`
-- 远端 `origin/main`：`b2c8a9b8829589b3a12a62350fd9a9ce3bf38829`
+- `git rev-parse HEAD` 与 `git ls-remote origin refs/heads/main` 已核对相等
 - Git 状态：`main...origin/main`，工作树干净
 
 此前未提权的 CLI 尝试曾受到无效 Token 和沙箱代理限制；在获得回环运行验证所需的命令执行授权后，最终创建和推送已成功。远端 SHA 已按命令行和 GitHub 仓库元数据双重核对，不把本地 commit 单独当作发布证据。
