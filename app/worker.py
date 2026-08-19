@@ -590,6 +590,8 @@ def segment_analysis(frame: pd.DataFrame, spec: Dict[str, Any]) -> Dict[str, Any
     dimensions = spec.get("dimensions") or []
     if not 1 <= len(dimensions) <= 4:
         raise ValueError("INVALID_ANALYSIS_SPEC: 维度必须为 1—4 个")
+    max_groups = max(1, min(int(spec.get("max_groups", 1000)), 5000))
+    top_k = max(2, min(int(spec.get("top_k_per_dimension", 20)), 100))
     columns = [item.get("column") for item in dimensions]
     missing = [column for column in columns if column not in frame.columns]
     if missing:
@@ -601,16 +603,24 @@ def segment_analysis(frame: pd.DataFrame, spec: Dict[str, Any]) -> Dict[str, Any
     for item in dimensions:
         column = item["column"]
         if item.get("transform") in ("quantile_bins", "numeric_bins") and pd.api.types.is_numeric_dtype(work[column]):
-            work[f"__dim_{column}"] = pd.qcut(work[column], q=int(item.get("bins", 10)), duplicates="drop")
+            work[f"__dim_{column}"] = pd.qcut(work[column], q=min(int(item.get("bins", 10)), 20), duplicates="drop")
         else:
-            work[f"__dim_{column}"] = work[column].fillna("<MISSING>").astype(str)
+            values = work[column].fillna("<MISSING>").astype(str)
+            counts = values.value_counts(dropna=False)
+            keep = set(counts.head(top_k).index)
+            work[f"__dim_{column}"] = values.map(lambda value: value if value in keep else "<OTHER>")
     group_cols = [f"__dim_{column}" for column in columns]
+    estimated_groups = 1
+    for group_column in group_cols:
+        estimated_groups *= max(1, int(work[group_column].nunique(dropna=False)))
+        if estimated_groups > max_groups * 20:
+            raise ValueError(f"GROUP_LIMIT_EXCEEDED: 预计组合数 {estimated_groups:,} 超过当前上限，请减少维度或提高筛选条件")
     grouped = work.groupby(group_cols, observed=False)
     result = grouped.size().reset_index(name="row_count")
     if "__target__" in work:
         target_group = grouped["__target__"].agg(["sum", "mean"]).reset_index().rename(columns={"sum": "bad_count", "mean": "bad_rate"})
         result = result.merge(target_group, on=group_cols, how="left")
     result = result[result["row_count"] >= int(spec.get("min_group_size", 50))]
-    result = result.sort_values("row_count", ascending=False).head(int(spec.get("max_groups", 1000)))
+    result = result.sort_values("row_count", ascending=False).head(max_groups)
     records = result.to_dict(orient="records")
     return {"dimensions": columns, "rows": records, "suppressed_groups": max(0, int(len(grouped)) - len(records)), "spec": spec}

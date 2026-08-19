@@ -125,6 +125,18 @@ def test_train_candidates_and_segment_analysis(tmp_path) -> None:
     assert sum(item["row_count"] for item in analysis["rows"]) == len(frame)
 
 
+def test_segment_analysis_caps_combination_explosion() -> None:
+    frame = pd.DataFrame({f"d{index}": [f"v{row % 40}" for row in range(600)] for index in range(4)})
+    frame["bad_flag"] = [row % 2 for row in range(600)]
+    spec = {"dimensions": [{"column": f"d{index}"} for index in range(4)], "target": {"column": "bad_flag"}, "max_groups": 100}
+    try:
+        segment_analysis(frame, spec)
+    except ValueError as exc:
+        assert "GROUP_LIMIT_EXCEEDED" in str(exc)
+    else:
+        raise AssertionError("expected high-dimensional grouping guard")
+
+
 def test_generated_code_review_blocks_network_and_allows_reference_code() -> None:
     assert review_generated_code("import pandas as pd\nprint('ok')")["verdict"] == "pass"
     result = review_generated_code("import requests\nrequests.get('https://example.com')")
