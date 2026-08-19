@@ -264,7 +264,7 @@ function renderActionCard() {
   else if (run.status === 'succeeded') {
     const baseline = (run.state && run.state.report && run.state.report.baseline) || {};
     const reevalButton = baseline.score_column ? '<button class="secondary-button action-button" id="reevaluate-baseline">新 OOT 复评既有模型</button>' : '';
-    card.innerHTML = '<h3>本次 Run 已完成</h3><p>模型、代码交付物和报告已保存在本机。你可以打开 HTML 报告，或从当前方案派生隔离的 what-if 实验。</p><a class="secondary-button action-button" href="/api/runs/' + run.id + '/report.html" target="_blank">打开报告</a><div class="action-links"><a class="text-link" href="/api/runs/' + run.id + '/report.xlsx" target="_blank">下载 XLSX</a><a class="text-link" href="/api/runs/' + run.id + '/trace.zip" target="_blank">下载 Trace</a></div><button class="secondary-button action-button" id="what-if-run">派生 what-if 实验</button>' + reevalButton;
+    card.innerHTML = '<h3>本次 Run 已完成</h3><p>模型、代码交付物和报告已保存在本机。你可以打开 HTML 报告，或从当前方案派生隔离的 what-if 实验。</p><a class="secondary-button action-button" href="/api/runs/' + run.id + '/report.html" target="_blank">打开报告</a><div class="action-links"><a class="text-link" href="/api/runs/' + run.id + '/report.xlsx" target="_blank">下载 XLSX</a><a class="text-link" href="/api/runs/' + run.id + '/artifacts.zip" target="_blank">下载完整交付物</a><a class="text-link" href="/api/runs/' + run.id + '/trace.zip" target="_blank">下载 Trace</a></div><button class="secondary-button action-button" id="what-if-run">派生 what-if 实验</button>' + reevalButton;
     $('#what-if-run').addEventListener('click', createWhatIf);
     if ($('#reevaluate-baseline')) $('#reevaluate-baseline').addEventListener('click', reevaluateBaseline);
   }
@@ -287,7 +287,10 @@ function renderReport(report) {
   const highPsi = stability.filter(function (item) { return ['review', 'high'].includes(item.validation && item.validation.review_flag) || ['review', 'high'].includes(item.oot && item.oot.review_flag); }).length;
   const reevaluations = report.baseline_reevaluations || [];
   const reevaluationNote = reevaluations.length ? '<strong>既有模型新 OOT 复评</strong><ul>' + reevaluations.map(function (item) { const metrics = item.metrics || {}; return '<li>' + escapeHtml(item.dataset_filename || item.dataset_id || '新数据集') + ' · ROC-AUC ' + escapeHtml(metrics.roc_auc == null ? '—' : metrics.roc_auc) + ' · KS ' + escapeHtml(metrics.ks == null ? '—' : metrics.ks) + ' · 固定通过率坏样本捕获 ' + escapeHtml((item.fixed_rate || {}).bad_capture_rate == null ? '—' : (item.fixed_rate || {}).bad_capture_rate) + '</li>'; }).join('') + '</ul>' : '';
-  $('#report-details').innerHTML = '<div class="report-facts"><span>校准最大绝对差</span><strong>' + calibrationGap + '</strong><span>需稳定性复核变量</span><strong>' + highPsi + '</strong></div>' + (excluded.length ? '<strong>字段处理摘要</strong><ul>' + excluded.map(function (item) { return '<li><code>' + escapeHtml(item.column) + '</code> · ' + escapeHtml(item.status) + ' · ' + escapeHtml((item.reasons || []).join('、') || '规则排除') + '</li>'; }).join('') + '</ul>' : '<strong>字段处理摘要</strong><span>没有字段被规则排除。</span>') + reevaluationNote;
+  const review = report.code_review || {};
+  const imbalance = report.imbalance_policy || {};
+  const reviewLabel = review.verdict === 'pass' ? '通过' : review.verdict === 'block' ? '阻断' : (review.verdict || '—');
+  $('#report-details').innerHTML = '<div class="report-facts"><span>校准最大绝对差</span><strong>' + calibrationGap + '</strong><span>需稳定性复核变量</span><strong>' + highPsi + '</strong><span>代码 Reviewer</span><strong>' + escapeHtml(reviewLabel) + '</strong><span>训练正/负类</span><strong>' + escapeHtml(String(imbalance.train_positive_count == null ? '—' : imbalance.train_positive_count) + ' / ' + String(imbalance.train_negative_count == null ? '—' : imbalance.train_negative_count)) + '</strong></div>' + (excluded.length ? '<strong>字段处理摘要</strong><ul>' + excluded.map(function (item) { return '<li><code>' + escapeHtml(item.column) + '</code> · ' + escapeHtml(item.status) + ' · ' + escapeHtml((item.reasons || []).join('、') || '规则排除') + '</li>'; }).join('') + '</ul>' : '<strong>字段处理摘要</strong><span>没有字段被规则排除。</span>') + reevaluationNote;
   renderSelectionTable(report);
   renderNarrativeEditor(report);
 }
