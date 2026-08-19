@@ -154,7 +154,7 @@ def _report_html(report: Dict[str, Any]) -> str:
     <h2>冠军解释与稳定性</h2><p>下表为训练分区拟合规则下的变量重要性；PSI 仅作稳定性复核提示，不参与 OOT 选择。</p><table><thead><tr><th>变量</th><th>重要性/绝对系数</th></tr></thead><tbody>{importance_rows or '<tr><td colspan="2">暂无解释结果</td></tr>'}</tbody></table>
     <h3>验证集校准</h3><table><thead><tr><th>分箱</th><th>样本</th><th>预测坏率</th><th>实际坏率</th><th>绝对差</th></tr></thead><tbody>{calibration_rows or '<tr><td colspan="5">暂无校准结果</td></tr>'}</tbody></table>
     <table><thead><tr><th>变量</th><th>验证 PSI</th><th>验证提示</th><th>OOT PSI</th><th>OOT 提示</th></tr></thead><tbody>{stability_rows or '<tr><td colspan="5">暂无稳定性结果</td></tr>'}</tbody></table>
-    <h2>探索与数据处理</h2><p>重复行：{report.get('quality', {}).get('duplicate_rows', 0)}；数值字段：{len(report.get('quality', {}).get('numeric', []))}；类别字段：{len(report.get('quality', {}).get('categorical', []))}</p><p>{report.get('cleaning', {}).get('note', '仅展示已记录的本地处理规则。')}</p>
+    <h2>探索与数据处理</h2><p>重复行：{report.get('quality', {}).get('duplicate_rows', 0)}；数值字段：{len(report.get('quality', {}).get('numeric', []))}；类别字段：{len(report.get('quality', {}).get('categorical', []))}</p><p>{report.get('cleaning', {}).get('note', '仅展示已记录的本地处理规则。')}</p><p>类别不平衡：训练分区 {safe((report.get('imbalance_policy') or {}).get('train_positive_count', '-'))} 个正类 / {safe((report.get('imbalance_policy') or {}).get('train_negative_count', '-'))} 个负类，采用算法级权重，不做重采样。</p>
     {f"<h2>既有模型基线</h2><p>分数列：{safe(baseline.get('score_column', '-'))}；方向：{safe(baseline.get('orientation', '-'))}；验证阈值在验证集冻结，OOT 仅评估。固定通过率：{safe(baseline.get('fixed_approval_rate', '-'))}；swap set 已按冠军与基线的验证排序生成聚合比较。</p>" if baseline else ""}
     {f"<h2>既有模型新 OOT 复评</h2><table><thead><tr><th>数据集</th><th>ROC-AUC</th><th>KS</th><th>固定通过率坏样本捕获</th><th>协议</th></tr></thead><tbody>{reevaluation_rows}</tbody></table>" if reevaluation_rows else ""}
     <h2>运行信息</h2><pre>{manifest_text}</pre></html>"""
@@ -232,6 +232,7 @@ def _write_report_xlsx(report: Dict[str, Any], path: Path) -> None:
         pd.DataFrame(importance_rows).to_excel(writer, sheet_name="explanations", index=False)
         pd.DataFrame(stability_rows).to_excel(writer, sheet_name="stability", index=False)
         pd.DataFrame((report.get("scorecard") or {}).get("feature_importance", [])).to_excel(writer, sheet_name="scorecard_importance", index=False)
+        pd.DataFrame([report.get("imbalance_policy") or {}]).to_excel(writer, sheet_name="imbalance", index=False)
         baseline = report.get("baseline") or {}
         if baseline:
             pd.DataFrame(
@@ -624,6 +625,7 @@ def _node_report(context: RunContext, state: GraphState) -> GraphState:
         "scorecard": training.get("scorecard"),
         "stability": training.get("stability", {}),
         "baseline": training.get("baseline"),
+        "imbalance_policy": training.get("imbalance_policy", {}),
         "manifest": {
             "run_id": state["run_id"],
             "dataset_id": state["dataset_id"],

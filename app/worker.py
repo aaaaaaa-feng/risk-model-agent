@@ -1044,15 +1044,26 @@ def train_candidates(
     train_idx = np.asarray(split["train"], dtype=int)
     valid_idx = np.asarray(split["valid"], dtype=int)
     oot_idx = np.asarray(split["oot"], dtype=int)
+    train_positive = max(int(np.sum(y[train_idx] == 1)), 1)
+    train_negative = max(int(np.sum(y[train_idx] == 0)), 1)
+    scale_pos_weight = round(train_negative / train_positive, 8)
+    imbalance_policy = {
+        "schema_version": "risk-imbalance-policy/v1",
+        "fit_scope": "train",
+        "train_positive_count": train_positive,
+        "train_negative_count": train_negative,
+        "policy": "algorithmic_class_weight",
+        "resampling": "none",
+    }
     all_models: List[Tuple[str, Any, bool]] = [
         ("logistic_regression", LogisticRegression(max_iter=500, class_weight="balanced", random_state=42), False),
         ("random_forest", RandomForestClassifier(n_estimators=120, max_depth=8, min_samples_leaf=3, class_weight="balanced_subsample", n_jobs=1, random_state=42), True),
-        ("hist_gradient_boosting", HistGradientBoostingClassifier(max_iter=120, learning_rate=0.06, max_leaf_nodes=15, random_state=42), True),
+        ("hist_gradient_boosting", HistGradientBoostingClassifier(max_iter=120, learning_rate=0.06, max_leaf_nodes=15, class_weight="balanced", random_state=42), True),
     ]
     all_models.append(
         (
             "xgboost",
-            XGBClassifier(n_estimators=140, max_depth=4, learning_rate=0.07, subsample=0.85, colsample_bytree=0.85, n_jobs=1, eval_metric="logloss", random_state=42) if XGBClassifier is not None else None,
+            XGBClassifier(n_estimators=140, max_depth=4, learning_rate=0.07, subsample=0.85, colsample_bytree=0.85, scale_pos_weight=scale_pos_weight, n_jobs=1, eval_metric="logloss", random_state=42) if XGBClassifier is not None else None,
             True,
         )
     )
@@ -1175,6 +1186,7 @@ def train_candidates(
         "scorecard": scorecard,
         "baseline": baseline,
         "stability": stability,
+        "imbalance_policy": imbalance_policy,
     }
 
 

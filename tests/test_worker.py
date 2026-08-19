@@ -150,6 +150,8 @@ def test_train_candidates_and_segment_analysis(tmp_path) -> None:
     assert result["champion"]["feature_importance"]
     assert result["champion"]["validation"]["calibration"]
     assert result["champion"]["oof"]["status"] == "succeeded"
+    assert result["imbalance_policy"]["fit_scope"] == "train"
+    assert result["imbalance_policy"]["policy"] == "algorithmic_class_weight"
 
     analysis = segment_analysis(
         frame,
