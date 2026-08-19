@@ -29,6 +29,9 @@ risk-model-agent = "app.main:run"
 [tool.setuptools.packages.find]
 include = ["app*"]
 
+[tool.setuptools.package-data]
+app = ["templates/*.html", "static/*"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py39"

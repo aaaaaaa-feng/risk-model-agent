@@ -48,7 +48,7 @@
 ```bash
 python3.9 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/risk-model-agent
+.venv/bin/python -m app.main
 ```
 
 浏览器打开 `http://127.0.0.1:8765`。如果暂时不配置外部 Provider，页面会明确显示“确定性降级”，仍可使用本地 Worker 完成演示流程。

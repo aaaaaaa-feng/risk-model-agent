@@ -306,3 +306,7 @@ def run_analysis(project_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 def run() -> None:
     import uvicorn
     uvicorn.run("app.main:app", host=os.getenv("RISK_AGENT_HOST", "127.0.0.1"), port=int(os.getenv("RISK_AGENT_PORT", "8765")), reload=False)
+
+
+if __name__ == "__main__":
+    run()
