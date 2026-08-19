@@ -35,6 +35,8 @@
 - `python scripts/verify_packaging.py`：通过；这是入口和资源契约检查，不等价于目标平台真实打包。
 - `.venv/bin/python scripts/run_golden_cases.py`：5/5 通过；这是最小确定性回归门禁，不等价于独立评测 Harness。
 - 本地 Git 最新提交：
+  - `ad72542 docs: record project lifecycle audit`
+  - `64f5e8c docs: update latest audit commit list`
   - `c1d7227 feat: add auditable project lifecycle controls`
   - `3c0308a docs: map audit recommendations to implementation`
   - `0145e99 docs: record github connector verification`
@@ -82,4 +84,4 @@ Post "https://api.github.com/graphql": proxyconnect tcp: dial tcp 127.0.0.1:1080
 gh auth status: The token in default is invalid.
 ```
 
-没有创建远程地址，也没有反复重试；仓库保留在本地，工作树干净。若后续通过 GitHub 网页或有效 CLI 重新创建仓库，再以当前 HEAD `3f6c10d` 为起点添加远程并核对远端 SHA。
+没有创建远程地址，也没有反复重试；仓库保留在本地，工作树干净。若后续通过 GitHub 网页或有效 CLI 重新创建仓库，再以当前 HEAD `ad72542` 为起点添加远程并核对远端 SHA。
