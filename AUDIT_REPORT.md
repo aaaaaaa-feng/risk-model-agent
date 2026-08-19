@@ -28,12 +28,12 @@
 - `git diff --check`：通过。
 - `python scripts/verify_packaging.py`：通过；这是入口和资源契约检查，不等价于目标平台真实打包。
 - `.venv/bin/python scripts/run_golden_cases.py`：5/5 通过；这是最小确定性回归门禁，不等价于独立评测 Harness。
-- 本地 Git 提交：
-  - `4a8460a fix: escape local HTML report content`
-  - `ecf7269 fix: keep demo dataset versions immutable`
-  - `6bfbe78 docs: align worker isolation with v0.1 boundaries`
-  - `15bf693 fix: preserve safe aliases in trace and review payloads`
-- `57c073b feat: harden resources trace and model evidence`
+- 本地 Git 最新提交：
+  - `3967feb docs: record final regression count`
+  - `74e22b6 fix: keep free-form chat local by default`
+  - `c776715 feat: add guarded chat and feature confirmation controls`
+  - `c62e11e feat: expose report narrative editing in web UI`
+  - `448db66 feat: add conversational agent and report narrative workflow`
 - 外部 Provider 默认关闭；启用后只发送别名化 SafeEvidence 和受控结构化聊天意图，测试覆盖敏感载荷阻断、聊天文本边界、疑似敏感值发送前阻断和 OpenAI-compatible 请求形态。
 - 生成代码只作为本地交付物，产品不执行任意生成代码；静态 Reviewer 阻断不会被标成成功。
 - 代码 Reviewer 已覆盖 AST 语法、依赖白名单、危险调用、网络/凭据模式，并给出结构化位置；项目对话只向 Provider 发送别名化上下文，Trace 不导出聊天原文。
