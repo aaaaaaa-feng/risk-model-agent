@@ -35,6 +35,7 @@
 - `python scripts/verify_packaging.py`：通过；这是入口和资源契约检查，不等价于目标平台真实打包。
 - `.venv/bin/python scripts/run_golden_cases.py`：5/5 通过；这是最小确定性回归门禁，不等价于独立评测 Harness。
 - 本地 Git 最新提交：
+  - `c1d7227 feat: add auditable project lifecycle controls`
   - `3c0308a docs: map audit recommendations to implementation`
   - `0145e99 docs: record github connector verification`
   - `c5f1779 feat: expose complete run delivery artifacts`
