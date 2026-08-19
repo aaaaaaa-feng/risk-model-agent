@@ -171,6 +171,17 @@ button { cursor: pointer; }
 .model-options { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .model-option { display: flex !important; grid-template-columns: none !important; align-items: center; gap: 6px; padding: 6px 7px; border-radius: 7px; background: #f0f8f4; color: var(--ink) !important; font-size: 10px !important; font-weight: 600 !important; }
 .model-option input { width: auto; accent-color: var(--accent); }
+.feature-selection { display: grid; gap: 7px; margin-top: 2px; }
+.feature-selection-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.feature-selection-heading small { color: var(--muted); font-size: 9px; font-weight: 400; }
+.feature-search { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: white; color: var(--ink); font-size: 11px; outline: none; }
+.feature-search:focus { border-color: #7abda7; box-shadow: 0 0 0 3px #e5f5ed; }
+.feature-list { display: grid; gap: 5px; max-height: 190px; overflow: auto; padding-right: 2px; }
+.feature-option { display: flex !important; grid-template-columns: none !important; align-items: flex-start; gap: 7px; padding: 7px 8px; border-radius: 8px; background: #f0f8f4; color: var(--ink) !important; font-size: 10px !important; font-weight: 600 !important; }
+.feature-option input { width: auto; margin-top: 2px; accent-color: var(--accent); }
+.feature-option span { min-width: 0; }
+.feature-option strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feature-option small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .analysis-controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
 .analysis-select { min-width: 0; border: 1px solid var(--line); border-radius: 9px; padding: 9px 8px; background: #fbfdfc; color: var(--ink); font-size: 11px; }
 .analysis-result { margin-top: 12px; overflow: hidden; }

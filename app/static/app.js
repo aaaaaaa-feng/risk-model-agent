@@ -1,4 +1,4 @@
-const state = { projects: [], project: null, datasets: [], dictionaries: [], runs: [], run: null, events: [], conversation: null, messages: [], mode: 'auto', eventSource: null, config: null };
+const state = { projects: [], project: null, datasets: [], dictionaries: [], runs: [], run: null, events: [], conversation: null, messages: [], mode: 'auto', eventSource: null, config: null, confirmationRunId: null, confirmationFeatures: [], confirmationExcluded: new Set() };
 const $ = function (selector) { return document.querySelector(selector); };
 const projectList = $('#project-list');
 const escapeHtml = function (value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]; }); };
@@ -113,6 +113,29 @@ function renderAnalysisControls() {
   control.querySelectorAll('.analysis-select').forEach(function (select) { select.addEventListener('change', function () { button.disabled = !Array.from(control.querySelectorAll('.analysis-select')).some(function (item) { return item.value; }); }); });
   button.disabled = true;
 }
+function renderFeatureSelection() {
+  const list = $('#feature-list'); const search = $('#feature-search'); const count = $('#feature-count');
+  if (!list || !search || !count) return;
+  const query = search.value.trim().toLowerCase();
+  const matching = state.confirmationFeatures.filter(function (item) {
+    const label = ((item.name || '') + ' ' + (((item.dictionary || {}).display_name) || '')).toLowerCase();
+    return !query || label.includes(query);
+  });
+  const visible = matching.slice(0, 200);
+  list.innerHTML = visible.length ? visible.map(function (item) {
+    const dictionary = item.dictionary || {};
+    const display = dictionary.display_name && dictionary.display_name !== item.name ? ' · ' + dictionary.display_name : '';
+    const missing = item.missing_rate == null ? '缺失 —' : '缺失 ' + (Number(item.missing_rate) * 100).toFixed(1) + '%';
+    return '<label class="feature-option"><input type="checkbox" data-confirm-exclude="' + escapeHtml(item.name) + '" ' + (state.confirmationExcluded.has(item.name) ? 'checked' : '') + ' /><span><strong>' + escapeHtml(item.name) + '</strong><small>' + escapeHtml((item.type || 'unknown') + display + ' · ' + missing) + '</small></span></label>';
+  }).join('') : '<span class="muted">没有匹配字段。</span>';
+  count.textContent = (query ? '匹配 ' + matching.length + ' 个' : '可选 ' + state.confirmationFeatures.length + ' 个') + (matching.length > visible.length ? ' · 当前展示前 200 个，请继续搜索' : '');
+  list.querySelectorAll('[data-confirm-exclude]').forEach(function (input) {
+    input.addEventListener('change', function () {
+      if (input.checked) state.confirmationExcluded.add(input.dataset.confirmExclude);
+      else state.confirmationExcluded.delete(input.dataset.confirmExclude);
+    });
+  });
+}
 function renderConversation() {
   const container = $('#conversation-messages');
   if (!container) return;
@@ -162,6 +185,11 @@ function renderActionCard() {
     const split = plan.split || {}; const models = (plan.models || []).map(escapeHtml).join('、') || '待定';
     const targetCandidates = (runState.profile && runState.profile.target_candidates) || [];
     const profileColumns = (runState.profile && runState.profile.columns_detail) || [];
+    if (state.confirmationRunId !== run.id) {
+      state.confirmationRunId = run.id;
+      state.confirmationFeatures = profileColumns.filter(function (item) { return ['numeric', 'categorical'].includes(item.type) && item.name !== (plan.target || target.target); });
+      state.confirmationExcluded = new Set((plan.screening && plan.screening.excluded_columns) || []);
+    }
     const baselineCandidates = profileColumns.filter(function (item) { return item.type === 'numeric' && item.name !== (plan.target || target.target); });
     const baselineOptions = ['<option value="">不导入既有模型基线</option>'].concat(baselineCandidates.map(function (item) { return '<option value="' + escapeHtml(item.name) + '" ' + (item.name === plan.baseline_column ? 'selected' : '') + '>' + escapeHtml(item.name) + '</option>'; })).join('');
     const targetOptions = targetCandidates.map(function (candidate) { return '<option value="' + escapeHtml(candidate) + '" ' + (candidate === (plan.target || target.target) ? 'selected' : '') + '>' + escapeHtml(candidate) + '</option>'; }).join('');
@@ -181,9 +209,16 @@ function renderActionCard() {
       '<div class="decision-controls"><label>确认 Y 字段<select id="confirm-target">' + targetOptions + '</select></label>' +
       '<label>确认样本切分<select id="confirm-split">' + splitOptions + '</select></label>' +
       '<label>既有模型基线（可选）<select id="confirm-baseline">' + baselineOptions + '</select></label>' +
+      '<div class="feature-selection"><div class="feature-selection-heading"><span class="control-label">手动排除字段（可选）</span><small id="feature-count">可选 ' + state.confirmationFeatures.length + ' 个</small></div><input id="feature-search" class="feature-search" type="search" placeholder="搜索字段名或中文释义" autocomplete="off" /><div id="feature-list" class="feature-list"></div><small class="muted">规则筛选仍会在训练分区执行；这里的勾选会作为明确业务决定记录。</small></div>' +
       '<div><span class="control-label">本次候选模型</span><div class="model-options">' + modelOptions + '</div></div></div>' +
       cleaningButton + '<button class="primary-button action-button" id="confirm-plan"' + confirmationDisabled + '>确认并继续</button>';
     $('#confirm-plan').addEventListener('click', confirmPlan);
+    renderFeatureSelection();
+    $('#feature-search').addEventListener('input', renderFeatureSelection);
+    $('#confirm-target').addEventListener('change', function () {
+      state.confirmationFeatures = profileColumns.filter(function (item) { return ['numeric', 'categorical'].includes(item.type) && item.name !== $('#confirm-target').value; });
+      renderFeatureSelection();
+    });
     if ($('#apply-cleaning')) $('#apply-cleaning').addEventListener('click', applyCleaning);
     if ($('#skip-cleaning')) $('#skip-cleaning').addEventListener('click', skipCleaning);
   }
@@ -286,7 +321,7 @@ async function confirmPlan() {
   const models = Array.from(document.querySelectorAll('[data-confirm-model]:checked')).map(function (input) { return input.dataset.confirmModel; });
   if (!target || !splitMethod || !models.length) { showNotice('请先确认 Y、样本切分，并至少选择一个候选模型。', 'block'); return; }
   try {
-    await api('/api/runs/' + state.run.id + '/decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'plan_confirmation', values: { target: target, split_method: splitMethod, models: models, baseline_column: baselineColumn || null, reviewed_without_code_reading: true } }) });
+    await api('/api/runs/' + state.run.id + '/decision', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'plan_confirmation', values: { target: target, split_method: splitMethod, models: models, baseline_column: baselineColumn || null, excluded_features: Array.from(state.confirmationExcluded), reviewed_without_code_reading: true } }) });
     showNotice('已记录正式确认，继续本地筛选与训练。'); await syncRun(); connectStream();
   } catch (error) { showNotice(error.message, 'block'); }
 }

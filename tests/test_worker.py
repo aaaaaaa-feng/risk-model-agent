@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from app import agent as agent_module
-from app.agent import ProviderGateway, _safe_plan_payload, build_safe_evidence, generate_reproducible_code, propose_plan, repair_generated_code, review_generated_code, review_plan
+from app.agent import ProviderGateway, _safe_plan_payload, answer_chat, build_safe_evidence, generate_reproducible_code, propose_plan, repair_generated_code, review_generated_code, review_plan
 from app.tools import registry_manifest, require_tool
 from app.worker import build_cleaning_plan, estimate_table_resources, evaluate_baseline, parse_data_dictionary, profile_table, quality_analysis, read_table, segment_analysis, select_features, split_frame, target_summary, train_candidates
 
@@ -274,6 +274,33 @@ def test_provider_gateway_budget_guard_fails_closed(monkeypatch) -> None:
     )
     result = gateway.complete("system", {"schema_version": "risk-safe-evidence/v1"})
     assert result.error_code == "PROVIDER_BUDGET_EXCEEDED"
+
+
+def test_chat_dlp_blocks_suspected_pasted_identifier_before_provider_call(monkeypatch) -> None:
+    monkeypatch.setattr(agent_module, "provider_key", lambda: "test-key")
+    calls = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, *args, **kwargs):
+            calls.append((args, kwargs))
+            raise AssertionError("疑似敏感聊天不应触发外部请求")
+
+    gateway = ProviderGateway(
+        config={"llm_enabled": True, "base_url": "https://provider.example/v1", "model": "main-model"},
+        client_factory=Client,
+    )
+    answer = answer_chat("请帮我看手机号 13800138000 的样本", {}, gateway)
+    assert answer["provider_call"]["error_code"] == "CHAT_DLP_BLOCK"
+    assert calls == []
 
 
 def test_plan_review_blocks_too_small_target_class() -> None:

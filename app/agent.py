@@ -272,6 +272,23 @@ def _alias_text(text: str, profile: Optional[Dict[str, Any]]) -> str:
     return result
 
 
+def _chat_dlp_reason(text: str) -> Optional[str]:
+    """Detect common pasted identifiers before an optional external chat call.
+
+    Chat is persisted locally, but free-form user text is not SafeEvidence by
+    default.  We fail closed for high-confidence secrets and long identifiers
+    rather than trying to guess whether a number is a harmless business value.
+    """
+    value = str(text or "")
+    if re.search(r"(?i)\b(?:bearer\s+|sk-|api[_ -]?key\s*[:=])[^\s,;]{12,}", value):
+        return "检测到疑似凭据"
+    if re.search(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b", value):
+        return "检测到疑似邮箱"
+    if re.search(r"(?<!\d)(?:\d[ -]?){11,19}(?!\d)", value):
+        return "检测到疑似手机号或卡号"
+    return None
+
+
 def _restore_aliases(text: str, profile: Optional[Dict[str, Any]]) -> str:
     result = str(text or "")
     aliases = alias_fields(profile or {})
@@ -338,7 +355,11 @@ def answer_chat(message: str, run_state: Optional[Dict[str, Any]], gateway: Prov
     provider_mode = "deterministic-fallback"
     response_text = fallback
     provider_call: Dict[str, Any] = {"attempted": False, "ok": False, "error_code": "PROVIDER_DISABLED"}
-    if gateway.enabled and gateway.configured:
+    dlp_reason = _chat_dlp_reason(text)
+    if gateway.enabled and gateway.configured and dlp_reason:
+        provider_call = {"attempted": False, "ok": False, "error_code": "CHAT_DLP_BLOCK", "reason": dlp_reason}
+        response_text = f"{fallback} 为保护数据安全，本轮消息未发送到外部 API（{dlp_reason}）。"
+    elif gateway.enabled and gateway.configured:
         provider_mode = "external-enabled"
         result = gateway.complete(
             "你是风控建模工作台中的项目协作 Agent。只根据匿名上下文回答，不能编造指标或客户信息。"

@@ -34,7 +34,7 @@
   - `6bfbe78 docs: align worker isolation with v0.1 boundaries`
   - `15bf693 fix: preserve safe aliases in trace and review payloads`
 - `57c073b feat: harden resources trace and model evidence`
-- 外部 Provider 默认关闭；启用后只发送别名化 SafeEvidence，测试覆盖敏感载荷阻断和 OpenAI-compatible 请求形态。
+- 外部 Provider 默认关闭；启用后只发送别名化 SafeEvidence，测试覆盖敏感载荷阻断、聊天疑似敏感值发送前阻断和 OpenAI-compatible 请求形态。
 - 生成代码只作为本地交付物，产品不执行任意生成代码；静态 Reviewer 阻断不会被标成成功。
 - 代码 Reviewer 已覆盖 AST 语法、依赖白名单、危险调用、网络/凭据模式，并给出结构化位置；项目对话只向 Provider 发送别名化上下文，Trace 不导出聊天原文。
 - 当前验证使用 FastAPI TestClient 和本地 Worker 子进程；本环境不把一次受限沙箱端口绑定失败当作应用功能失败，也未把它包装成真实浏览器/跨平台验收。
