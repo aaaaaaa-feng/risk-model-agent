@@ -5,6 +5,11 @@ if (Test-Path $Packaged) {
     & $Packaged
     exit $LASTEXITCODE
 }
+$PackagedFile = Join-Path $Root "dist\risk-model-agent.exe"
+if (Test-Path $PackagedFile) {
+    & $PackagedFile
+    exit $LASTEXITCODE
+}
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 if (-not (Test-Path $Python)) {
     $Python = "py"

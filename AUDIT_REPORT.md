@@ -22,16 +22,17 @@
 
 ## 已验证证据
 
-- `27 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算/出站摘要、报告导出、Trace 脱敏与事件链、资源边界、数据字典、校准/稳定性/评分卡映射、训练集筛选、高维分析守卫、Tool Registry、清洗版本、Baseline 和 what-if 隔离。
-- `ruff check app tests`：通过。
+- `28 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算/出站摘要、报告导出、Trace 脱敏与事件链、资源边界、数据字典、校准/稳定性/评分卡映射、训练集筛选、高维分析守卫、Tool Registry、清洗版本、Baseline 和 what-if 隔离、跨平台打包契约。
+- `ruff check app tests scripts/verify_packaging.py`：通过。
 - `node --check app/static/app.js`：通过。
 - `git diff --check`：通过。
+- `python scripts/verify_packaging.py`：通过；这是入口和资源契约检查，不等价于目标平台真实打包。
 - 本地 Git 提交：
   - `4a8460a fix: escape local HTML report content`
   - `ecf7269 fix: keep demo dataset versions immutable`
   - `6bfbe78 docs: align worker isolation with v0.1 boundaries`
   - `15bf693 fix: preserve safe aliases in trace and review payloads`
-  - `57c073b feat: harden resources trace and model evidence`
+- `57c073b feat: harden resources trace and model evidence`
 - 外部 Provider 默认关闭；启用后只发送别名化 SafeEvidence，测试覆盖敏感载荷阻断和 OpenAI-compatible 请求形态。
 - 生成代码只作为本地交付物，产品不执行任意生成代码；静态 Reviewer 阻断不会被标成成功。
 - 当前验证使用 FastAPI TestClient 和本地 Worker 子进程；本环境不把一次受限沙箱端口绑定失败当作应用功能失败，也未把它包装成真实浏览器/跨平台验收。

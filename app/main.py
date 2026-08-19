@@ -4,7 +4,9 @@ import asyncio
 from copy import deepcopy
 import json
 import os
+import re
 import shutil
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -791,8 +793,10 @@ def project_backup(project_id: str, include_data: bool = False) -> FileResponse:
 
 def _safe_archive_path(name: str) -> Path:
     normalized = str(name or "").replace("\\", "/")
+    if "\x00" in normalized or normalized.startswith(("/", "//")) or re.match(r"^[A-Za-z]:/", normalized):
+        raise ValueError(f"BACKUP_PATH_INVALID: {name}")
     path = Path(normalized)
-    if not normalized or normalized.startswith("/") or path.drive or any(part in {"", ".", ".."} for part in path.parts):
+    if not normalized or path.drive or any(part in {"", ".", ".."} for part in path.parts):
         raise ValueError(f"BACKUP_PATH_INVALID: {name}")
     return Path(*path.parts)
 
@@ -827,7 +831,11 @@ async def restore_project(file: UploadFile = File(...)) -> Dict[str, Any]:
                     raise HTTPException(413, "备份包超过本地恢复上限")
                 handle.write(chunk)
         with zipfile.ZipFile(temp_path) as archive:
-            names = {str(info.filename).replace("\\", "/") for info in archive.infolist() if not info.is_dir()}
+            file_infos = [info for info in archive.infolist() if not info.is_dir()]
+            normalized_names = [str(info.filename).replace("\\", "/") for info in file_infos]
+            if len(normalized_names) != len(set(normalized_names)):
+                raise HTTPException(400, "备份包包含重复文件名")
+            names = set(normalized_names)
             if "manifest.json" not in names:
                 raise HTTPException(400, "备份包缺少 manifest.json")
             try:
@@ -839,7 +847,16 @@ async def restore_project(file: UploadFile = File(...)) -> Dict[str, Any]:
             listed_files = manifest.get("files") or []
             if not isinstance(listed_files, list):
                 raise HTTPException(400, "备份包 files 必须是列表")
-            expected = {str(item.get("path")) for item in listed_files if isinstance(item, dict) and item.get("path")}
+            file_entries: Dict[str, Dict[str, Any]] = {}
+            for item in listed_files:
+                if not isinstance(item, dict) or not item.get("path"):
+                    raise HTTPException(400, "备份包 files 存在无效条目")
+                normalized = str(item["path"]).replace("\\", "/")
+                _safe_archive_path(normalized)
+                if normalized in file_entries:
+                    raise HTTPException(400, "备份包 manifest 包含重复文件名")
+                file_entries[normalized] = item
+            expected = set(file_entries)
             for name in names - {"manifest.json"}:
                 _safe_archive_path(name)
             if not (names - {"manifest.json"}).issubset(expected):
@@ -850,6 +867,10 @@ async def restore_project(file: UploadFile = File(...)) -> Dict[str, Any]:
             total_uncompressed = sum(int(info.file_size or 0) for info in archive.infolist())
             if total_uncompressed > MAX_BACKUP_BYTES * 4:
                 raise HTTPException(413, "备份包解压后超过本地恢复上限")
+            for info in file_infos:
+                mode = (int(info.external_attr) >> 16) & 0o170000
+                if mode == 0o120000:
+                    raise HTTPException(400, "备份包不允许包含符号链接")
             source_project = manifest.get("project") or {}
             source_project_id = str(source_project.get("id") or "")
             source_name = str(source_project.get("name") or "恢复项目").strip()[:90] or "恢复项目"
@@ -857,16 +878,23 @@ async def restore_project(file: UploadFile = File(...)) -> Dict[str, Any]:
             project_id = project["id"]
             try:
                 project_dir = store.project_dir(project_id)
-                for info in archive.infolist():
+                for info in file_infos:
                     if info.is_dir() or info.filename == "manifest.json":
                         continue
-                    relative = _safe_archive_path(info.filename)
+                    normalized = str(info.filename).replace("\\", "/")
+                    relative = _safe_archive_path(normalized)
                     destination = (project_dir / relative).resolve()
                     if project_dir.resolve() not in destination.parents:
                         raise ValueError("BACKUP_PATH_ESCAPE")
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     with archive.open(info) as source, destination.open("wb") as target:
                         shutil.copyfileobj(source, target, length=1024 * 1024)
+                    entry = file_entries.get(normalized) or {}
+                    if entry.get("bytes") is not None and int(entry["bytes"]) != destination.stat().st_size:
+                        raise ValueError(f"BACKUP_CHECKSUM_SIZE_MISMATCH: {normalized}")
+                    expected_hash = str(entry.get("sha256") or "")
+                    if expected_hash and sha256_file(destination) != expected_hash:
+                        raise ValueError(f"BACKUP_CHECKSUM_MISMATCH: {normalized}")
 
                 warnings: List[str] = []
                 dataset_map: Dict[str, str] = {}
@@ -990,7 +1018,12 @@ def run_analysis(project_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def run() -> None:
     import uvicorn
-    uvicorn.run("app.main:app", host=os.getenv("RISK_AGENT_HOST", "127.0.0.1"), port=int(os.getenv("RISK_AGENT_PORT", "8765")), reload=False)
+    host = os.getenv("RISK_AGENT_HOST", "127.0.0.1")
+    port = int(os.getenv("RISK_AGENT_PORT", "8765"))
+    # A frozen PyInstaller process should pass the already-imported ASGI app;
+    # string re-import can fail when the bundle has no normal module path.
+    target = app if getattr(sys, "frozen", False) else "app.main:app"
+    uvicorn.run(target, host=host, port=port, reload=False)
 
 
 if __name__ == "__main__":

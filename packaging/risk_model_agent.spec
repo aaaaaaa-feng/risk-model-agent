@@ -31,8 +31,7 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
+    [],
     [],
     name="risk-model-agent",
     debug=False,
@@ -40,4 +39,13 @@ exe = EXE(
     strip=False,
     upx=False,
     console=True,
+    exclude_binaries=True,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="risk-model-agent",
 )

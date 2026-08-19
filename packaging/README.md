@@ -2,6 +2,14 @@
 
 仓库提供同一份 PyInstaller spec 和两个本机启动脚本，目标是把本地 FastAPI Web 服务打成可双击启动的目录发行版。这里的构建脚本是可复现入口，不代表当前机器已经完成 macOS 与 Windows 的真实安装验收。
 
+在没有安装 PyInstaller 的环境中，可以先运行不依赖打包工具的契约检查：
+
+```bash
+python scripts/verify_packaging.py
+```
+
+它只检查入口、资源目录、spec 的 onedir 配置和可选依赖是否齐全；通过不等于已经完成目标平台的真实构建。
+
 ## macOS
 
 ```bash
