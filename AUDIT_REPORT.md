@@ -63,11 +63,11 @@
 
 ## GitHub 尝试结果
 
-按用户授权尝试执行公开仓库创建和推送，但当前 GitHub CLI 认证 token 已失效，且沙箱代理连接被拒绝：
+按用户授权尝试执行公开仓库创建和推送。当前外部状态核验为：GitHub 连接器可识别账号 `aaaaaaa-feng`，但 `aaaaaaa-feng/risk-model-agent` 返回 404；连接器当前没有“创建仓库”能力。命令行路径的认证 token 也已失效，且沙箱代理连接被拒绝：
 
 ```text
 Post "https://api.github.com/graphql": proxyconnect tcp: dial tcp 127.0.0.1:10808: connect: operation not permitted
 gh auth status: The token in default is invalid.
 ```
 
-没有创建远程地址，也没有反复重试；仓库保留在本地，工作树干净。
+没有创建远程地址，也没有反复重试；仓库保留在本地，工作树干净。若后续通过 GitHub 网页或有效 CLI 重新创建仓库，再以当前 HEAD `3f6c10d` 为起点添加远程并核对远端 SHA。
