@@ -289,6 +289,29 @@ def _chat_dlp_reason(text: str) -> Optional[str]:
     return None
 
 
+def _chat_intent(text: str) -> Optional[str]:
+    """Map a small, explicit set of safe questions to provider intents.
+
+    The original free-form sentence is deliberately never needed by the
+    Provider.  Unknown questions stay local instead of being heuristically
+    scrubbed and then sent over the network.
+    """
+    value = str(text or "").lower()
+    intent_patterns = (
+        ("explain_evidence", ("为什么", "原因", "排除", "复核", "explain", "why")),
+        ("next_step", ("下一步", "接下来", "怎么做", "需要确认", "next step")),
+        ("model_comparison", ("模型", "auc", "ks", "冠军", "比较", "model")),
+        ("target_contract", ("目标", "y字段", "正类", "负类", "target", "0/1")),
+        ("split_plan", ("切分", "训练集", "验证集", "oot", "留出", "split")),
+        ("report_delivery", ("报告", "评分卡", "产物", "导出", "report", "scorecard")),
+        ("segment_analysis", ("画像", "坏样本率", "分组", "维度", "分析", "segment")),
+    )
+    for intent, patterns in intent_patterns:
+        if any(pattern in value for pattern in patterns):
+            return intent
+    return None
+
+
 def _restore_aliases(text: str, profile: Optional[Dict[str, Any]]) -> str:
     result = str(text or "")
     aliases = alias_fields(profile or {})
@@ -327,7 +350,6 @@ def answer_chat(message: str, run_state: Optional[Dict[str, Any]], gateway: Prov
     run_state = run_state or {}
     profile = run_state.get("profile") or {}
     safe_context = _safe_chat_context(run_state)
-    safe_question = _alias_text(text, profile)
     next_actions: List[str] = []
     status = run_state.get("status")
     phase = run_state.get("phase")
@@ -356,16 +378,20 @@ def answer_chat(message: str, run_state: Optional[Dict[str, Any]], gateway: Prov
     response_text = fallback
     provider_call: Dict[str, Any] = {"attempted": False, "ok": False, "error_code": "PROVIDER_DISABLED"}
     dlp_reason = _chat_dlp_reason(text)
+    intent = _chat_intent(text)
     if gateway.enabled and gateway.configured and dlp_reason:
         provider_call = {"attempted": False, "ok": False, "error_code": "CHAT_DLP_BLOCK", "reason": dlp_reason}
         response_text = f"{fallback} 为保护数据安全，本轮消息未发送到外部 API（{dlp_reason}）。"
+    elif gateway.enabled and gateway.configured and not intent:
+        provider_call = {"attempted": False, "ok": False, "error_code": "CHAT_TEXT_LOCAL_ONLY"}
+        response_text = f"{fallback} 为保护数据安全，未将这段自由文本发送到外部 API；你可以继续使用本机流程或改用结构化问题。"
     elif gateway.enabled and gateway.configured:
         provider_mode = "external-enabled"
         result = gateway.complete(
             "你是风控建模工作台中的项目协作 Agent。只根据匿名上下文回答，不能编造指标或客户信息。"
             "如果问题需要改变 Y、切分、清洗、变量或模型，明确提示用户走结构化确认入口；"
             "不要声称已经执行未发生的动作。回答简洁、带证据边界。",
-            {"question": safe_question, "context": safe_context},
+            {"intent": intent, "context": safe_context},
             model=gateway.config.get("model"),
             max_tokens=600,
         )

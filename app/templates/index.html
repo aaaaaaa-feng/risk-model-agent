@@ -117,7 +117,7 @@
             <div id="conversation-messages" class="conversation-messages"><div class="timeline-placeholder">你可以追问当前证据、模型比较或下一步；需要改变方案时，系统会引导到确认卡。</div></div>
             <form id="conversation-form" class="conversation-form">
               <textarea id="conversation-input" rows="2" maxlength="2000" placeholder="例如：为什么这个字段被排除？当前最需要我确认什么？"></textarea>
-              <div class="conversation-actions"><small class="muted">外部 LLM 开启时只发送别名化 SafeEvidence；疑似敏感自由文本会在本机拦截。</small><button class="primary-button small" type="submit">发送</button></div>
+              <div class="conversation-actions"><small class="muted">外部 LLM 只接收结构化意图和别名化 SafeEvidence；无法归类的自由文本留在本机。</small><button class="primary-button small" type="submit">发送</button></div>
             </form>
           </section>
 

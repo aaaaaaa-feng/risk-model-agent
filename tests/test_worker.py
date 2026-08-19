@@ -303,6 +303,45 @@ def test_chat_dlp_blocks_suspected_pasted_identifier_before_provider_call(monkey
     assert calls == []
 
 
+def test_chat_external_boundary_sends_structured_intent_only(monkeypatch) -> None:
+    monkeypatch.setattr(agent_module, "provider_key", lambda: "test-key")
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "只能根据当前 SafeEvidence 给出下一步建议。"}}]}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers, json):
+            captured["json"] = json
+            return Response()
+
+    gateway = ProviderGateway(
+        config={"llm_enabled": True, "base_url": "https://provider.example/v1", "model": "main-model"},
+        client_factory=Client,
+    )
+    safe = answer_chat("下一步应该做什么？", {}, gateway)
+    assert safe["provider_call"]["ok"] is True
+    provider_text = captured["json"]["messages"][1]["content"]
+    assert "下一步应该做什么" not in provider_text
+    assert "next_step" in provider_text
+
+    local_only = answer_chat("张三住在上海浦东", {}, gateway)
+    assert local_only["provider_call"]["error_code"] == "CHAT_TEXT_LOCAL_ONLY"
+
+
 def test_plan_review_blocks_too_small_target_class() -> None:
     frame = make_frame(40)
     frame["bad_flag"] = 0
