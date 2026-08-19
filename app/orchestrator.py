@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import html
 import os
 import subprocess
 import sys
@@ -108,35 +109,44 @@ class RunContext:
 
 
 def _report_html(report: Dict[str, Any]) -> str:
+    def safe(value: Any) -> str:
+        return html.escape(str(value))
+
     metrics = report.get("metrics", [])
     rows = "".join(
-        f"<tr><td>{item.get('name')}</td><td>{item.get('validation', {}).get('roc_auc', '-')}</td><td>{item.get('validation', {}).get('ks', '-')}</td><td>{item.get('status')}</td></tr>"
+        f"<tr><td>{safe(item.get('name', ''))}</td><td>{safe(item.get('validation', {}).get('roc_auc', '-'))}</td><td>{safe(item.get('validation', {}).get('ks', '-'))}</td><td>{safe(item.get('status', ''))}</td></tr>"
         for item in metrics
     )
     stability = report.get("stability") or {}
     stability_rows = "".join(
-        f"<tr><td>{item.get('feature')}</td><td>{(item.get('validation') or {}).get('psi', '-')}</td><td>{(item.get('validation') or {}).get('review_flag', '-')}</td><td>{(item.get('oot') or {}).get('psi', '-')}</td><td>{(item.get('oot') or {}).get('review_flag', '-')}</td></tr>"
+        f"<tr><td>{safe(item.get('feature', ''))}</td><td>{safe((item.get('validation') or {}).get('psi', '-'))}</td><td>{safe((item.get('validation') or {}).get('review_flag', '-'))}</td><td>{safe((item.get('oot') or {}).get('psi', '-'))}</td><td>{safe((item.get('oot') or {}).get('review_flag', '-'))}</td></tr>"
         for item in stability.get("features", [])[:50]
     )
     champion_importance = (report.get("champion") or {}).get("feature_importance", [])
-    importance_rows = "".join(f"<tr><td>{item.get('feature')}</td><td>{item.get('importance', item.get('absolute_coefficient', '-'))}</td></tr>" for item in champion_importance[:20])
+    importance_rows = "".join(f"<tr><td>{safe(item.get('feature', ''))}</td><td>{safe(item.get('importance', item.get('absolute_coefficient', '-')))}</td></tr>" for item in champion_importance[:20])
+    calibration_rows = "".join(
+        f"<tr><td>{safe(item.get('bucket'))}</td><td>{safe(item.get('row_count'))}</td><td>{safe(item.get('predicted_rate'))}</td><td>{safe(item.get('observed_rate'))}</td><td>{safe(item.get('absolute_gap'))}</td></tr>"
+        for item in ((report.get("champion") or {}).get("validation") or {}).get("calibration", [])
+    )
     baseline = report.get("baseline") or {}
     baseline_row = ""
     if baseline:
         baseline_metrics = baseline.get("validation", {})
         swap = baseline.get("swap_set", {}).get("groups", {})
         swap_note = "；".join(f"{key}: {value.get('count', 0)} 条" for key, value in swap.items()) if swap else "未计算 swap set"
-        baseline_row = f"<tr><td>Baseline · {baseline.get('score_column', '-')}</td><td>{baseline_metrics.get('roc_auc', '-')}</td><td>{baseline_metrics.get('ks', '-')}</td><td>既有模型比较（{swap_note}）</td></tr>"
+        baseline_row = f"<tr><td>Baseline · {safe(baseline.get('score_column', '-'))}</td><td>{safe(baseline_metrics.get('roc_auc', '-'))}</td><td>{safe(baseline_metrics.get('ks', '-'))}</td><td>既有模型比较（{safe(swap_note)}）</td></tr>"
     experiment_note = "<p><strong>实验 Run：</strong>本结果由 what-if 方案派生，默认未审核，不覆盖正式 Run。</p>" if report.get("manifest", {}).get("run_kind") == "experiment" else ""
+    manifest_text = safe(json.dumps(report.get('manifest',{}), ensure_ascii=False, indent=2))
     return f"""<!doctype html><html lang='zh-CN'><meta charset='utf-8'><title>风控建模报告</title>
     <style>body{{font-family:system-ui,sans-serif;max-width:1100px;margin:40px auto;color:#18332f}}table{{border-collapse:collapse;width:100%}}td,th{{padding:10px;border-bottom:1px solid #dce9e4;text-align:left}}.hero{{background:#eaf7f0;padding:24px;border-radius:18px}}</style>
-    <div class='hero'><h1>{report.get('title','风控建模报告')}</h1><p>{report.get('narrative','')}</p><p>事实边界：离线实验结果，不代表生产效果。</p>{experiment_note}</div>
+    <div class='hero'><h1>{safe(report.get('title','风控建模报告'))}</h1><p>{safe(report.get('narrative',''))}</p><p>事实边界：离线实验结果，不代表生产效果。</p>{experiment_note}</div>
     <h2>模型比较</h2><table><thead><tr><th>模型</th><th>验证 ROC-AUC</th><th>验证 KS</th><th>状态</th></tr></thead><tbody>{rows}{baseline_row}</tbody></table>
     <h2>冠军解释与稳定性</h2><p>下表为训练分区拟合规则下的变量重要性；PSI 仅作稳定性复核提示，不参与 OOT 选择。</p><table><thead><tr><th>变量</th><th>重要性/绝对系数</th></tr></thead><tbody>{importance_rows or '<tr><td colspan="2">暂无解释结果</td></tr>'}</tbody></table>
+    <h3>验证集校准</h3><table><thead><tr><th>分箱</th><th>样本</th><th>预测坏率</th><th>实际坏率</th><th>绝对差</th></tr></thead><tbody>{calibration_rows or '<tr><td colspan="5">暂无校准结果</td></tr>'}</tbody></table>
     <table><thead><tr><th>变量</th><th>验证 PSI</th><th>验证提示</th><th>OOT PSI</th><th>OOT 提示</th></tr></thead><tbody>{stability_rows or '<tr><td colspan="5">暂无稳定性结果</td></tr>'}</tbody></table>
     <h2>探索与数据处理</h2><p>重复行：{report.get('quality', {}).get('duplicate_rows', 0)}；数值字段：{len(report.get('quality', {}).get('numeric', []))}；类别字段：{len(report.get('quality', {}).get('categorical', []))}</p><p>{report.get('cleaning', {}).get('note', '仅展示已记录的本地处理规则。')}</p>
-    {f"<h2>既有模型基线</h2><p>分数列：{baseline.get('score_column', '-')}；方向：{baseline.get('orientation', '-')}；验证阈值在验证集冻结，OOT 仅评估。固定通过率：{baseline.get('fixed_approval_rate', '-')}；swap set 已按冠军与基线的验证排序生成聚合比较。</p>" if baseline else ""}
-    <h2>运行信息</h2><pre>{json.dumps(report.get('manifest',{}), ensure_ascii=False, indent=2)}</pre></html>"""
+    {f"<h2>既有模型基线</h2><p>分数列：{safe(baseline.get('score_column', '-'))}；方向：{safe(baseline.get('orientation', '-'))}；验证阈值在验证集冻结，OOT 仅评估。固定通过率：{safe(baseline.get('fixed_approval_rate', '-'))}；swap set 已按冠军与基线的验证排序生成聚合比较。</p>" if baseline else ""}
+    <h2>运行信息</h2><pre>{manifest_text}</pre></html>"""
 
 
 def _write_report_xlsx(report: Dict[str, Any], path: Path) -> None:
