@@ -33,10 +33,15 @@
 - `node --check app/static/app.js`：通过。
 - `git diff --check`：通过。
 - `python scripts/verify_packaging.py`：通过；同时修复并覆盖了 spec 的仓库根目录计算。
-- 当前 Mac 真实构建：PyInstaller 6.22.2、macOS arm64，`dist/risk-model-agent/risk-model-agent` 构建成功；启动发行包后 `/api/health` 和首页均返回 200。该证据只覆盖当前 Mac 的 onedir 构建与启动，不覆盖 Windows、签名、安装、升级/卸载。
+- 当前 Mac 真实构建：PyInstaller 6.22.2、macOS arm64，`dist/risk-model-agent/risk-model-agent` 构建成功；启动发行包后 `/api/health` 和首页均返回 200。
+- GitHub Actions 的跨平台打包运行 [32301044262](https://github.com/aaaaaaa-feng/risk-model-agent/actions/runs/32301044262) 已成功：`macOS arm64 onedir` 与 `Windows x64 onedir` 均完成构建、契约检查、目标平台本机回环健康/首页烟测和 artifact 上传；对应的测试运行 [32301044270](https://github.com/aaaaaaa-feng/risk-model-agent/actions/runs/32301044270) 也已成功。该证据覆盖 CI 构建与烟测，不等于签名、安装、升级/卸载或目标客户机器验收。
 - `.venv/bin/python scripts/run_golden_cases.py`：5/5 通过；这是最小确定性回归门禁，不等价于独立评测 Harness。
 - 真实本机回环烟测（短暂启动 Uvicorn）：`GET /api/health` 返回 200 且明确 `runtime=local`/确定性降级，首页返回 200，并包含项目生命周期、变量明细和 API Key 清除入口；这证明服务可启动和 HTML 可返回，但不替代目标系统安装验收或完整浏览器视觉验收。
-- 本地 Git 最新提交：
+- 本轮相关 Git 提交（列表不作为远端发布证据）：
+  - `f82a78e ci: build and smoke test macos and windows bundles`
+  - `1db6ebe fix: verify and document macos packaging`
+  - `970aecc docs: make remote evidence reproducible`
+  - `05f8fcf docs: verify public github release`
   - `b2c8a9b docs: record runtime smoke evidence`
   - `ad72542 docs: record project lifecycle audit`
   - `64f5e8c docs: update latest audit commit list`
@@ -75,7 +80,7 @@
 - 当前不做超参数搜索；训练分区在 10,000 行以内提供 3-fold OOF 诊断，冠军仍按冻结验证集选择，超过资源上限会显式跳过。报告新增校准分箱、训练集拟合的 PSI/相关性复核和模型变量重要性，但这些证据不自动替代人工/治理判断。
 - 清洗目前自动执行的只有安全标准化；去重和 IQR 分位截断可在确认节点显式批准并产生新数据版本，稀有类别合并和样本删除仍未实现。
 - 评分卡已是 WOE + Logistic 路线，包含训练集分箱、WOE/IV、PDO/Base Score/Odds、分箱分值、评分—概率映射校验和训练/验证/OOT 指标；单调性、模型包跨版本加载验收和目标规模实测仍属后续版本。
-- 已完成当前 Mac arm64 的 PyInstaller onedir 构建和发行包级健康/首页烟测；Windows 构建、两端签名、安装、升级/卸载和目标机器验收仍未完成，不能把当前包宣称为跨平台发行版。
+- 已完成当前 Mac arm64 的本机 PyInstaller onedir 构建，以及 GitHub Actions 中 macOS arm64/Windows x64 的 onedir 构建、健康/首页烟测和 artifact 上传；两端签名、安装、升级/卸载和目标机器验收仍未完成，因此不能把它宣称为已签名、已安装验收的正式发行版。
 - 独立评测 Harness 按约定后置；当前仅保留 Trace 和普通软件回归测试。
 
 ## GitHub 同步结果
@@ -86,5 +91,6 @@
 - 可见性：`PUBLIC`；默认分支：`main`
 - `git rev-parse HEAD` 与 `git ls-remote origin refs/heads/main` 已核对相等
 - Git 状态：`main...origin/main`，工作树干净
+- `package.yml` 的跨平台运行已在上方 Actions 记录中通过；它是软件打包回归，不是后置的独立评测 Harness。
 
 此前未提权的 CLI 尝试曾受到无效 Token 和沙箱代理限制；在获得回环运行验证所需的命令执行授权后，最终创建和推送已成功。远端 SHA 已按命令行和 GitHub 仓库元数据双重核对，不把本地 commit 单独当作发布证据。

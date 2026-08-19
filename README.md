@@ -45,7 +45,7 @@
 - 已实现：Provider Gateway 的 OpenAI-compatible 接口和显式 `llm_enabled` 开关。外部请求只允许别名化 SafeEvidence，并在本地记录可查看的脱敏出站请求摘要/哈希；计划、代码审核失败会保留结构化原因并阻断；代码 Reviewer 使用 AST/依赖/危险调用静态门禁；项目对话外发只允许本地识别出的结构化意图，疑似凭据、邮箱、手机号/卡号或无法归类的自由文本留在本机；单 Run/单月 token 预算在本地调用前熔断并记录 usage。没有 Provider 时仍走确定性本地流程。
 - 已实现：类别不平衡采用算法级处理而非重采样：Logistic/Random Forest/HistGradientBoosting 使用类别权重，XGBoost 使用训练分区计算的 `scale_pos_weight`；训练正负样本数、策略、`fit_scope=train` 和 `resampling=none` 写入 JSON/HTML/XLSX 报告，验证集与 OOT 不参与权重拟合。
 - 已验证：本地单元、集成和端到端测试；变量筛选的 IV、WOE 和 OOF 诊断只从训练分区拟合（OOF 按折重新拟合 WOE）；生成代码只作为交付物，不在产品内执行；Reviewer 阻断不会被标成成功；JSON、HTML、XLSX 由同一次 Run 产物生成并写入 checksums；批准的去重/异常值动作会创建新的本地数据版本；Baseline 会在同一冻结样本上输出固定通过率和 swap set 聚合比较；what-if 会隔离为实验 Run。
-- 尚未宣称：真实供应商 API 的生产连通性/费用验证、超参数搜索、Windows 安装包的真实构建与跨平台安装验收、macOS 包的签名/安装/升级验收、OS Keychain/Credential Manager 在目标机器上的真实验收、XLSX 大文件的目标规模实测和独立评测 Harness。当前已在本机 macOS arm64 用 PyInstaller 真实构建并启动 onedir 包，仍不能替代 Windows 与签名安装验收。当前资源估算是导入前保护性边界，不等于 8GB 机器的最终支持规模；PSI、相关性和树模型变量重要性已实现为复核证据，不等于自动通过或生产稳定性结论。可选 `.[secure]` 依赖会优先使用系统凭据存储，失败时回退到 600 权限本地文件。训练分区提供受资源上限约束的 3-fold OOF 诊断，但冠军仍只按冻结验证集选择。Reviewer 现在支持最多三轮“冻结方案 → 受控模板重生成 → 重审”，但不是任意自然语言代码的语义修复器。
+- 尚未宣称：真实供应商 API 的生产连通性/费用验证、超参数搜索、两端签名/安装/升级/卸载验收、OS Keychain/Credential Manager 在目标机器上的真实验收、XLSX 大文件的目标规模实测和独立评测 Harness。当前已在本机 macOS arm64 真实构建并启动 onedir 包，并在 GitHub Actions 中完成 macOS arm64 与 Windows x64 的构建、健康/首页烟测和 artifact 上传；这仍不能替代正式签名安装和目标机器验收。当前资源估算是导入前保护性边界，不等于 8GB 机器的最终支持规模；PSI、相关性和树模型变量重要性已实现为复核证据，不等于自动通过或生产稳定性结论。可选 `.[secure]` 依赖会优先使用系统凭据存储，失败时回退到 600 权限本地文件。训练分区提供受资源上限约束的 3-fold OOF 诊断，但冠军仍只按冻结验证集选择。Reviewer 现在支持最多三轮“冻结方案 → 受控模板重生成 → 重审”，但不是任意自然语言代码的语义修复器。
 
 ## 本机运行
 
