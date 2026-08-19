@@ -34,6 +34,9 @@
 - `python scripts/verify_packaging.py`：通过；这是入口和资源契约检查，不等价于目标平台真实打包。
 - `.venv/bin/python scripts/run_golden_cases.py`：5/5 通过；这是最小确定性回归门禁，不等价于独立评测 Harness。
 - 本地 Git 最新提交：
+  - `c5f1779 feat: expose complete run delivery artifacts`
+  - `4b774e9 feat: clarify dataset versions and local provider controls`
+  - `ee00c7e docs: document imbalance policy and audit evidence`
   - `82d90b2 feat: record train-only imbalance policy`
   - `7359ee5 feat: add frozen baseline OOT reevaluation`
   - `ab1d19e fix: clear provider audit when switching projects`
