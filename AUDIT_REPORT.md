@@ -84,4 +84,4 @@ Post "https://api.github.com/graphql": proxyconnect tcp: dial tcp 127.0.0.1:1080
 gh auth status: The token in default is invalid.
 ```
 
-没有创建远程地址，也没有反复重试；仓库保留在本地，工作树干净。若后续通过 GitHub 网页或有效 CLI 重新创建仓库，再以当前 HEAD `ad72542` 为起点添加远程并核对远端 SHA。
+没有创建远程地址，也没有反复重试；仓库保留在本地，工作树干净。若后续通过 GitHub 网页或有效 CLI 重新创建仓库，应先以工作树核对后的最新本地 commit 添加远程，再核对远端 SHA。
