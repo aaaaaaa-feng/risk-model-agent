@@ -122,6 +122,9 @@ def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
 def test_demo_label_and_reupload_preserve_dataset_versions() -> None:
     project, demo = create_demo_project("数据版本与演示标记")
     assert demo["is_demo"] is True
+    reused = client.post(f"/api/projects/{project['id']}/demo")
+    reused.raise_for_status()
+    assert reused.json()["dataset"]["id"] == demo["id"]
     content = b"bad_flag,income\n0,100\n1,50\n"
     for _ in range(2):
         response = client.post(

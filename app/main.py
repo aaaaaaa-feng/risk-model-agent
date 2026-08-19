@@ -209,7 +209,14 @@ def create_demo(project_id: str) -> Dict[str, Any]:
     if not store.get_project(project_id):
         raise HTTPException(404, "项目不存在")
     path = write_demo(project_id)
-    dataset = store.create_dataset(project_id, path.name, path, sha256_file(path), path.stat().st_size, is_demo=True)
+    digest = sha256_file(path)
+    existing = next(
+        (item for item in store.list_datasets(project_id) if item.get("is_demo") and item.get("sha256") == digest),
+        None,
+    )
+    if existing:
+        return {"dataset": public_dataset(existing), "is_demo": True, "message": "本地合成演示数据已存在，继续复用同一不可变版本。"}
+    dataset = store.create_dataset(project_id, path.name, path, digest, path.stat().st_size, is_demo=True)
     try:
         store.update_dataset_profile(dataset["id"], profile_table(read_table(path)))
         dataset = store.get_dataset(dataset["id"]) or dataset
