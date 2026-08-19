@@ -22,7 +22,7 @@
 
 ## 已验证证据
 
-- `31 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算/出站摘要、报告导出、Trace 脱敏与事件链、资源边界、数据字典、校准/稳定性/评分卡映射、训练集筛选、高维分析守卫、Tool Registry、清洗版本、清洗确认门禁、Baseline 和 what-if 隔离、项目多轮对话、报告叙事锁定、跨平台打包契约和黄金回归。
+- `32 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算/出站摘要、报告导出、Trace 脱敏与事件链、资源边界、数据字典、校准/稳定性/评分卡映射、训练集筛选、高维分析守卫、Tool Registry、清洗版本、清洗确认门禁、Baseline 和 what-if 隔离、项目多轮对话、报告叙事锁定、聊天文本边界、跨平台打包契约和黄金回归。
 - `ruff check app tests scripts/*.py`：通过。
 - `node --check app/static/app.js`：通过。
 - `git diff --check`：通过。
