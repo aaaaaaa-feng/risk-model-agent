@@ -36,6 +36,10 @@ class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
 
 
+class ProjectActionPayload(BaseModel):
+    confirm: bool = False
+
+
 class RunCreate(BaseModel):
     dataset_id: str
     mode: str = Field(default="auto", pattern="^(auto|semi_trust)$")
@@ -184,6 +188,59 @@ def create_project(payload: ProjectCreate) -> Dict[str, Any]:
     return {"project": store.create_project(payload.name)}
 
 
+def _active_project_runs(project_id: str) -> List[Dict[str, Any]]:
+    return [
+        run
+        for run in store.list_runs(project_id)
+        if run["status"] in {"queued", "running", "awaiting_review", "awaiting_confirmation", "paused"}
+    ]
+
+
+@app.post("/api/projects/{project_id}/archive")
+def archive_project(project_id: str) -> Dict[str, Any]:
+    project = store.get_project(project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if _active_project_runs(project_id):
+        raise HTTPException(409, "项目仍有活动 Run，请先完成、暂停或取消后再归档")
+    if project["status"] != "archived":
+        store.update_project_status(project_id, "archived")
+    return {"project": store.get_project(project_id), "message": "项目已归档；数据和历史产物仍保留在本机。"}
+
+
+@app.post("/api/projects/{project_id}/restore")
+def restore_project_state(project_id: str) -> Dict[str, Any]:
+    project = store.get_project(project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if project["status"] == "archived":
+        runs = store.list_runs(project_id)
+        datasets = store.list_datasets(project_id)
+        if any(run["status"] == "succeeded" for run in runs):
+            status = "completed"
+        elif datasets:
+            status = "data_imported"
+        else:
+            status = "draft"
+        store.update_project_status(project_id, status)
+    return {"project": store.get_project(project_id), "message": "项目已恢复，可继续本地操作。"}
+
+
+@app.delete("/api/projects/{project_id}")
+def delete_project(project_id: str, payload: ProjectActionPayload) -> Dict[str, Any]:
+    project = store.get_project(project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if not payload.confirm:
+        raise HTTPException(400, "删除项目必须显式传入 confirm=true")
+    if project["status"] != "archived":
+        raise HTTPException(409, "请先归档项目，再执行删除")
+    if _active_project_runs(project_id):
+        raise HTTPException(409, "项目仍有活动 Run，不能删除")
+    store.delete_project(project_id)
+    return {"deleted": True, "project_id": project_id, "message": "项目及其本地文件已删除。"}
+
+
 @app.get("/api/projects/{project_id}")
 def get_project(project_id: str) -> Dict[str, Any]:
     project = store.get_project(project_id)
@@ -228,8 +285,11 @@ def write_demo(project_id: str) -> Path:
 
 @app.post("/api/projects/{project_id}/demo")
 def create_demo(project_id: str) -> Dict[str, Any]:
-    if not store.get_project(project_id):
+    project = store.get_project(project_id)
+    if not project:
         raise HTTPException(404, "项目不存在")
+    if project["status"] == "archived":
+        raise HTTPException(409, "项目已归档，请先恢复后再写入数据")
     path = write_demo(project_id)
     digest = sha256_file(path)
     existing = next(
@@ -251,8 +311,11 @@ def create_demo(project_id: str) -> Dict[str, Any]:
 
 @app.post("/api/projects/{project_id}/datasets")
 async def upload_dataset(project_id: str, file: UploadFile = File(...), sheet: Optional[str] = Form(default=None)) -> Dict[str, Any]:
-    if not store.get_project(project_id):
+    project = store.get_project(project_id)
+    if not project:
         raise HTTPException(404, "项目不存在")
+    if project["status"] == "archived":
+        raise HTTPException(409, "项目已归档，请先恢复后再上传数据")
     filename = Path(file.filename or "upload.csv").name
     if Path(filename).suffix.lower() not in {".csv", ".xlsx"}:
         raise HTTPException(400, "只支持 CSV 和 XLSX")
@@ -300,8 +363,11 @@ async def upload_dataset(project_id: str, file: UploadFile = File(...), sheet: O
 
 @app.post("/api/projects/{project_id}/datasets/inspect")
 async def inspect_dataset(project_id: str, file: UploadFile = File(...)) -> Dict[str, Any]:
-    if not store.get_project(project_id):
+    project = store.get_project(project_id)
+    if not project:
         raise HTTPException(404, "项目不存在")
+    if project["status"] == "archived":
+        raise HTTPException(409, "项目已归档，请先恢复后再预检数据")
     filename = Path(file.filename or "inspect.csv").name
     suffix = Path(filename).suffix.lower()
     if suffix not in {".csv", ".xlsx"}:
@@ -344,8 +410,11 @@ async def inspect_dataset(project_id: str, file: UploadFile = File(...)) -> Dict
 
 @app.post("/api/projects/{project_id}/dictionaries")
 async def upload_dictionary(project_id: str, file: UploadFile = File(...), sheet: Optional[str] = Form(default=None)) -> Dict[str, Any]:
-    if not store.get_project(project_id):
+    project = store.get_project(project_id)
+    if not project:
         raise HTTPException(404, "项目不存在")
+    if project["status"] == "archived":
+        raise HTTPException(409, "项目已归档，请先恢复后再上传数据字典")
     filename = Path(file.filename or "dictionary.csv").name
     suffix = Path(filename).suffix.lower()
     if suffix not in {".csv", ".xlsx"}:
@@ -400,7 +469,9 @@ def create_run(project_id: str, payload: RunCreate) -> Dict[str, Any]:
     dataset = store.get_dataset(payload.dataset_id)
     if not project or not dataset or dataset["project_id"] != project_id:
         raise HTTPException(404, "项目或数据集不存在")
-    active = [run for run in store.list_runs(project_id) if run["status"] in {"queued", "running", "awaiting_confirmation", "paused"}]
+    if project["status"] == "archived":
+        raise HTTPException(409, "项目已归档，请先恢复后再启动 Run")
+    active = _active_project_runs(project_id)
     if active:
         raise HTTPException(409, "该项目已有活动 Run，请先完成、取消或确认已有 Run")
     run = store.create_run(project_id, payload.dataset_id, payload.mode)
@@ -411,6 +482,11 @@ def create_run(project_id: str, payload: RunCreate) -> Dict[str, Any]:
 @app.post("/api/projects/{project_id}/what-if")
 def create_what_if(project_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Fork a completed Run into an isolated, explicitly experimental Run."""
+    project = store.get_project(project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if project["status"] == "archived":
+        raise HTTPException(409, "项目已归档，请先恢复后再创建 what-if")
     base_run_id = str(payload.get("base_run_id") or payload.get("run_id") or "")
     base = store.get_run(base_run_id)
     if not base or base["project_id"] != project_id:
@@ -1292,6 +1368,11 @@ async def restore_project(file: UploadFile = File(...)) -> Dict[str, Any]:
 
 @app.post("/api/projects/{project_id}/analysis")
 def run_analysis(project_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    project = store.get_project(project_id)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    if project["status"] == "archived":
+        raise HTTPException(409, "项目已归档，请先恢复后再运行分析")
     dataset = store.get_dataset(str(payload.get("dataset_id")))
     if not dataset or dataset["project_id"] != project_id:
         raise HTTPException(404, "数据集不存在")

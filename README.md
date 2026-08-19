@@ -39,7 +39,7 @@
 
 ## 当前已实现与边界
 
-- 已实现：本地 FastAPI Web 服务、CSV/XLSX 导入（多 Sheet 需明确选择、导入前行列/内存预算预估）、同一项目多数据版本的明确选择与运行中锁定、数据画像与本地 EDA、Y 契约检查、半信任确认卡（清洗动作不可绕过、可明确跳过）、LangGraph 状态编排、训练集范围内 IV/缺失/ID/泄漏筛选、报告内可检索/筛选/排序的变量明细和隔离 what-if、既有评分列新 OOT 复评（冻结验证方向与阈值）、数据字典版本化与字段语义联动、WOE + Logistic 评分卡、Logistic/Random Forest/HistGradientBoosting/XGBoost 候选比较、校准分箱/PSI/训练集相关性/变量重要性、HTML/JSON/XLSX/Python/哈希清单交付物、SSE 进度与可下载 Trace、项目备份与安全恢复、项目级多轮对话与消息反馈、报告叙事 Agent 草稿/专家编辑锁定、API 配置入口、Provider 出站脱敏摘要、多维 1—4 维本地分析。
+- 已实现：本地 FastAPI Web 服务、CSV/XLSX 导入（多 Sheet 需明确选择、导入前行列/内存预算预估）、同一项目多数据版本的明确选择与运行中锁定、项目归档/恢复/显式确认删除、数据画像与本地 EDA、Y 契约检查、半信任确认卡（清洗动作不可绕过、可明确跳过）、LangGraph 状态编排、训练集范围内 IV/缺失/ID/泄漏筛选、报告内可检索/筛选/排序的变量明细和隔离 what-if、既有评分列新 OOT 复评（冻结验证方向与阈值）、数据字典版本化与字段语义联动、WOE + Logistic 评分卡、Logistic/Random Forest/HistGradientBoosting/XGBoost 候选比较、校准分箱/PSI/训练集相关性/变量重要性、HTML/JSON/XLSX/Python/哈希清单交付物、SSE 进度与可下载 Trace、项目备份与安全恢复、项目级多轮对话与消息反馈、报告叙事 Agent 草稿/专家编辑锁定、API 配置入口、Provider 出站脱敏摘要、多维 1—4 维本地分析。
 - 已实现：Provider Gateway 的 OpenAI-compatible 接口和显式 `llm_enabled` 开关。外部请求只允许别名化 SafeEvidence，并在本地记录可查看的脱敏出站请求摘要/哈希；计划、代码审核失败会保留结构化原因并阻断；代码 Reviewer 使用 AST/依赖/危险调用静态门禁；项目对话外发只允许本地识别出的结构化意图，疑似凭据、邮箱、手机号/卡号或无法归类的自由文本留在本机；单 Run/单月 token 预算在本地调用前熔断并记录 usage。没有 Provider 时仍走确定性本地流程。
 - 已实现：类别不平衡采用算法级处理而非重采样：Logistic/Random Forest/HistGradientBoosting 使用类别权重，XGBoost 使用训练分区计算的 `scale_pos_weight`；训练正负样本数、策略、`fit_scope=train` 和 `resampling=none` 写入 JSON/HTML/XLSX 报告，验证集与 OOT 不参与权重拟合。
 - 已验证：本地单元、集成和端到端测试；变量筛选的 IV、WOE 和 OOF 诊断只从训练分区拟合（OOF 按折重新拟合 WOE）；生成代码只作为交付物，不在产品内执行；Reviewer 阻断不会被标成成功；JSON、HTML、XLSX 由同一次 Run 产物生成并写入 checksums；批准的去重/异常值动作会创建新的本地数据版本；Baseline 会在同一冻结样本上输出固定通过率和 swap set 聚合比较；what-if 会隔离为实验 Run。

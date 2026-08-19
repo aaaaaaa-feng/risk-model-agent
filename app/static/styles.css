@@ -45,6 +45,9 @@ button { cursor: pointer; }
 .topbar { height: 92px; display: flex; align-items: center; justify-content: space-between; padding: 0 34px; border-bottom: 1px solid var(--line); background: rgba(248, 252, 250, .86); }
 .topbar h1 { margin: 5px 0 0; font-size: 24px; letter-spacing: -.04em; }
 .top-actions { display: flex; align-items: center; gap: 10px; }
+.project-action { border: 0; background: transparent; padding: 4px 2px; cursor: pointer; }
+.project-action:hover { text-decoration: underline; }
+.danger-link { color: var(--red); }
 .chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 6px 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .chip.neutral { color: var(--muted); background: #edf3f0; }
 .chip.safe { color: #177158; background: #e4f6ed; }

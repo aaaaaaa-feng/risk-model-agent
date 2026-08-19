@@ -37,6 +37,29 @@ def create_demo_project(name: str) -> tuple[dict, dict]:
     return project, dataset_response.json()["dataset"]
 
 
+def test_project_archive_restore_and_explicit_delete() -> None:
+    project, dataset = create_demo_project("项目归档生命周期")
+    archived = client.post(f"/api/projects/{project['id']}/archive")
+    archived.raise_for_status()
+    assert archived.json()["project"]["status"] == "archived"
+    blocked_run = client.post(
+        f"/api/projects/{project['id']}/runs",
+        json={"dataset_id": dataset["id"], "mode": "auto"},
+    )
+    assert blocked_run.status_code == 409
+    restored = client.post(f"/api/projects/{project['id']}/restore")
+    restored.raise_for_status()
+    assert restored.json()["project"]["status"] == "data_imported"
+    archived_again = client.post(f"/api/projects/{project['id']}/archive")
+    archived_again.raise_for_status()
+    missing_confirmation = client.request("DELETE", f"/api/projects/{project['id']}", json={"confirm": False})
+    assert missing_confirmation.status_code == 400
+    deleted = client.request("DELETE", f"/api/projects/{project['id']}", json={"confirm": True})
+    deleted.raise_for_status()
+    assert deleted.json()["deleted"] is True
+    assert client.get(f"/api/projects/{project['id']}").status_code == 404
+
+
 def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
     health = client.get("/api/health")
     assert health.status_code == 200

@@ -84,13 +84,16 @@ async function loadConversation() {
 function renderProject() {
   const hasProject = Boolean(state.project);
   $('#empty-state').classList.toggle('hidden', hasProject); $('#workspace').classList.toggle('hidden', !hasProject);
+  const archiveButton = $('#archive-project'); const deleteButton = $('#delete-project');
+  if (archiveButton) { archiveButton.hidden = !hasProject; archiveButton.textContent = hasProject && state.project.status === 'archived' ? '恢复项目' : '归档项目'; archiveButton.disabled = Boolean(state.run && ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run.status)); }
+  if (deleteButton) { deleteButton.hidden = !hasProject; deleteButton.disabled = Boolean(state.run && ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run.status)); }
   if (!hasProject) return;
   $('#project-title').textContent = state.project.name;
   $('#mode-toggle').textContent = state.mode === 'auto' ? '自动运行模式' : '半信任模式';
   $('#dataset-version').textContent = state.datasets.length ? 'v' + state.datasets.length : '—';
   $('#run-version').textContent = state.run ? state.run.id.slice(-6) : '—';
   renderDataset(); renderDictionaryStatus(); renderRun(); renderStages(); renderAnalysisControls(); renderConversation();
-  $('#start-run').disabled = !state.datasets.length || ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run && state.run.status);
+  $('#start-run').disabled = state.project.status === 'archived' || !state.datasets.length || ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run && state.run.status);
 }
 function renderDataset() {
   const dataset = activeDataset(); const card = $('#dataset-card');
@@ -359,6 +362,25 @@ async function createProject() {
   const data = await api('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name }) });
   state.project = data.project; await loadProjects(); await selectProject(data.project.id);
 }
+async function toggleArchiveProject() {
+  if (!state.project) return;
+  const archived = state.project.status === 'archived';
+  if (!archived && !window.confirm('确认归档当前项目？本地数据和报告会保留，但归档期间不能上传、分析或启动 Run。')) return;
+  try {
+    const endpoint = archived ? '/api/projects/' + state.project.id + '/restore' : '/api/projects/' + state.project.id + '/archive';
+    const result = await api(endpoint, { method: 'POST' });
+    showNotice(result.message || (archived ? '项目已恢复。' : '项目已归档。'));
+    await loadProjects(); await selectProject(state.project.id);
+  } catch (error) { showNotice(error.message, 'block'); }
+}
+async function deleteProject() {
+  if (!state.project || !window.confirm('删除项目会移除本机项目目录、数据版本、Run 和报告，且不可恢复。确认继续？')) return;
+  try {
+    await api('/api/projects/' + state.project.id, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true }) });
+    state.project = null; state.run = null; state.datasets = []; state.dictionaries = []; state.runs = [];
+    showNotice('项目及其本地文件已删除。'); await loadProjects(); renderProject();
+  } catch (error) { showNotice(error.message, 'block'); }
+}
 async function createDemo() {
   if (!state.project) await createProject(); if (!state.project) return;
   const data = await api('/api/projects/' + state.project.id + '/demo', { method: 'POST' }); showNotice(data.message); await selectProject(state.project.id);
@@ -492,6 +514,7 @@ async function sendMessageFeedback(messageId, reaction) {
 }
 
 $('#new-project').addEventListener('click', createProject); $('#empty-new-project').addEventListener('click', createProject); $('#empty-demo').addEventListener('click', createDemo); $('#start-run').addEventListener('click', startRun); $('#choose-file').addEventListener('click', function () { $('#file-input').click(); }); $('#file-input').addEventListener('change', function (event) { uploadFile(event.target.files[0]); });
+$('#archive-project').addEventListener('click', toggleArchiveProject); $('#delete-project').addEventListener('click', deleteProject);
 $('#choose-dictionary').addEventListener('click', function () { $('#dictionary-input').click(); }); $('#dictionary-input').addEventListener('change', function (event) { uploadDictionary(event.target.files[0]); });
 $('#run-analysis').addEventListener('click', runAnalysis);
 $('#dataset-card').addEventListener('dragover', function (event) { event.preventDefault(); $('#dataset-card').classList.add('dragging'); });
