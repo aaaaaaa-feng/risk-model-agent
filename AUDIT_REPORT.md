@@ -26,9 +26,11 @@
 - `node --check app/static/app.js`：通过。
 - `git diff --check`：通过。
 - 本地 Git 提交：
-  - `b752bc2 feat: complete local risk modeling agent workflow`
-  - `00dced8 feat: complete guarded modeling workflow`
-  - `9a2feb6 fix: bound training selection and segment analysis`
+  - `4a8460a fix: escape local HTML report content`
+  - `ecf7269 fix: keep demo dataset versions immutable`
+  - `6bfbe78 docs: align worker isolation with v0.1 boundaries`
+  - `15bf693 fix: preserve safe aliases in trace and review payloads`
+  - `57c073b feat: harden resources trace and model evidence`
 - 外部 Provider 默认关闭；启用后只发送别名化 SafeEvidence，测试覆盖敏感载荷阻断和 OpenAI-compatible 请求形态。
 - 生成代码只作为本地交付物，产品不执行任意生成代码；静态 Reviewer 阻断不会被标成成功。
 - 当前验证使用 FastAPI TestClient 和本地 Worker 子进程；本环境不把一次受限沙箱端口绑定失败当作应用功能失败，也未把它包装成真实浏览器/跨平台验收。
