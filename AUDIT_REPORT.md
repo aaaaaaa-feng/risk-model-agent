@@ -35,7 +35,7 @@
 - `git diff --check`：通过。
 - `python scripts/verify_packaging.py`：通过；同时修复并覆盖了 spec 的仓库根目录计算。
 - 当前 Mac 真实构建：PyInstaller 6.22.2、macOS arm64，`dist/risk-model-agent/risk-model-agent` 构建成功；启动发行包后 `/api/health` 和首页均返回 200。
-- GitHub Actions 的跨平台打包运行 [32301800829](https://github.com/aaaaaaa-feng/risk-model-agent/actions/runs/32301800829) 已成功（对应提交 `7665a6d`）：`macOS arm64 onedir` 与 `Windows x64 onedir` 均完成构建、契约检查、目标平台本机回环健康/首页烟测和 artifact 上传；对应的测试运行 [32301800879](https://github.com/aaaaaaa-feng/risk-model-agent/actions/runs/32301800879) 也已成功。该证据覆盖 CI 构建与烟测，不等于签名、安装、升级/卸载或目标客户机器验收。
+- GitHub Actions 的跨平台打包运行 [32320721343](https://github.com/aaaaaaa-feng/risk-model-agent/actions/runs/32320721343) 已成功（对应提交 `faaf7c5`）：`macOS arm64 onedir` 与 `Windows x64 onedir` 均完成构建、契约检查、目标平台本机回环健康/首页烟测和 artifact 上传；对应的测试运行 [32320721339](https://github.com/aaaaaaa-feng/risk-model-agent/actions/runs/32320721339) 也已成功。该证据覆盖 CI 构建与烟测，不等于签名、安装、升级/卸载或目标客户机器验收。
 - `.venv/bin/python scripts/run_golden_cases.py`：5/5 通过；这是最小确定性回归门禁，不等价于独立评测 Harness。
 - Provider 协议回归覆盖 OpenAI Chat Completions 的 Bearer 请求、Anthropic Messages 的 `x-api-key`/`anthropic-version`/`/v1/messages` 请求，以及未保存表单 Key 的连通性探测；本环境没有真实供应商密钥，因此不把 mock 回归写成真实账户连通性证据。
 - 真实本机回环烟测（短暂启动 Uvicorn）：`GET /api/health` 返回 200 且明确 `runtime=local`/确定性降级，首页返回 200，并包含项目生命周期、变量明细和 API Key 清除入口；这证明服务可启动和 HTML 可返回，但不替代目标系统安装验收或完整浏览器视觉验收。
