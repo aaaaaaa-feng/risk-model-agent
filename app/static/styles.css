@@ -140,6 +140,33 @@ button { cursor: pointer; }
 .report-details { margin-top: 13px; padding: 13px 15px; color: #46625c; font-size: 12px; line-height: 1.7; background: #f8fbfa; border-radius: 11px; }
 .report-details ul { margin: 8px 0 0; padding-left: 18px; }
 .report-details code { color: #14796d; }
+.report-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.chart-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: #fbfefc; }
+.chart-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.chart-heading strong { font-size: 12px; }
+.chart-heading span { color: var(--muted); font-size: 9px; }
+.chart-slot { min-height: 170px; overflow: hidden; }
+.chart-slot svg { display: block; width: 100%; height: auto; }
+.chart-background { fill: #f6faf8; }
+.chart-grid { stroke: #dfece6; stroke-width: 1; }
+.chart-axis { stroke: #9bb8ad; stroke-width: 1; }
+.chart-reference { stroke: #b7c7c1; stroke-width: 1.2; stroke-dasharray: 5 4; fill: none; }
+.chart-line { fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.chart-point { fill: #1d8067; stroke: #ffffff; stroke-width: 1.5; }
+.chart-axis-label, .chart-axis-caption, .chart-bar-value { fill: #718682; font: 9px system-ui, sans-serif; }
+.chart-axis-caption { font-size: 8px; }
+.chart-bar-label { fill: #46625c; font: 9px system-ui, sans-serif; }
+.chart-bar { fill: #1d8067; }
+.chart-bar-validation { fill: #1d8067; }
+.chart-bar-oot { fill: #d88b45; }
+.chart-bar-positive { fill: #1d8067; }
+.chart-bar-negative { fill: #d88b45; }
+.chart-empty { display: grid; place-items: center; min-height: 150px; color: var(--muted); font-size: 10px; background: #f6faf8; border-radius: 9px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 5px; color: var(--muted); font-size: 9px; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 4px; }
+.chart-legend i { width: 10px; height: 3px; display: inline-block; border-radius: 999px; background: var(--teal); }
+.chart-legend i.secondary { background: var(--blue); }
+.chart-legend i.warn { background: var(--amber); }
 .selection-table-panel { margin-top: 14px; padding: 14px 15px; border: 1px solid var(--line); border-radius: 12px; background: #fbfefc; }
 .selection-table-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .selection-table-heading strong { display: block; font-size: 12px; }
@@ -206,6 +233,8 @@ button { cursor: pointer; }
 .feature-search { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: white; color: var(--ink); font-size: 11px; outline: none; }
 .feature-search:focus { border-color: #7abda7; box-shadow: 0 0 0 3px #e5f5ed; }
 .feature-list { display: grid; gap: 5px; max-height: 190px; overflow: auto; padding-right: 2px; }
+.table-pagination { display: flex; align-items: center; justify-content: center; gap: 9px; margin: 8px 0 2px; color: var(--muted); font-size: 10px; }
+.table-pagination .small { min-width: 58px; }
 .feature-option { display: flex !important; grid-template-columns: none !important; align-items: flex-start; gap: 7px; padding: 7px 8px; border-radius: 8px; background: #f0f8f4; color: var(--ink) !important; font-size: 10px !important; font-weight: 600 !important; }
 .feature-option input { width: auto; margin-top: 2px; accent-color: var(--accent); }
 .feature-option span { min-width: 0; }
@@ -337,6 +366,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .settings-actions { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 0 4px; background: linear-gradient(180deg, rgba(248, 252, 250, 0), var(--paper) 22%); }
 .settings-actions > div:last-child { display: flex; gap: 8px; }
 .form-status { min-height: 18px; color: var(--teal); font-size: 11px; line-height: 1.45; }
+.modal { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 20px; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(24, 51, 47, .32); backdrop-filter: blur(3px); }
+.modal-card { position: relative; z-index: 1; width: min(560px, 100%); max-height: min(720px, calc(100vh - 40px)); overflow: auto; padding: 23px; border: 1px solid var(--line); border-radius: 17px; background: white; box-shadow: 0 24px 70px rgba(24, 51, 47, .2); }
+.interaction-dialog-card { width: min(520px, 100%); }
+.modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; }
+.modal-header h2 { margin: 6px 0 0; font-size: 19px; letter-spacing: -.03em; }
+.modal-intro { margin: 10px 0 17px; color: var(--muted); font-size: 12px; line-height: 1.65; white-space: pre-line; }
+.icon-button { width: 30px; height: 30px; border: 0; border-radius: 8px; color: var(--muted); background: #eef6f2; font-size: 18px; line-height: 1; }
+.icon-button:hover { color: var(--ink); background: #e2f1ea; }
+.dialog-fields { display: grid; gap: 12px; }
+.dialog-field { display: grid; gap: 6px; color: #58716a; font-size: 10px; font-weight: 750; }
+.dialog-field input, .dialog-field select, .dialog-field textarea { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px; outline: none; color: var(--ink); background: white; font-size: 12px; font-weight: 400; }
+.dialog-field textarea { min-height: 82px; resize: vertical; line-height: 1.55; }
+.dialog-field input:focus, .dialog-field select:focus, .dialog-field textarea:focus { border-color: #7abda7; box-shadow: 0 0 0 3px #e5f5ed; }
+.dialog-field input[type="range"] { padding: 5px 0; accent-color: var(--accent); }
+.dialog-range-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 10px; font-weight: 400; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 
 @media (max-width: 1280px) {
   .sidebar { width: 212px; }
@@ -371,6 +417,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .settings-nav-title, .settings-state-card { display: none; }
   .settings-nav-item { white-space: nowrap; }
   .form-two { grid-template-columns: 1fr; }
+  .report-charts { grid-template-columns: 1fr; }
   .settings-actions { align-items: flex-start; flex-direction: column; }
   .settings-actions > div:last-child { width: 100%; flex-wrap: wrap; }
 }

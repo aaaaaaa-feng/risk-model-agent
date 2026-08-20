@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="本地优先的风控建模 Agent 工作台" />
   <title>风控建模 Agent</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260820-settings" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260820-review" />
 </head>
 <body>
   <div class="app-shell">
@@ -160,6 +160,14 @@
                 <div id="metric-grid" class="metric-grid"></div>
                 <div id="report-narrative" class="report-narrative"></div>
                 <div id="report-details" class="report-details"></div>
+                <section id="report-charts" class="report-charts" aria-label="模型可视化">
+                  <div class="chart-card"><div class="chart-heading"><strong>ROC 曲线</strong><span>验证集</span></div><div id="chart-roc" class="chart-slot"></div></div>
+                  <div class="chart-card"><div class="chart-heading"><strong>KS 曲线</strong><span>TPR − FPR</span></div><div id="chart-ks" class="chart-slot"></div></div>
+                  <div class="chart-card"><div class="chart-heading"><strong>校准曲线</strong><span>预测坏率 / 实际坏率</span></div><div id="chart-calibration" class="chart-slot"></div></div>
+                  <div class="chart-card"><div class="chart-heading"><strong>变量重要性</strong><span>冠军模型</span></div><div id="chart-importance" class="chart-slot"></div></div>
+                  <div class="chart-card"><div class="chart-heading"><strong>PSI 稳定性</strong><span>验证 / OOT · 0.25 复核线</span></div><div id="chart-psi" class="chart-slot"></div></div>
+                  <div class="chart-card"><div class="chart-heading"><strong>WOE 分箱</strong><span>评分卡变量</span></div><div id="chart-woe" class="chart-slot"></div></div>
+                </section>
                 <div id="selection-table-panel" class="selection-table-panel"></div>
                 <div id="report-narrative-editor" class="report-narrative-editor"></div>
               </section>
@@ -254,6 +262,15 @@
       </section>
     </main>
   </div>
-  <script src="/static/app.js?v=20260820-settings"></script>
+  <div id="interaction-dialog" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="interaction-dialog-title" aria-describedby="interaction-dialog-message">
+    <div class="modal-backdrop" data-dialog-cancel="true"></div>
+    <section class="modal-card interaction-dialog-card" tabindex="-1">
+      <div class="modal-header"><div><span class="section-kicker">需要你的确认</span><h2 id="interaction-dialog-title">确认操作</h2></div><button id="interaction-dialog-close" class="icon-button" type="button" aria-label="关闭">×</button></div>
+      <p id="interaction-dialog-message" class="modal-intro"></p>
+      <div id="interaction-dialog-fields" class="dialog-fields"></div>
+      <div class="modal-actions"><button id="interaction-dialog-cancel" type="button" class="secondary-button">取消</button><button id="interaction-dialog-submit" type="button" class="primary-button">确认</button></div>
+    </section>
+  </div>
+  <script src="/static/app.js?v=20260820-review"></script>
 </body>
 </html>

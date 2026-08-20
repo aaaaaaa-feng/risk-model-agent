@@ -149,6 +149,9 @@ def test_train_candidates_and_segment_analysis(tmp_path) -> None:
     assert result["stability"]["schema_version"] == "risk-stability/v1"
     assert result["champion"]["feature_importance"]
     assert result["champion"]["validation"]["calibration"]
+    assert result["champion"]["validation"]["roc_curve"]
+    assert result["champion"]["validation"]["ks_curve"]
+    assert len(result["champion"]["validation"]["roc_curve"]) <= 101
     assert result["champion"]["oof"]["status"] == "succeeded"
     assert result["imbalance_policy"]["fit_scope"] == "train"
     assert result["imbalance_policy"]["policy"] == "algorithmic_class_weight"

@@ -1,7 +1,10 @@
-const state = { projects: [], project: null, datasets: [], selectedDatasetId: null, dictionaries: [], runs: [], run: null, events: [], conversation: null, messages: [], mode: 'auto', defaultMode: 'auto', activeWorkspaceTab: 'overview', eventSource: null, config: null, providerPresets: {}, providerRequests: [], confirmationRunId: null, confirmationFeatures: [], confirmationExcluded: new Set(), selectionExcluded: new Set(), settingsReturnFocus: null };
+const state = { projects: [], project: null, datasets: [], selectedDatasetId: null, dictionaries: [], runs: [], run: null, events: [], conversation: null, messages: [], mode: 'auto', defaultMode: 'auto', activeWorkspaceTab: 'overview', lastAutoPhase: null, featurePage: 1, selectionPage: 1, eventSource: null, config: null, providerPresets: {}, providerRequests: [], confirmationRunId: null, confirmationFeatures: [], confirmationExcluded: new Set(), selectionExcluded: new Set(), settingsReturnFocus: null };
 const $ = function (selector) { return document.querySelector(selector); };
 const projectList = $('#project-list');
 const escapeHtml = function (value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]; }); };
+let dialogResolver = null;
+let dialogReturnFocus = null;
+let dialogKeyHandler = null;
 
 async function api(path, options) {
   const response = await fetch(path, options || {});
@@ -14,6 +17,60 @@ function showNotice(message, kind) {
   notice.textContent = message;
   notice.className = 'notice' + (kind ? ' ' + kind : '');
   notice.classList.remove('hidden');
+}
+function closeDialog(value) {
+  const dialog = $('#interaction-dialog');
+  if (!dialog) return;
+  dialog.classList.add('hidden');
+  if (dialogKeyHandler) dialog.removeEventListener('keydown', dialogKeyHandler);
+  dialogKeyHandler = null;
+  const resolver = dialogResolver;
+  dialogResolver = null;
+  if (resolver) resolver(value);
+  if (dialogReturnFocus && document.contains(dialogReturnFocus)) window.requestAnimationFrame(function () { dialogReturnFocus.focus({ preventScroll: true }); });
+  dialogReturnFocus = null;
+}
+function dialogFieldMarkup(field) {
+  const name = escapeHtml(field.name || 'value'); const label = escapeHtml(field.label || '输入'); const value = escapeHtml(field.value == null ? '' : field.value); const required = field.required ? ' required' : '';
+  if (field.type === 'select') {
+    const options = (field.options || []).map(function (option) { const item = typeof option === 'string' ? { value: option, label: option } : option; return '<option value="' + escapeHtml(item.value) + '" ' + (String(item.value) === String(field.value) ? 'selected' : '') + '>' + escapeHtml(item.label) + '</option>'; }).join('');
+    return '<label class="dialog-field"><span>' + label + '</span><select name="' + name + '"' + required + '>' + options + '</select></label>';
+  }
+  if (field.type === 'range') {
+    const min = escapeHtml(field.min == null ? 0 : field.min); const max = escapeHtml(field.max == null ? 1 : field.max); const step = escapeHtml(field.step == null ? 0.001 : field.step); const output = escapeHtml(field.value == null ? '' : field.value);
+    return '<label class="dialog-field"><span>' + label + '</span><input name="' + name + '" type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + value + '"' + required + ' /><span class="dialog-range-meta"><span>' + min + '</span><output data-dialog-output="' + name + '">' + output + '</output><span>' + max + '</span></span></label>';
+  }
+  const type = field.type === 'textarea' ? 'textarea' : 'input';
+  if (type === 'textarea') return '<label class="dialog-field"><span>' + label + '</span><textarea name="' + name + '" maxlength="' + escapeHtml(field.maxlength || 2000) + '"' + required + '>' + value + '</textarea></label>';
+  const min = field.min == null ? '' : ' min="' + escapeHtml(field.min) + '"'; const max = field.max == null ? '' : ' max="' + escapeHtml(field.max) + '"'; const step = field.step == null ? '' : ' step="' + escapeHtml(field.step) + '"'; const maxlength = field.maxlength == null ? '' : ' maxlength="' + escapeHtml(field.maxlength) + '"';
+  return '<label class="dialog-field"><span>' + label + '</span><input name="' + name + '" type="' + escapeHtml(field.type || 'text') + '" value="' + value + '" placeholder="' + escapeHtml(field.placeholder || '') + '"' + min + max + step + maxlength + (field.autocomplete ? ' autocomplete="' + escapeHtml(field.autocomplete) + '"' : '') + required + ' /></label>';
+}
+function openDialog(options) {
+  const dialog = $('#interaction-dialog');
+  if (!dialog) return Promise.resolve(null);
+  if (dialogResolver) closeDialog(null);
+  return new Promise(function (resolve) {
+    dialogResolver = resolve; dialogReturnFocus = document.activeElement;
+    $('#interaction-dialog-title').textContent = options.title || '确认操作';
+    $('#interaction-dialog-message').textContent = options.message || '';
+    const fields = options.fields || [];
+    $('#interaction-dialog-fields').innerHTML = fields.map(dialogFieldMarkup).join('');
+    $('#interaction-dialog-submit').textContent = options.submitLabel || (options.confirm ? '确认' : '继续');
+    $('#interaction-dialog-cancel').textContent = options.cancelLabel || '取消';
+    dialog.classList.remove('hidden');
+    const card = dialog.querySelector('.modal-card');
+    dialogKeyHandler = function (event) {
+      if (event.key === 'Escape') { event.preventDefault(); closeDialog(null); }
+      else if (event.key === 'Enter' && event.target.tagName !== 'TEXTAREA' && !event.isComposing) { event.preventDefault(); $('#interaction-dialog-submit').click(); }
+    };
+    dialog.addEventListener('keydown', dialogKeyHandler);
+    dialog.querySelectorAll('input[type="range"]').forEach(function (input) { input.addEventListener('input', function () { const output = dialog.querySelector('[data-dialog-output="' + input.name + '"]'); if (output) output.value = input.value; }); });
+    const first = dialog.querySelector('#interaction-dialog-fields input, #interaction-dialog-fields select, #interaction-dialog-fields textarea') || $('#interaction-dialog-submit'); window.requestAnimationFrame(function () { (first || card).focus(); });
+  });
+}
+function readDialogFields() {
+  const fields = {}; $('#interaction-dialog-fields').querySelectorAll('[name]').forEach(function (input) { fields[input.name] = input.value; });
+  return fields;
 }
 function setAppView(view, moveFocus) {
   const settingsOpen = view === 'settings';
@@ -35,6 +92,14 @@ function setWorkspaceTab(tab) {
   state.activeWorkspaceTab = tab;
   document.querySelectorAll('[data-workspace-tab]').forEach(function (button) { const selected = button.dataset.workspaceTab === tab; button.classList.toggle('active', selected); button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1; });
   document.querySelectorAll('[data-workspace-panel]').forEach(function (panel) { const selected = panel.dataset.workspacePanel === tab; panel.classList.toggle('active', selected); panel.setAttribute('aria-hidden', String(!selected)); });
+}
+const phaseWorkspaceTabs = { profiling: 'data', planning: 'overview', eda: 'data', cleaning: 'data', screening: 'data', training: 'execution', reporting: 'report' };
+function autoFocusRunTab(run) {
+  const phase = run && run.phase;
+  const tab = phaseWorkspaceTabs[phase];
+  if (!tab || state.lastAutoPhase === phase) return;
+  state.lastAutoPhase = phase;
+  setWorkspaceTab(tab);
 }
 function runIsActive() {
   return Boolean(state.run && ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run.status));
@@ -61,7 +126,7 @@ async function loadProjects() {
 }
 async function selectProject(projectId) {
   const data = await api('/api/projects/' + projectId);
-  state.project = data.project; state.datasets = data.datasets || []; state.dictionaries = data.dictionaries || []; state.runs = data.runs || []; state.run = state.runs[0] || null; state.selectedDatasetId = (state.run && state.run.dataset_id) || (state.datasets[0] && state.datasets[0].id) || null; state.mode = runIsActive() ? state.run.mode : state.defaultMode; state.events = []; state.providerRequests = []; state.selectionExcluded = new Set();
+  state.project = data.project; state.datasets = data.datasets || []; state.dictionaries = data.dictionaries || []; state.runs = data.runs || []; state.run = state.runs[0] || null; state.selectedDatasetId = (state.run && state.run.dataset_id) || (state.datasets[0] && state.datasets[0].id) || null; state.mode = runIsActive() ? state.run.mode : state.defaultMode; state.events = []; state.providerRequests = []; state.selectionExcluded = new Set(); state.lastAutoPhase = null; state.featurePage = 1; state.selectionPage = 1;
   setWorkspaceTab('overview');
   $('#report-panel').classList.add('hidden'); $('#report-empty-state').classList.remove('hidden'); $('#report-tab').classList.remove('has-result');
   await loadConversation();
@@ -154,6 +219,7 @@ function renderDictionaryStatus() {
 function phaseLabel(phase) { return ({ profiling: '数据画像', planning: '计划与审核', eda: '探索分析', cleaning: '数据清洗', screening: '变量筛选', training: '模型训练', reporting: '报告产出' })[phase] || phase || '等待'; }
 function renderRun() {
   const run = state.run; const status = run && run.status || 'idle'; const event = state.events[state.events.length - 1];
+  autoFocusRunTab(run);
   $('#current-node').textContent = event && event.payload && event.payload.node ? phaseLabel(event.payload.node) : (status === 'idle' ? '等待导入数据' : phaseLabel(run.phase));
   $('#current-message').textContent = event && event.payload && event.payload.message ? event.payload.message : statusText(status);
   $('#inspector-status').textContent = statusLabel(status); $('#inspector-status').className = 'chip ' + statusClass(status);
@@ -168,10 +234,9 @@ function statusLabel(status) { return ({ idle: '等待', queued: '排队', runni
 function statusClass(status) { return ({ running: 'running', queued: 'running', awaiting_confirmation: 'warn', paused: 'warn', failed: 'block', blocked: 'block', cancelled: 'block', succeeded: 'safe' })[status] || 'neutral'; }
 function renderStages() {
   const current = state.run && state.run.phase; const phases = [['profiling', '数据画像'], ['planning', 'Y 与计划'], ['eda', '探索分析'], ['cleaning', '数据清洗'], ['screening', '变量筛选'], ['training', '模型训练'], ['reporting', '报告与产物']]; const order = phases.map(function (item) { return item[0]; }); const currentIndex = order.indexOf(current);
-  const stageTabs = { profiling: 'data', planning: 'overview', eda: 'data', cleaning: 'data', screening: 'data', training: 'execution', reporting: 'report' };
   $('#stage-list').innerHTML = phases.map(function (item, index) {
     const done = state.run && (state.run.status === 'succeeded' || (currentIndex >= 0 && index < currentIndex)); const active = current === item[0]; const blocked = state.run && state.run.status === 'blocked' && active;
-    return '<button type="button" class="stage-item ' + (done ? 'done' : '') + ' ' + (active ? 'active' : '') + ' ' + (blocked ? 'blocked' : '') + '" data-stage-tab="' + stageTabs[item[0]] + '">' + (done ? '✓ ' : '') + item[1] + '</button>';
+    return '<button type="button" class="stage-item ' + (done ? 'done' : '') + ' ' + (active ? 'active' : '') + ' ' + (blocked ? 'blocked' : '') + '" data-stage-tab="' + phaseWorkspaceTabs[item[0]] + '">' + (done ? '✓ ' : '') + item[1] + '</button>';
   }).join('');
   $('#stage-list').querySelectorAll('[data-stage-tab]').forEach(function (button) { button.addEventListener('click', function () { setWorkspaceTab(button.dataset.stageTab); }); });
 }
@@ -194,20 +259,23 @@ function renderFeatureSelection() {
     const label = ((item.name || '') + ' ' + (((item.dictionary || {}).display_name) || '')).toLowerCase();
     return !query || label.includes(query);
   });
-  const visible = matching.slice(0, 200);
-  list.innerHTML = visible.length ? visible.map(function (item) {
+  const pageSize = 50; const pageCount = Math.max(1, Math.ceil(matching.length / pageSize)); state.featurePage = Math.min(Math.max(state.featurePage || 1, 1), pageCount); const start = (state.featurePage - 1) * pageSize; const visible = matching.slice(start, start + pageSize);
+  const pageControls = pageCount > 1 ? '<div class="table-pagination"><button type="button" class="secondary-button small" id="feature-page-prev"' + (state.featurePage === 1 ? ' disabled' : '') + '>上一页</button><span>第 ' + state.featurePage + ' / ' + pageCount + ' 页</span><button type="button" class="secondary-button small" id="feature-page-next"' + (state.featurePage === pageCount ? ' disabled' : '') + '>下一页</button></div>' : '';
+  list.innerHTML = (visible.length ? visible.map(function (item) {
     const dictionary = item.dictionary || {};
     const display = dictionary.display_name && dictionary.display_name !== item.name ? ' · ' + dictionary.display_name : '';
     const missing = item.missing_rate == null ? '缺失 —' : '缺失 ' + (Number(item.missing_rate) * 100).toFixed(1) + '%';
     return '<label class="feature-option"><input type="checkbox" data-confirm-exclude="' + escapeHtml(item.name) + '" ' + (state.confirmationExcluded.has(item.name) ? 'checked' : '') + ' /><span><strong>' + escapeHtml(item.name) + '</strong><small>' + escapeHtml((item.type || 'unknown') + display + ' · ' + missing) + '</small></span></label>';
-  }).join('') : '<span class="muted">没有匹配字段。</span>';
-  count.textContent = (query ? '匹配 ' + matching.length + ' 个' : '可选 ' + state.confirmationFeatures.length + ' 个') + (matching.length > visible.length ? ' · 当前展示前 200 个，请继续搜索' : '');
+  }).join('') : '<span class="muted">没有匹配字段。</span>') + pageControls;
+  count.textContent = (query ? '匹配 ' + matching.length + ' 个' : '可选 ' + state.confirmationFeatures.length + ' 个') + (pageCount > 1 ? ' · 第 ' + state.featurePage + ' / ' + pageCount + ' 页' : '');
   list.querySelectorAll('[data-confirm-exclude]').forEach(function (input) {
     input.addEventListener('change', function () {
       if (input.checked) state.confirmationExcluded.add(input.dataset.confirmExclude);
       else state.confirmationExcluded.delete(input.dataset.confirmExclude);
     });
   });
+  if ($('#feature-page-prev')) $('#feature-page-prev').addEventListener('click', function () { state.featurePage -= 1; renderFeatureSelection(); });
+  if ($('#feature-page-next')) $('#feature-page-next').addEventListener('click', function () { state.featurePage += 1; renderFeatureSelection(); });
 }
 function renderConversation() {
   const container = $('#conversation-messages');
@@ -264,6 +332,7 @@ function renderActionCard() {
     if (state.confirmationRunId !== run.id) {
       state.confirmationRunId = run.id;
       state.confirmationFeatures = profileColumns.filter(function (item) { return ['numeric', 'categorical'].includes(item.type) && item.name !== (plan.target || target.target); });
+      state.featurePage = 1;
       state.confirmationExcluded = new Set((plan.screening && plan.screening.excluded_columns) || []);
     }
     const baselineCandidates = profileColumns.filter(function (item) { return item.type === 'numeric' && item.name !== (plan.target || target.target); });
@@ -290,10 +359,10 @@ function renderActionCard() {
       cleaningButton + '<button class="primary-button action-button" id="confirm-plan"' + confirmationDisabled + '>确认并继续</button>';
     $('#confirm-plan').addEventListener('click', confirmPlan);
     renderFeatureSelection();
-    $('#feature-search').addEventListener('input', renderFeatureSelection);
+    $('#feature-search').addEventListener('input', function () { state.featurePage = 1; renderFeatureSelection(); });
     $('#confirm-target').addEventListener('change', function () {
       state.confirmationFeatures = profileColumns.filter(function (item) { return ['numeric', 'categorical'].includes(item.type) && item.name !== $('#confirm-target').value; });
-      renderFeatureSelection();
+      state.featurePage = 1; renderFeatureSelection();
     });
     if ($('#apply-cleaning')) $('#apply-cleaning').addEventListener('click', applyCleaning);
     if ($('#skip-cleaning')) $('#skip-cleaning').addEventListener('click', skipCleaning);
@@ -310,6 +379,62 @@ function renderActionCard() {
   else if (run.status === 'failed' || run.status === 'blocked') card.innerHTML = '<h3>需要处理</h3><p>' + escapeHtml(run.error || '查看时间线中的结构化问题。') + '</p>';
   else if (run.status === 'cancelled') card.innerHTML = '<h3>Run 已取消</h3><p>未完成产物已与正式结果隔离。可以修改方案后新建一次 Run。</p>';
   else card.innerHTML = '<h3>正在运行</h3><p>页面会持续接收节点和工具事件。可以离开后回来继续查看。</p>';
+}
+function chartNumber(value) { const number = Number(value); return Number.isFinite(number) ? number : null; }
+function chartEmpty(message) { return '<div class="chart-empty">' + escapeHtml(message || '暂无可视化证据') + '</div>'; }
+function chartCanvas(label, yMax, yFormatter) {
+  const width = 460; const height = 240; const left = 46; const right = 16; const top = 14; const bottom = 34; const plotWidth = width - left - right; const plotHeight = height - top - bottom; const max = yMax > 0 ? yMax : 1;
+  const x = function (value) { return left + Math.max(0, Math.min(1, value)) * plotWidth; }; const y = function (value) { return top + plotHeight - Math.max(0, Math.min(max, value)) / max * plotHeight; };
+  let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + escapeHtml(label) + '"><rect class="chart-background" x="0" y="0" width="' + width + '" height="' + height + '" rx="12" />';
+  [0, 0.25, 0.5, 0.75, 1].forEach(function (ratio) { const value = max * ratio; const yPosition = y(value); svg += '<line class="chart-grid" x1="' + left + '" y1="' + yPosition.toFixed(2) + '" x2="' + (left + plotWidth) + '" y2="' + yPosition.toFixed(2) + '" /><text class="chart-axis-label" x="' + (left - 8) + '" y="' + (yPosition + 3).toFixed(2) + '" text-anchor="end">' + escapeHtml(yFormatter ? yFormatter(value) : value.toFixed(2)) + '</text>'; });
+  svg += '<line class="chart-axis" x1="' + left + '" y1="' + (top + plotHeight) + '" x2="' + (left + plotWidth) + '" y2="' + (top + plotHeight) + '" /><line class="chart-axis" x1="' + left + '" y1="' + top + '" x2="' + left + '" y2="' + (top + plotHeight) + '" />';
+  return { svg: svg, x: x, y: y, left: left, top: top, plotWidth: plotWidth, plotHeight: plotHeight, bottom: bottom, width: width, height: height };
+}
+function chartLine(points, color, shell, xKey, yKey) {
+  const coordinates = points.map(function (item, index) { const xValue = xKey ? xKey(item, index, points.length) : index / Math.max(points.length - 1, 1); const yValue = chartNumber(yKey(item)); return yValue == null ? null : shell.x(xValue).toFixed(2) + ',' + shell.y(yValue).toFixed(2); }).filter(Boolean);
+  return coordinates.length > 1 ? '<polyline class="chart-line" stroke="' + color + '" points="' + coordinates.join(' ') + '" />' : '';
+}
+function chartLegend(items) { return '<div class="chart-legend">' + items.map(function (item) { return '<span><i style="background:' + escapeHtml(item.color) + '"></i>' + escapeHtml(item.label) + '</span>'; }).join('') + '</div>'; }
+function renderRocChart(metrics) {
+  const target = $('#chart-roc'); if (!target) return;
+  const points = (metrics && metrics.roc_curve || []).filter(function (item) { return chartNumber(item.fpr) != null && chartNumber(item.tpr) != null; });
+  if (points.length < 2) { target.innerHTML = chartEmpty('该 Run 未保存 ROC 曲线点；重新运行后会生成。'); return; }
+  const shell = chartCanvas('验证集 ROC 曲线', 1, function (value) { return value.toFixed(1); }); let svg = shell.svg + '<line class="chart-reference" x1="' + shell.x(0) + '" y1="' + shell.y(0) + '" x2="' + shell.x(1) + '" y2="' + shell.y(1) + '" />' + chartLine(points, '#1d8067', shell, function (item) { return chartNumber(item.fpr); }, function (item) { return item.tpr; }); svg += '<text class="chart-axis-caption" x="' + (shell.left + shell.plotWidth / 2) + '" y="' + (shell.height - 7) + '" text-anchor="middle">False Positive Rate</text><text class="chart-axis-caption" transform="translate(12 ' + (shell.top + shell.plotHeight / 2) + ') rotate(-90)" text-anchor="middle">True Positive Rate</text></svg>'; target.innerHTML = svg + chartLegend([{ color: '#1d8067', label: 'ROC' }, { color: '#b7c7c1', label: '随机基线' }]);
+}
+function renderKsChart(metrics) {
+  const target = $('#chart-ks'); if (!target) return;
+  const points = (metrics && metrics.ks_curve || []).filter(function (item) { return chartNumber(item.fpr) != null && chartNumber(item.tpr) != null; });
+  if (points.length < 2) { target.innerHTML = chartEmpty('该 Run 未保存 KS 曲线点；重新运行后会生成。'); return; }
+  const shell = chartCanvas('验证集 KS 曲线', 1, function (value) { return value.toFixed(1); }); let svg = shell.svg + chartLine(points, '#1d8067', shell, null, function (item) { return item.tpr; }) + chartLine(points, '#d88b45', shell, null, function (item) { return item.fpr; }) + chartLine(points, '#8d5aa7', shell, null, function (item) { return item.ks; }); svg += '<text class="chart-axis-caption" x="' + (shell.left + shell.plotWidth / 2) + '" y="' + (shell.height - 7) + '" text-anchor="middle">排序分位（由高分到低分）</text><text class="chart-axis-caption" transform="translate(12 ' + (shell.top + shell.plotHeight / 2) + ') rotate(-90)" text-anchor="middle">Rate</text></svg>'; target.innerHTML = svg + chartLegend([{ color: '#1d8067', label: 'TPR' }, { color: '#d88b45', label: 'FPR' }, { color: '#8d5aa7', label: 'KS' }]);
+}
+function renderCalibrationChart(metrics) {
+  const target = $('#chart-calibration'); if (!target) return;
+  const points = (metrics && metrics.calibration || []).filter(function (item) { return chartNumber(item.predicted_rate) != null && chartNumber(item.observed_rate) != null; });
+  if (!points.length) { target.innerHTML = chartEmpty('暂无校准分箱结果。'); return; }
+  const shell = chartCanvas('验证集校准曲线', 1, function (value) { return value.toFixed(1); }); let svg = shell.svg + '<line class="chart-reference" x1="' + shell.x(0) + '" y1="' + shell.y(0) + '" x2="' + shell.x(1) + '" y2="' + shell.y(1) + '" />' + chartLine(points, '#1d8067', shell, function (item) { return chartNumber(item.predicted_rate); }, function (item) { return item.observed_rate; }); points.forEach(function (item) { svg += '<circle class="chart-point" cx="' + shell.x(chartNumber(item.predicted_rate)) + '" cy="' + shell.y(chartNumber(item.observed_rate)) + '" r="3" />'; }); svg += '<text class="chart-axis-caption" x="' + (shell.left + shell.plotWidth / 2) + '" y="' + (shell.height - 7) + '" text-anchor="middle">预测坏率</text><text class="chart-axis-caption" transform="translate(12 ' + (shell.top + shell.plotHeight / 2) + ') rotate(-90)" text-anchor="middle">实际坏率</text></svg>'; target.innerHTML = svg + chartLegend([{ color: '#1d8067', label: '实际 / 预测' }, { color: '#b7c7c1', label: '理想校准' }]);
+}
+function renderImportanceChart(champion, scorecard) {
+  const target = $('#chart-importance'); if (!target) return;
+  const rows = (champion && champion.feature_importance || []).map(function (item) { return { label: item.feature || item.column, value: chartNumber(item.importance != null ? item.importance : (item.absolute_coefficient != null ? item.absolute_coefficient : item.iv)) }; }).filter(function (item) { return item.label && item.value != null; }).sort(function (a, b) { return b.value - a.value; }).slice(0, 8);
+  if (!rows.length && scorecard) return renderImportanceChart({ feature_importance: scorecard.feature_importance || [] }, null);
+  if (!rows.length) { target.innerHTML = chartEmpty('暂无变量重要性结果。'); return; }
+  const max = Math.max.apply(null, rows.map(function (item) { return item.value; })) || 1; const rowHeight = 23; const width = 460; const height = Math.max(150, rows.length * rowHeight + 42); let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="冠军模型变量重要性"><rect class="chart-background" x="0" y="0" width="' + width + '" height="' + height + '" rx="12" />'; rows.forEach(function (item, index) { const y = 20 + index * rowHeight; const bar = Math.max(2, item.value / max * 250); svg += '<text class="chart-bar-label" x="14" y="' + (y + 13) + '">' + escapeHtml(String(item.label).slice(0, 24)) + '</text><rect class="chart-bar" x="170" y="' + y + '" width="' + bar.toFixed(2) + '" height="14" rx="7" /><text class="chart-bar-value" x="' + (180 + bar) + '" y="' + (y + 12) + '">' + escapeHtml(item.value.toFixed(4)) + '</text>'; }); svg += '</svg>'; target.innerHTML = svg;
+}
+function renderPsiChart(stability) {
+  const target = $('#chart-psi'); if (!target) return;
+  const rows = (stability || []).map(function (item) { return { label: item.feature, validation: chartNumber((item.validation || {}).psi), oot: chartNumber((item.oot || {}).psi) }; }).filter(function (item) { return item.label && (item.validation != null || item.oot != null); }).sort(function (a, b) { return Math.max(b.validation || 0, b.oot || 0) - Math.max(a.validation || 0, a.oot || 0); }).slice(0, 8);
+  if (!rows.length) { target.innerHTML = chartEmpty('暂无验证 / OOT PSI 结果。'); return; }
+  const max = Math.max(0.25, Math.max.apply(null, rows.map(function (item) { return Math.max(item.validation || 0, item.oot || 0); }))); const width = 460; const rowHeight = 25; const height = Math.max(160, rows.length * rowHeight + 42); const left = 142; const plotWidth = 280; let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="变量 PSI 稳定性"><rect class="chart-background" x="0" y="0" width="' + width + '" height="' + height + '" rx="12" /><line class="chart-reference" x1="' + (left + 0.25 / max * plotWidth) + '" y1="14" x2="' + (left + 0.25 / max * plotWidth) + '" y2="' + (height - 22) + '" />'; rows.forEach(function (item, index) { const y = 18 + index * rowHeight; const validation = (item.validation || 0) / max * plotWidth; const oot = (item.oot || 0) / max * plotWidth; svg += '<text class="chart-bar-label" x="12" y="' + (y + 13) + '">' + escapeHtml(String(item.label).slice(0, 20)) + '</text><rect class="chart-bar chart-bar-validation" x="' + left + '" y="' + y + '" width="' + Math.max(1, validation).toFixed(2) + '" height="7" rx="3.5" /><rect class="chart-bar chart-bar-oot" x="' + left + '" y="' + (y + 9) + '" width="' + Math.max(1, oot).toFixed(2) + '" height="7" rx="3.5" />'; }); svg += '<text class="chart-axis-caption" x="' + (left + plotWidth / 2) + '" y="' + (height - 7) + '" text-anchor="middle">PSI（虚线 = 0.25）</text></svg>'; target.innerHTML = svg + chartLegend([{ color: '#1d8067', label: '验证' }, { color: '#d88b45', label: 'OOT' }]);
+}
+function renderWoeChart(scorecard) {
+  const target = $('#chart-woe'); if (!target) return;
+  const bins = scorecard && scorecard.bins || {}; const importance = scorecard && scorecard.feature_importance || []; const feature = (importance[0] && importance[0].feature) || Object.keys(bins)[0]; const rows = feature && bins[feature] && bins[feature].rows || [];
+  if (!rows.length) { target.innerHTML = chartEmpty('当前 Run 没有评分卡 WOE 分箱结果。'); return; }
+  const values = rows.map(function (item) { return chartNumber(item.woe); }).filter(function (value) { return value != null; }); const bound = Math.max(0.2, Math.max.apply(null, values.map(Math.abs))); const width = 460; const height = 220; const left = 48; const right = 16; const top = 18; const bottom = 40; const plotWidth = width - left - right; const plotHeight = height - top - bottom; const x = function (index) { return left + (index + 0.5) / rows.length * plotWidth; }; const y = function (value) { return top + plotHeight / 2 - value / bound * (plotHeight / 2 - 5); }; let svg = '<svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="' + escapeHtml(String(feature) + ' WOE 分箱') + '"><rect class="chart-background" x="0" y="0" width="' + width + '" height="' + height + '" rx="12" /><line class="chart-axis" x1="' + left + '" y1="' + (top + plotHeight / 2) + '" x2="' + (left + plotWidth) + '" y2="' + (top + plotHeight / 2) + '" />'; rows.forEach(function (item, index) { const value = chartNumber(item.woe); if (value == null) return; const barTop = Math.min(y(value), top + plotHeight / 2); const barHeight = Math.max(2, Math.abs(y(value) - (top + plotHeight / 2))); svg += '<rect class="chart-bar ' + (value >= 0 ? 'chart-bar-positive' : 'chart-bar-negative') + '" x="' + (x(index) - Math.max(7, plotWidth / rows.length * 0.28)) + '" y="' + barTop + '" width="' + Math.max(14, plotWidth / rows.length * 0.56) + '" height="' + barHeight + '" rx="4" /><text class="chart-axis-label" x="' + x(index) + '" y="' + (height - 19) + '" text-anchor="middle">' + escapeHtml(String(item.bin || '').slice(0, 12)) + '</text>'; }); svg += '<text class="chart-axis-caption" x="' + (left + plotWidth / 2) + '" y="' + (height - 5) + '" text-anchor="middle">' + escapeHtml(String(feature).slice(0, 32)) + '</text><text class="chart-axis-caption" transform="translate(12 ' + (top + plotHeight / 2) + ') rotate(-90)" text-anchor="middle">WOE</text></svg>'; target.innerHTML = svg + chartLegend([{ color: '#1d8067', label: '正 WOE' }, { color: '#d88b45', label: '负 WOE' }]);
+}
+function renderReportCharts(report) {
+  const champion = report && report.champion || {}; const metrics = champion.validation || {};
+  renderRocChart(metrics); renderKsChart(metrics); renderCalibrationChart(metrics); renderImportanceChart(champion, report && report.scorecard); renderPsiChart(report && report.stability && report.stability.features); renderWoeChart(report && report.scorecard);
 }
 function renderReport(report) {
   if (!report) return; $('#report-panel').classList.remove('hidden'); $('#report-empty-state').classList.add('hidden'); $('#report-tab').classList.add('has-result'); $('#report-link').href = '/api/runs/' + state.run.id + '/report.html';
@@ -328,6 +453,7 @@ function renderReport(report) {
   const imbalance = report.imbalance_policy || {};
   const reviewLabel = review.verdict === 'pass' ? '通过' : review.verdict === 'block' ? '阻断' : (review.verdict || '—');
   $('#report-details').innerHTML = '<div class="report-facts"><span>校准最大绝对差</span><strong>' + calibrationGap + '</strong><span>需稳定性复核变量</span><strong>' + highPsi + '</strong><span>代码 Reviewer</span><strong>' + escapeHtml(reviewLabel) + '</strong><span>训练正/负类</span><strong>' + escapeHtml(String(imbalance.train_positive_count == null ? '—' : imbalance.train_positive_count) + ' / ' + String(imbalance.train_negative_count == null ? '—' : imbalance.train_negative_count)) + '</strong></div>' + (excluded.length ? '<strong>字段处理摘要</strong><ul>' + excluded.map(function (item) { return '<li><code>' + escapeHtml(item.column) + '</code> · ' + escapeHtml(item.status) + ' · ' + escapeHtml((item.reasons || []).join('、') || '规则排除') + '</li>'; }).join('') + '</ul>' : '<strong>字段处理摘要</strong><span>没有字段被规则排除。</span>') + reevaluationNote;
+  renderReportCharts(report);
   renderSelectionTable(report);
   renderNarrativeEditor(report);
 }
@@ -337,7 +463,7 @@ function renderSelectionTable(report) {
   if (!rows.length) { panel.innerHTML = ''; return; }
   const planExcluded = new Set(((state.run && state.run.state && state.run.state.plan && state.run.state.plan.screening) || {}).excluded_columns || []);
   if (!state.selectionExcluded.size) state.selectionExcluded = new Set(planExcluded);
-  panel.innerHTML = '<div class="selection-table-heading"><div><strong>变量筛选明细</strong><small>训练分区拟合的 IV/缺失/规则结果；勾选后可派生隔离 what-if。</small></div><span id="selection-count" class="chip neutral">' + rows.length + ' 个字段</span></div><div class="selection-table-controls"><input id="selection-search" class="feature-search" type="search" placeholder="搜索字段名" autocomplete="off" /><select id="selection-status"><option value="all">全部状态</option><option value="included">入选</option><option value="excluded">排除</option><option value="blocked">阻断</option></select><select id="selection-sort"><option value="iv">按 IV 降序</option><option value="missing">按缺失率降序</option><option value="column">按字段名</option></select></div><div id="selection-table-list" class="selection-table-list"></div><div class="selection-table-actions"><small class="muted">当前仅展示匹配结果前 200 个；正式 Run 不会被直接修改。</small><button type="button" id="selection-what-if" class="secondary-button small">用勾选字段派生 what-if</button></div>';
+  panel.innerHTML = '<div class="selection-table-heading"><div><strong>变量筛选明细</strong><small>训练分区拟合的 IV/缺失/规则结果；勾选后可派生隔离 what-if。</small></div><span id="selection-count" class="chip neutral">' + rows.length + ' 个字段</span></div><div class="selection-table-controls"><input id="selection-search" class="feature-search" type="search" placeholder="搜索字段名" autocomplete="off" /><select id="selection-status"><option value="all">全部状态</option><option value="included">入选</option><option value="excluded">排除</option><option value="blocked">阻断</option></select><select id="selection-sort"><option value="iv">按 IV 降序</option><option value="missing">按缺失率降序</option><option value="column">按字段名</option></select></div><div id="selection-table-list" class="selection-table-list"></div><div id="selection-pagination"></div><div class="selection-table-actions"><small class="muted">变量按页加载，避免大字段表阻塞浏览器；筛选和排序会作用于全部结果。</small><button type="button" id="selection-what-if" class="secondary-button small">用勾选字段派生 what-if</button></div>';
   function redraw() {
     const query = ($('#selection-search').value || '').trim().toLowerCase();
     const status = $('#selection-status').value;
@@ -347,12 +473,13 @@ function renderSelectionTable(report) {
       const key = sort === 'missing' ? 'missing_rate' : 'iv';
       return Number(b[key] == null ? -1 : b[key]) - Number(a[key] == null ? -1 : a[key]);
     });
-    const visible = filtered.slice(0, 200);
-    $('#selection-count').textContent = (query || status !== 'all' ? '匹配 ' + filtered.length : rows.length) + ' 个字段';
+    const pageSize = 50; const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize)); state.selectionPage = Math.min(Math.max(state.selectionPage || 1, 1), pageCount); const start = (state.selectionPage - 1) * pageSize; const visible = filtered.slice(start, start + pageSize);
+    $('#selection-count').textContent = (query || status !== 'all' ? '匹配 ' + filtered.length : rows.length) + ' 个字段' + (pageCount > 1 ? ' · 第 ' + state.selectionPage + ' / ' + pageCount + ' 页' : '');
     $('#selection-table-list').innerHTML = visible.length ? '<table class="selection-table"><thead><tr><th>what-if</th><th>字段</th><th>状态</th><th>缺失率</th><th>IV</th><th>原因</th></tr></thead><tbody>' + visible.map(function (item) { return '<tr><td><input type="checkbox" data-selection-column="' + escapeHtml(item.column) + '" ' + (state.selectionExcluded.has(item.column) ? 'checked' : '') + ' ' + (item.status === 'blocked' ? 'disabled' : '') + ' /></td><td><code>' + escapeHtml(item.column) + '</code></td><td><span class="selection-status ' + escapeHtml(item.status) + '">' + escapeHtml(item.status) + '</span></td><td>' + (item.missing_rate == null ? '—' : escapeHtml((Number(item.missing_rate) * 100).toFixed(1) + '%')) + '</td><td>' + (item.iv == null ? '—' : escapeHtml(Number(item.iv).toFixed(4))) + '</td><td>' + escapeHtml((item.reasons || []).join('、') || '—') + '</td></tr>'; }).join('') + '</tbody></table>' : '<span class="muted">没有匹配变量。</span>';
     $('#selection-table-list').querySelectorAll('[data-selection-column]').forEach(function (input) { input.addEventListener('change', function () { if (input.checked) state.selectionExcluded.add(input.dataset.selectionColumn); else state.selectionExcluded.delete(input.dataset.selectionColumn); }); });
+    const pagination = $('#selection-pagination'); if (pagination) { pagination.innerHTML = pageCount > 1 ? '<div class="table-pagination"><button type="button" class="secondary-button small" id="selection-page-prev"' + (state.selectionPage === 1 ? ' disabled' : '') + '>上一页</button><span>第 ' + state.selectionPage + ' / ' + pageCount + ' 页</span><button type="button" class="secondary-button small" id="selection-page-next"' + (state.selectionPage === pageCount ? ' disabled' : '') + '>下一页</button></div>' : ''; if ($('#selection-page-prev')) $('#selection-page-prev').addEventListener('click', function () { state.selectionPage -= 1; redraw(); }); if ($('#selection-page-next')) $('#selection-page-next').addEventListener('click', function () { state.selectionPage += 1; redraw(); }); }
   }
-  $('#selection-search').addEventListener('input', redraw); $('#selection-status').addEventListener('change', redraw); $('#selection-sort').addEventListener('change', redraw); redraw();
+  $('#selection-search').addEventListener('input', function () { state.selectionPage = 1; redraw(); }); $('#selection-status').addEventListener('change', function () { state.selectionPage = 1; redraw(); }); $('#selection-sort').addEventListener('change', function () { state.selectionPage = 1; redraw(); }); redraw();
   $('#selection-what-if').addEventListener('click', function () { createWhatIf({ excluded_features: Array.from(state.selectionExcluded) }); });
 }
 function renderNarrativeEditor(report) {
@@ -392,7 +519,8 @@ async function syncRun() {
   if (state.run.status === 'succeeded') { const report = await api('/api/runs/' + state.run.id + '/report'); renderReport(report); }
 }
 async function createProject() {
-  const name = window.prompt('项目名称', '我的风控建模项目'); if (!name) return;
+  const values = await openDialog({ title: '新建项目', message: '为这次风控建模任务起一个容易识别的名称。', submitLabel: '创建', fields: [{ name: 'name', label: '项目名称', value: '我的风控建模项目', required: true, maxlength: 120 }] });
+  const name = values && String(values.name || '').trim(); if (!name) return;
   setAppView('project');
   const data = await api('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name }) });
   state.project = data.project; await loadProjects(); await selectProject(data.project.id);
@@ -400,7 +528,7 @@ async function createProject() {
 async function toggleArchiveProject() {
   if (!state.project) return;
   const archived = state.project.status === 'archived';
-  if (!archived && !window.confirm('确认归档当前项目？本地数据和报告会保留，但归档期间不能上传、分析或启动 Run。')) return;
+  if (!archived && !(await openDialog({ title: '归档项目', message: '本地数据和报告会保留，但归档期间不能上传、分析或启动 Run。', submitLabel: '确认归档', confirm: true }))) return;
   try {
     const endpoint = archived ? '/api/projects/' + state.project.id + '/restore' : '/api/projects/' + state.project.id + '/archive';
     const result = await api(endpoint, { method: 'POST' });
@@ -409,7 +537,7 @@ async function toggleArchiveProject() {
   } catch (error) { showNotice(error.message, 'block'); }
 }
 async function deleteProject() {
-  if (!state.project || !window.confirm('删除项目会移除本机项目目录、数据版本、Run 和报告，且不可恢复。确认继续？')) return;
+  if (!state.project || !(await openDialog({ title: '删除项目', message: '这会移除本机项目目录、数据版本、Run 和报告，且不可恢复。', submitLabel: '确认删除', confirm: true }))) return;
   try {
     await api('/api/projects/' + state.project.id, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm: true }) });
     state.project = null; state.run = null; state.datasets = []; state.dictionaries = []; state.runs = [];
@@ -425,7 +553,7 @@ async function uploadFile(file) {
   try {
     const inspectionForm = new FormData(); inspectionForm.append('file', file);
     const inspection = await api('/api/projects/' + state.project.id + '/datasets/inspect', { method: 'POST', body: inspectionForm });
-    if (inspection.requires_sheet) { const sheet = window.prompt('请选择 Sheet：' + inspection.sheets.join('、'), inspection.sheets[0]); if (!sheet) return; form.append('sheet', sheet); }
+    if (inspection.requires_sheet) { const values = await openDialog({ title: '选择工作表', message: '这个 Excel 文件包含多个 Sheet，请选择要导入的工作表。', submitLabel: '导入', fields: [{ name: 'sheet', label: 'Sheet', type: 'select', options: inspection.sheets, value: inspection.sheets[0], required: true }] }); if (!values || !values.sheet) return; form.append('sheet', values.sheet); }
     const data = await api('/api/projects/' + state.project.id + '/datasets', { method: 'POST', body: form }); showNotice(data.message); await selectProject(state.project.id);
   }
   catch (error) { showNotice(error.message, 'block'); }
@@ -436,7 +564,7 @@ async function uploadDictionary(file) {
   try {
     const inspectionForm = new FormData(); inspectionForm.append('file', file);
     const inspection = await api('/api/projects/' + state.project.id + '/datasets/inspect', { method: 'POST', body: inspectionForm });
-    if (inspection.requires_sheet) { const sheet = window.prompt('请选择数据字典 Sheet：' + inspection.sheets.join('、'), inspection.sheets[0]); if (!sheet) return; form.append('sheet', sheet); }
+    if (inspection.requires_sheet) { const values = await openDialog({ title: '选择数据字典 Sheet', message: '请选择存放字段中文名、口径和来源信息的工作表。', submitLabel: '绑定', fields: [{ name: 'sheet', label: 'Sheet', type: 'select', options: inspection.sheets, value: inspection.sheets[0], required: true }] }); if (!values || !values.sheet) return; form.append('sheet', values.sheet); }
     const result = await api('/api/projects/' + state.project.id + '/dictionaries', { method: 'POST', body: form });
     showNotice(result.message || '数据字典已保存到本机。');
     await selectProject(state.project.id);
@@ -447,7 +575,7 @@ async function startRun() {
   if (!state.project || !dataset) return;
   try {
     const data = await api('/api/projects/' + state.project.id + '/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: dataset.id, mode: state.defaultMode }) });
-    state.run = data.run; state.events = []; state.providerRequests = []; await loadConversation(); renderProject(); await loadProviderRequests(); connectStream();
+    state.run = data.run; state.events = []; state.providerRequests = []; state.lastAutoPhase = null; await loadConversation(); renderProject(); await loadProviderRequests(); connectStream();
   } catch (error) { showNotice(error.message, 'block'); }
 }
 async function confirmPlan() {
@@ -466,7 +594,7 @@ async function applyCleaning() {
   if (!state.run) return;
   const cleaning = state.run.state && state.run.state.cleaning || {};
   const actions = (cleaning.requires_confirmation || []).map(function (item) { return { code: item.code, columns: item.columns || [] }; });
-  if (!actions.length || !window.confirm('确认按当前方案执行清洗？系统会保留原数据并创建新的本地数据版本。')) return;
+  if (!actions.length || !(await openDialog({ title: '执行数据清洗', message: '系统会保留原数据，并创建新的本地数据版本。', submitLabel: '确认执行', confirm: true }))) return;
   try { await api('/api/runs/' + state.run.id + '/clean', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actions: actions }) }); showNotice('清洗已执行并生成新的本地数据版本。'); await syncRun(); } catch (error) { showNotice(error.message, 'block'); }
 }
 async function skipCleaning() {
@@ -481,36 +609,31 @@ async function createWhatIf(changes) {
   if (!changes) {
     const currentPlan = state.run.state && state.run.state.plan || {};
     const currentScreening = currentPlan.screening || {};
-    const rawIv = window.prompt('what-if：新的最小 IV 阈值（留空表示沿用当前值）', String(currentScreening.min_iv == null ? 0.005 : currentScreening.min_iv));
-    if (rawIv === null) return;
-    const minIv = Number(rawIv);
+    const values = await openDialog({ title: '派生 what-if 实验', message: '只改变这一个筛选阈值，正式 Run 不会被覆盖。', submitLabel: '启动实验', fields: [{ name: 'min_iv', label: '新的最小 IV 阈值', type: 'number', value: String(currentScreening.min_iv == null ? 0.005 : currentScreening.min_iv), min: 0, max: 10, step: 0.001, required: true }] });
+    if (!values) return;
+    const minIv = Number(values.min_iv);
     if (!Number.isFinite(minIv) || minIv < 0 || minIv > 10) { showNotice('IV 阈值必须是 0—10 的数值。', 'block'); return; }
     changes = { min_iv: minIv };
   }
   try {
     const result = await api('/api/projects/' + state.project.id + '/what-if', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base_run_id: state.run.id, changes: changes }) });
     showNotice('what-if 实验已隔离启动，不会覆盖正式 Run。');
-    state.run = result.run; state.events = []; state.providerRequests = []; state.selectionExcluded = new Set(); await loadConversation(); renderProject(); await loadProviderRequests(); connectStream();
+    state.run = result.run; state.events = []; state.providerRequests = []; state.selectionExcluded = new Set(); state.lastAutoPhase = null; await loadConversation(); renderProject(); await loadProviderRequests(); connectStream();
   } catch (error) { showNotice(error.message, 'block'); }
 }
 async function pauseRun() { if (!state.run) return; try { await api('/api/runs/' + state.run.id + '/pause', { method: 'POST' }); await syncRun(); if (state.eventSource) state.eventSource.close(); } catch (error) { showNotice(error.message, 'block'); } }
 async function resumeRun() { if (!state.run) return; try { await api('/api/runs/' + state.run.id + '/resume', { method: 'POST' }); await syncRun(); connectStream(); } catch (error) { showNotice(error.message, 'block'); } }
-async function cancelRun() { if (!state.run || !window.confirm('确认取消当前 Run？未完成产物不会作为正式结果。')) return; try { await api('/api/runs/' + state.run.id + '/cancel', { method: 'POST' }); await syncRun(); if (state.eventSource) state.eventSource.close(); } catch (error) { showNotice(error.message, 'block'); } }
+async function cancelRun() { if (!state.run || !(await openDialog({ title: '取消当前 Run', message: '未完成产物不会作为正式结果。', submitLabel: '确认取消', confirm: true }))) return; try { await api('/api/runs/' + state.run.id + '/cancel', { method: 'POST' }); await syncRun(); if (state.eventSource) state.eventSource.close(); } catch (error) { showNotice(error.message, 'block'); } }
 async function reevaluateBaseline() {
   if (!state.run) return;
   const baseline = (state.run.state && state.run.state.report && state.run.state.report.baseline) || {};
   if (!baseline.score_column) { showNotice('当前 Run 没有可复评的既有模型基线。', 'block'); return; }
   const datasets = state.datasets || [];
   if (!datasets.length) return;
-  const choices = datasets.map(function (item, index) { return (index + 1) + '. ' + item.filename; }).join('\n');
-  const rawIndex = window.prompt('选择用于新 OOT 复评的数据集：\n' + choices, '1');
-  if (rawIndex === null) return;
-  const index = Number(rawIndex) - 1;
-  if (!Number.isInteger(index) || !datasets[index]) { showNotice('数据集序号无效。', 'block'); return; }
-  const scoreColumn = window.prompt('基线分数列', baseline.score_column);
-  if (scoreColumn === null || !scoreColumn.trim()) return;
+  const values = await openDialog({ title: '既有模型 OOT 复评', message: '选择一个数据版本，并指定其中的基线分数列。', submitLabel: '开始复评', fields: [{ name: 'dataset_id', label: '复评数据版本', type: 'select', options: datasets.map(function (item) { return { value: item.id, label: item.filename }; }), value: datasets[0].id, required: true }, { name: 'score_column', label: '基线分数列', value: baseline.score_column, required: true }] });
+  if (!values || !values.dataset_id || !String(values.score_column || '').trim()) return;
   try {
-    const result = await api('/api/runs/' + state.run.id + '/baseline/reevaluate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: datasets[index].id, score_column: scoreColumn.trim(), approval_rate: 0.8 }) });
+    const result = await api('/api/runs/' + state.run.id + '/baseline/reevaluate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: values.dataset_id, score_column: String(values.score_column).trim(), approval_rate: 0.8 }) });
     state.run.state = state.run.state || {}; state.run.state.report = result.report;
     showNotice('新 OOT 复评已完成，阈值沿用正式 Run 的验证集冻结值。');
     renderReport(result.report); renderActionCard(); await loadProviderRequests();
@@ -555,14 +678,16 @@ async function loadSettings() {
 async function saveSettings(event) {
   event.preventDefault(); const formElement = event.target; const form = new FormData(formElement); const payload = Object.fromEntries(form.entries()); payload.llm_enabled = formElement.elements.llm_enabled.checked; payload.clear_api_key = formElement.elements.clear_api_key.checked; payload.run_token_budget = Number(payload.run_token_budget || 0); payload.monthly_token_budget = Number(payload.monthly_token_budget || 0);
   if (payload.clear_api_key && String(payload.api_key || '').trim()) { $('#settings-status').textContent = '更新密钥和清除密钥不能同时执行，请只选择一项。'; return; }
-  if (payload.clear_api_key && !window.confirm('确认清除这台电脑上保存的 Provider API Key？清除后外部 LLM 会停止调用，直到重新配置。')) return;
+  if (payload.clear_api_key && !(await openDialog({ title: '清除 Provider API Key', message: '这会清除这台电脑上保存的密钥。环境变量中的密钥需要在启动环境中手动移除。', submitLabel: '确认清除', confirm: true }))) return;
   const submit = formElement.querySelector('button[type="submit"]'); submit.disabled = true; $('#settings-status').textContent = '正在保存本机设置…';
   try { await api('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); await loadSettings(); $('#settings-status').textContent = '设置已保存，仅对这台电脑生效。'; renderProject(); }
   catch (error) { $('#settings-status').textContent = error.message; }
   finally { submit.disabled = false; }
 }
 async function sendFeedback(reaction) {
-  if (!state.run) return; const reason = reaction === 'dislike' ? window.prompt('请告诉我们哪里需要改进（可留空）', '') : '';
+  if (!state.run) return; const values = reaction === 'dislike' ? await openDialog({ title: '请补充改进建议', message: '你的反馈会帮助我们调整后续的 Agent 回复。', submitLabel: '提交反馈', fields: [{ name: 'reason', label: '哪里需要改进（可留空）', type: 'textarea', maxlength: 1000 }] }) : {};
+  if (reaction === 'dislike' && !values) return;
+  const reason = values && values.reason || '';
   await api('/api/runs/' + state.run.id + '/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reaction: reaction, reason: reason }) }); showNotice('反馈已记录，不会改变正式确认。');
 }
 async function sendConversation(event) {
@@ -579,7 +704,9 @@ async function sendConversation(event) {
 }
 async function sendMessageFeedback(messageId, reaction) {
   if (!state.run || !messageId) return;
-  const reason = reaction === 'dislike' ? window.prompt('请告诉我们哪里需要改进（可留空）', '') : '';
+  const values = reaction === 'dislike' ? await openDialog({ title: '请补充改进建议', message: '请描述这条 Agent 回复哪里不够好。', submitLabel: '提交反馈', fields: [{ name: 'reason', label: '哪里需要改进（可留空）', type: 'textarea', maxlength: 1000 }] }) : {};
+  if (reaction === 'dislike' && !values) return;
+  const reason = values && values.reason || '';
   try { await api('/api/runs/' + state.run.id + '/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reaction: reaction, reason: reason, message_id: messageId }) }); showNotice('已记录这条 Agent 回复的反馈。'); }
   catch (error) { showNotice(error.message, 'block'); }
 }
@@ -604,6 +731,7 @@ $('.settings-nav').addEventListener('keydown', function (event) { const items = 
 document.querySelectorAll('.feedback-button').forEach(function (button) { button.addEventListener('click', function () { sendFeedback(button.dataset.reaction); }); });
 $('#settings-form').elements.provider.addEventListener('change', applyProviderPreset); $('#settings-form').elements.api_format.addEventListener('change', applyProviderPreset);
 $('#settings-form').elements.api_key.addEventListener('input', function () { if (this.value.trim()) $('#settings-form').elements.clear_api_key.checked = false; }); $('#settings-form').elements.clear_api_key.addEventListener('change', function () { if (this.checked) $('#settings-form').elements.api_key.value = ''; });
+$('#interaction-dialog-submit').addEventListener('click', function () { closeDialog(readDialogFields()); }); $('#interaction-dialog-cancel').addEventListener('click', function () { closeDialog(null); }); $('#interaction-dialog-close').addEventListener('click', function () { closeDialog(null); }); $('#interaction-dialog').querySelector('[data-dialog-cancel]').addEventListener('click', function () { closeDialog(null); });
 $('#provider-test').addEventListener('click', async function () {
   const testButton = $('#provider-test'); testButton.disabled = true; $('#settings-status').textContent = '正在测试当前表单配置…';
   const formElement = $('#settings-form'); const form = new FormData(formElement); const payload = Object.fromEntries(form.entries());

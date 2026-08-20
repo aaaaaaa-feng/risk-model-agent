@@ -643,6 +643,8 @@ def _metrics(y_true: np.ndarray, probabilities: np.ndarray, threshold: float) ->
             "positive_rate": round(float(np.mean(y_true)) if len(y_true) else 0.0, 6),
             "confusion_matrix": None,
             "calibration": [],
+            "roc_curve": [],
+            "ks_curve": [],
         }
     fpr, tpr, thresholds = roc_curve(y_true, probabilities)
     ks = float(np.max(tpr - fpr))
@@ -653,6 +655,17 @@ def _metrics(y_true: np.ndarray, probabilities: np.ndarray, threshold: float) ->
     brier = None
     if np.isfinite(probabilities).all() and np.all((probabilities >= 0) & (probabilities <= 1)):
         brier = round(float(brier_score_loss(y_true, probabilities)), 6)
+    curve_indices = np.linspace(0, len(fpr) - 1, min(101, len(fpr)), dtype=int)
+    roc_points = [{"fpr": round(float(fpr[index]), 6), "tpr": round(float(tpr[index]), 6)} for index in curve_indices]
+    ks_points = [
+        {
+            "threshold": None if not np.isfinite(thresholds[index]) else round(float(thresholds[index]), 6),
+            "fpr": round(float(fpr[index]), 6),
+            "tpr": round(float(tpr[index]), 6),
+            "ks": round(float(tpr[index] - fpr[index]), 6),
+        }
+        for index in curve_indices
+    ]
     return {
         "roc_auc": round(float(roc_auc_score(y_true, probabilities)), 6),
         "pr_auc": round(float(average_precision_score(y_true, probabilities)), 6),
@@ -663,6 +676,8 @@ def _metrics(y_true: np.ndarray, probabilities: np.ndarray, threshold: float) ->
         "positive_rate": round(float(np.mean(y_true)), 6),
         "confusion_matrix": matrix,
         "calibration": _calibration_table(y_true, probabilities),
+        "roc_curve": roc_points,
+        "ks_curve": ks_points,
     }
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import html
+import math
 import os
 import subprocess
 import sys
@@ -9,7 +10,7 @@ import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, Optional, TypedDict
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 import pandas as pd
 from langgraph.graph import END, StateGraph
@@ -112,6 +113,75 @@ def _report_html(report: Dict[str, Any]) -> str:
     def safe(value: Any) -> str:
         return html.escape(str(value))
 
+    def number(value: Any) -> Optional[float]:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) else None
+
+    def line_chart(title: str, series: List[Tuple[str, str, List[Tuple[float, float]]]], y_max: float = 1.0) -> str:
+        width, height, left, top, right, bottom = 600, 270, 48, 18, 16, 38
+        plot_width, plot_height = width - left - right, height - top - bottom
+        maximum = max(number(y_max) or 1.0, 1e-9)
+        if not any(len(points) > 1 for _, _, points in series):
+            return f"<div class='report-chart empty-chart'><strong>{safe(title)}</strong><span>该 Run 未保存足够的曲线点。</span></div>"
+        def point(x_value: float, y_value: float) -> str:
+            x = left + max(0.0, min(1.0, x_value)) * plot_width
+            y = top + plot_height - max(0.0, min(maximum, y_value)) / maximum * plot_height
+            return f"{x:.2f},{y:.2f}"
+        svg = [f"<div class='report-chart'><h3>{safe(title)}</h3><svg viewBox='0 0 {width} {height}' role='img' aria-label='{safe(title)}'>"]
+        svg.append(f"<rect class='chart-bg' x='0' y='0' width='{width}' height='{height}' rx='12'/>")
+        for ratio in (0.0, 0.25, 0.5, 0.75, 1.0):
+            y = top + plot_height - ratio * plot_height
+            svg.append(f"<line class='chart-grid' x1='{left}' y1='{y:.2f}' x2='{left + plot_width}' y2='{y:.2f}'/><text class='chart-label' x='{left - 7}' y='{y + 3:.2f}' text-anchor='end'>{ratio:.1f}</text>")
+        svg.append(f"<line class='chart-axis' x1='{left}' y1='{top + plot_height}' x2='{left + plot_width}' y2='{top + plot_height}'/><line class='chart-axis' x1='{left}' y1='{top}' x2='{left}' y2='{top + plot_height}'/>")
+        for name, color, points in series:
+            if len(points) > 1:
+                svg.append(f"<polyline class='chart-line' stroke='{color}' points='{' '.join(point(x, y) for x, y in points)}'/>")
+        legend = "".join(f"<span><i style='background:{color}'></i>{safe(name)}</span>" for name, color, _ in series)
+        svg.append(f"</svg><div class='chart-legend'>{legend}</div></div>")
+        return "".join(svg)
+
+    def horizontal_bars(title: str, rows: List[Tuple[str, float, str]], max_value: Optional[float] = None) -> str:
+        valid = [(label, value, color) for label, value, color in rows if number(value) is not None]
+        if not valid:
+            return f"<div class='report-chart empty-chart'><strong>{safe(title)}</strong><span>暂无可视化证据。</span></div>"
+        width, row_height, left, top = 600, 25, 150, 18
+        maximum = max(number(max_value) or 0.0, max(value for _, value, _ in valid), 1e-9)
+        height = max(150, top + len(valid) * row_height + 26)
+        svg = [f"<div class='report-chart'><h3>{safe(title)}</h3><svg viewBox='0 0 {width} {height}' role='img' aria-label='{safe(title)}'><rect class='chart-bg' x='0' y='0' width='{width}' height='{height}' rx='12'/>"]
+        if max_value is not None:
+            threshold_x = left + (number(max_value) or 0.0) / maximum * 380
+            svg.append(f"<line class='chart-threshold' x1='{threshold_x:.2f}' y1='{top - 4}' x2='{threshold_x:.2f}' y2='{height - 18}'/><text class='chart-label' x='{threshold_x + 4:.2f}' y='{top - 5}'>复核线 {number(max_value):.2f}</text>")
+        for index, (label, value, color) in enumerate(valid[:12]):
+            y = top + index * row_height
+            bar = max(2.0, float(value) / maximum * 380)
+            svg.append(f"<text class='chart-bar-label' x='12' y='{y + 14}'>{safe(str(label)[:24])}</text><rect x='{left}' y='{y}' width='{bar:.2f}' height='14' rx='7' fill='{color}'/><text class='chart-label' x='{left + bar + 7:.2f}' y='{y + 12}'>{float(value):.4f}</text>")
+        svg.append("</svg></div>")
+        return "".join(svg)
+
+    def woe_bars(title: str, rows: List[Dict[str, Any]]) -> str:
+        values = [(str(item.get("bin", "")), number(item.get("woe"))) for item in rows]
+        values = [(label, value) for label, value in values if value is not None]
+        if not values:
+            return f"<div class='report-chart empty-chart'><strong>{safe(title)}</strong><span>暂无 WOE 分箱证据。</span></div>"
+        width, height, left, top, right, bottom = 600, 250, 42, 18, 16, 42
+        plot_width, plot_height = width - left - right, height - top - bottom
+        bound = max(0.2, max(abs(value) for _, value in values))
+        zero = top + plot_height / 2
+        svg = [f"<div class='report-chart'><h3>{safe(title)}</h3><svg viewBox='0 0 {width} {height}' role='img' aria-label='{safe(title)}'><rect class='chart-bg' x='0' y='0' width='{width}' height='{height}' rx='12'/><line class='chart-axis' x1='{left}' y1='{zero:.2f}' x2='{left + plot_width}' y2='{zero:.2f}'/>"]
+        slot = plot_width / max(len(values), 1)
+        for index, (label, value) in enumerate(values[:12]):
+            x = left + index * slot + slot * 0.2
+            bar_width = max(10.0, slot * 0.6)
+            bar_height = abs(value) / bound * (plot_height / 2 - 5)
+            y = zero - bar_height if value >= 0 else zero
+            color = "#1d8067" if value >= 0 else "#d88b45"
+            svg.append(f"<rect x='{x:.2f}' y='{y:.2f}' width='{bar_width:.2f}' height='{max(2.0, bar_height):.2f}' rx='4' fill='{color}'/><text class='chart-label' x='{x + bar_width / 2:.2f}' y='{height - 20}' text-anchor='middle'>{safe(label[:12])}</text>")
+        svg.append("</svg></div>")
+        return "".join(svg)
+
     metrics = report.get("metrics", [])
     rows = "".join(
         f"<tr><td>{safe(item.get('name', ''))}</td><td>{safe(item.get('validation', {}).get('roc_auc', '-'))}</td><td>{safe(item.get('validation', {}).get('ks', '-'))}</td><td>{safe(item.get('status', ''))}</td></tr>"
@@ -127,6 +197,45 @@ def _report_html(report: Dict[str, Any]) -> str:
     calibration_rows = "".join(
         f"<tr><td>{safe(item.get('bucket'))}</td><td>{safe(item.get('row_count'))}</td><td>{safe(item.get('predicted_rate'))}</td><td>{safe(item.get('observed_rate'))}</td><td>{safe(item.get('absolute_gap'))}</td></tr>"
         for item in ((report.get("champion") or {}).get("validation") or {}).get("calibration", [])
+    )
+    champion_validation = (report.get("champion") or {}).get("validation") or {}
+    roc_points = [(number(item.get("fpr")), number(item.get("tpr"))) for item in champion_validation.get("roc_curve", [])]
+    roc_points = [(x, y) for x, y in roc_points if x is not None and y is not None]
+    ks_points = [(index / max(len(champion_validation.get("ks_curve", [])) - 1, 1), number(item.get("tpr")), number(item.get("fpr")), number(item.get("ks"))) for index, item in enumerate(champion_validation.get("ks_curve", []))]
+    ks_tpr = [(x, y) for x, y, _, _ in ks_points if y is not None]
+    ks_fpr = [(x, y) for x, _, y, _ in ks_points if y is not None]
+    ks_value = [(x, y) for x, _, _, y in ks_points if y is not None]
+    calibration_points = [(number(item.get("predicted_rate")), number(item.get("observed_rate"))) for item in champion_validation.get("calibration", [])]
+    calibration_points = [(x, y) for x, y in calibration_points if x is not None and y is not None]
+    importance_chart_rows = [(str(item.get("feature", "")), number(item.get("importance", item.get("absolute_coefficient", item.get("iv")))), "#1d8067") for item in ((report.get("champion") or {}).get("feature_importance", [])[:12])]
+    psi_chart_rows: List[Tuple[str, float, str]] = []
+    for item in (report.get("stability") or {}).get("features", [])[:8]:
+        feature = str(item.get("feature", ""))
+        validation_psi = number((item.get("validation") or {}).get("psi"))
+        oot_psi = number((item.get("oot") or {}).get("psi"))
+        if validation_psi is not None:
+            psi_chart_rows.append((feature + " · 验证", validation_psi, "#1d8067"))
+        if oot_psi is not None:
+            psi_chart_rows.append((feature + " · OOT", oot_psi, "#d88b45"))
+    scorecard_bins = (report.get("scorecard") or {}).get("bins") or {}
+    scorecard_importance = (report.get("scorecard") or {}).get("feature_importance") or []
+    woe_feature = (scorecard_importance[0] or {}).get("feature") if scorecard_importance else next(iter(scorecard_bins), None)
+    woe_rows = (scorecard_bins.get(woe_feature) or {}).get("rows", []) if woe_feature else []
+    roc_series = [("ROC", "#1d8067", roc_points)] if roc_points else []
+    if roc_points:
+        roc_series.append(("随机基线", "#b7c7c1", [(0.0, 0.0), (1.0, 1.0)]))
+    calibration_series = [("实际 / 预测", "#1d8067", calibration_points)] if calibration_points else []
+    if calibration_points:
+        calibration_series.append(("理想校准", "#b7c7c1", [(0.0, 0.0), (1.0, 1.0)]))
+    charts_html = "".join(
+        [
+            line_chart("ROC 曲线（验证集）", roc_series),
+            line_chart("KS 曲线（验证集）", [("TPR", "#1d8067", ks_tpr), ("FPR", "#d88b45", ks_fpr), ("KS", "#8d5aa7", ks_value)]),
+            line_chart("校准曲线（验证集）", calibration_series),
+            horizontal_bars("变量重要性（冠军模型）", importance_chart_rows),
+            horizontal_bars("PSI 稳定性（验证 / OOT）", psi_chart_rows, 0.25),
+            woe_bars("WOE 分箱" + (f" · {woe_feature}" if woe_feature else ""), woe_rows),
+        ]
     )
     baseline = report.get("baseline") or {}
     baseline_row = ""
@@ -147,11 +256,11 @@ def _report_html(report: Dict[str, Any]) -> str:
         for item in narrative_sections.get("sections", [])
     )
     return f"""<!doctype html><html lang='zh-CN'><meta charset='utf-8'><title>风控建模报告</title>
-    <style>body{{font-family:system-ui,sans-serif;max-width:1100px;margin:40px auto;color:#18332f}}table{{border-collapse:collapse;width:100%}}td,th{{padding:10px;border-bottom:1px solid #dce9e4;text-align:left}}.hero{{background:#eaf7f0;padding:24px;border-radius:18px}}.narrative-section{{padding:14px 16px;margin:10px 0;border:1px solid #dce9e4;border-radius:12px;background:#fbfefc}}.narrative-section h3{{margin:0 0 6px}}.narrative-section p{{line-height:1.7;margin:0 0 7px}}.narrative-section small{{color:#718682}}</style>
+    <style>body{{font-family:system-ui,sans-serif;max-width:1100px;margin:40px auto;color:#18332f}}table{{border-collapse:collapse;width:100%}}td,th{{padding:10px;border-bottom:1px solid #dce9e4;text-align:left}}.hero{{background:#eaf7f0;padding:24px;border-radius:18px}}.narrative-section{{padding:14px 16px;margin:10px 0;border:1px solid #dce9e4;border-radius:12px;background:#fbfefc}}.narrative-section h3{{margin:0 0 6px}}.narrative-section p{{line-height:1.7;margin:0 0 7px}}.narrative-section small{{color:#718682}}.report-charts{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:14px 0}}.report-chart{{padding:12px;border:1px solid #dce9e4;border-radius:14px;background:#fbfefc;min-width:0}}.report-chart h3{{font-size:14px;margin:0 0 8px}}.report-chart svg{{display:block;width:100%;height:auto}}.chart-bg{{fill:#f6faf8}}.chart-grid{{stroke:#dfece6;stroke-width:1}}.chart-axis{{stroke:#9bb8ad;stroke-width:1}}.chart-threshold{{stroke:#d88b45;stroke-width:1.2;stroke-dasharray:5 4}}.chart-line{{fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}}.chart-label,.chart-bar-label{{fill:#718682;font:10px system-ui,sans-serif}}.chart-legend{{display:flex;gap:12px;flex-wrap:wrap;color:#718682;font-size:10px;margin-top:5px}}.chart-legend span{{display:inline-flex;align-items:center;gap:4px}}.chart-legend i{{width:10px;height:3px;border-radius:999px;display:inline-block}}.empty-chart{{display:grid;gap:6px;min-height:100px;align-content:center;color:#718682;font-size:12px}}@media(max-width:760px){{.report-charts{{grid-template-columns:1fr}}}}</style>
     <div class='hero'><h1>{safe(report.get('title','风控建模报告'))}</h1><p>{safe(report.get('narrative',''))}</p><p>事实边界：离线实验结果，不代表生产效果。</p>{experiment_note}</div>
     <h2>报告叙事与证据</h2>{narrative_html or '<p>暂无章节叙事。</p>'}
     <h2>模型比较</h2><table><thead><tr><th>模型</th><th>验证 ROC-AUC</th><th>验证 KS</th><th>状态</th></tr></thead><tbody>{rows}{baseline_row}</tbody></table>
-    <h2>冠军解释与稳定性</h2><p>下表为训练分区拟合规则下的变量重要性；PSI 仅作稳定性复核提示，不参与 OOT 选择。</p><table><thead><tr><th>变量</th><th>重要性/绝对系数</th></tr></thead><tbody>{importance_rows or '<tr><td colspan="2">暂无解释结果</td></tr>'}</tbody></table>
+    <h2>冠军解释与稳定性</h2><p>下表为训练分区拟合规则下的变量重要性；PSI 仅作稳定性复核提示，不参与 OOT 选择。</p><div class='report-charts'>{charts_html}</div><table><thead><tr><th>变量</th><th>重要性/绝对系数</th></tr></thead><tbody>{importance_rows or '<tr><td colspan="2">暂无解释结果</td></tr>'}</tbody></table>
     <h3>验证集校准</h3><table><thead><tr><th>分箱</th><th>样本</th><th>预测坏率</th><th>实际坏率</th><th>绝对差</th></tr></thead><tbody>{calibration_rows or '<tr><td colspan="5">暂无校准结果</td></tr>'}</tbody></table>
     <table><thead><tr><th>变量</th><th>验证 PSI</th><th>验证提示</th><th>OOT PSI</th><th>OOT 提示</th></tr></thead><tbody>{stability_rows or '<tr><td colspan="5">暂无稳定性结果</td></tr>'}</tbody></table>
     <h2>探索与数据处理</h2><p>重复行：{report.get('quality', {}).get('duplicate_rows', 0)}；数值字段：{len(report.get('quality', {}).get('numeric', []))}；类别字段：{len(report.get('quality', {}).get('categorical', []))}</p><p>{report.get('cleaning', {}).get('note', '仅展示已记录的本地处理规则。')}</p><p>类别不平衡：训练分区 {safe((report.get('imbalance_policy') or {}).get('train_positive_count', '-'))} 个正类 / {safe((report.get('imbalance_policy') or {}).get('train_negative_count', '-'))} 个负类，采用算法级权重，不做重采样。</p>

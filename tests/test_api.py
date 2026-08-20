@@ -76,6 +76,8 @@ def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
     assert "风控建模 Agent" in root.text
     assert "provider-request-list" in root.text
     assert "selection-table-panel" in root.text
+    assert "report-charts" in root.text
+    assert "interaction-dialog" in root.text
     assert 'name="clear_api_key"' in root.text
 
     project, dataset = create_demo_project("API 自动流程")
@@ -96,6 +98,12 @@ def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
     assert report_payload["code_review"]["review_history"]
     assert report_payload["stability"]["schema_version"] == "risk-stability/v1"
     assert report_payload["champion"]["validation"]["calibration"]
+    assert report_payload["champion"]["validation"]["roc_curve"]
+    assert report_payload["champion"]["validation"]["ks_curve"]
+    report_html = client.get(f"/api/runs/{run['id']}/report.html")
+    assert report_html.status_code == 200
+    assert "report-chart" in report_html.text
+    assert "ROC 曲线" in report_html.text
     narrative = report_payload["narrative_sections"]["sections"]
     edited = client.post(
         f"/api/runs/{run['id']}/report/narrative",
