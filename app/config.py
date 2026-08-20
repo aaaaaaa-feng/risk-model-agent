@@ -63,6 +63,12 @@ def load_config() -> Dict[str, Any]:
         # Older V0.1 configs used an OpenAI-compatible provider label without
         # storing the wire protocol. Preserve that behavior on migration.
         defaults["api_format"] = str(defaults.get("api_format") or "openai").lower()
+        # An environment-provided key is authoritative because provider_key()
+        # always resolves it before keyring or the protected local file. Never
+        # let stale persisted metadata claim that such a key was cleared.
+        if os.getenv("RISK_AGENT_API_KEY", "").strip():
+            defaults["api_key_configured"] = True
+            defaults["secret_storage"] = "environment"
         return defaults
     except (OSError, json.JSONDecodeError):
         return _config_defaults()
@@ -86,14 +92,23 @@ def save_config(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
     current.update({key: value for key, value in payload.items() if key in allowed})
     api_key = str(payload.get("api_key") or "").strip()
-    if api_key:
-        storage = _save_secret(api_key)
-        current["api_key_configured"] = True
-        current["secret_storage"] = storage
-    elif payload.get("clear_api_key"):
+    clear_api_key = bool(payload.get("clear_api_key"))
+    if clear_api_key:
+        # Clearing takes priority over a contradictory payload. Environment
+        # variables cannot be mutated by the UI, so report their real state.
         _clear_secret()
-        current["api_key_configured"] = False
-        current["secret_storage"] = "not_configured"
+        environment_key = bool(os.getenv("RISK_AGENT_API_KEY", "").strip())
+        current["api_key_configured"] = environment_key
+        current["secret_storage"] = "environment" if environment_key else "not_configured"
+    elif api_key:
+        if os.getenv("RISK_AGENT_API_KEY", "").strip():
+            # Do not persist a shadow key that provider_key() would never use.
+            current["api_key_configured"] = True
+            current["secret_storage"] = "environment"
+        else:
+            storage = _save_secret(api_key)
+            current["api_key_configured"] = True
+            current["secret_storage"] = storage
     CONFIG_PATH.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
     try:
         CONFIG_PATH.chmod(0o600)

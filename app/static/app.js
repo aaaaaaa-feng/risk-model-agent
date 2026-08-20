@@ -1,4 +1,4 @@
-const state = { projects: [], project: null, datasets: [], selectedDatasetId: null, dictionaries: [], runs: [], run: null, events: [], conversation: null, messages: [], mode: 'auto', eventSource: null, config: null, providerRequests: [], confirmationRunId: null, confirmationFeatures: [], confirmationExcluded: new Set(), selectionExcluded: new Set() };
+const state = { projects: [], project: null, datasets: [], selectedDatasetId: null, dictionaries: [], runs: [], run: null, events: [], conversation: null, messages: [], mode: 'auto', defaultMode: 'auto', activeWorkspaceTab: 'overview', eventSource: null, config: null, providerPresets: {}, providerRequests: [], confirmationRunId: null, confirmationFeatures: [], confirmationExcluded: new Set(), selectionExcluded: new Set(), settingsReturnFocus: null };
 const $ = function (selector) { return document.querySelector(selector); };
 const projectList = $('#project-list');
 const escapeHtml = function (value) { return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]; }); };
@@ -15,11 +15,42 @@ function showNotice(message, kind) {
   notice.className = 'notice' + (kind ? ' ' + kind : '');
   notice.classList.remove('hidden');
 }
+function setAppView(view, moveFocus) {
+  const settingsOpen = view === 'settings';
+  $('#project-view').classList.toggle('hidden', settingsOpen);
+  $('#settings-view').classList.toggle('hidden', !settingsOpen);
+  $('#open-workspace').classList.toggle('active', !settingsOpen);
+  $('#open-settings').classList.toggle('active', settingsOpen);
+  window.scrollTo({ top: 0, behavior: 'auto' });
+  if (moveFocus) window.requestAnimationFrame(function () {
+    const fallback = $('#open-workspace');
+    const target = settingsOpen ? $('#settings-title') : (state.settingsReturnFocus && document.contains(state.settingsReturnFocus) ? state.settingsReturnFocus : fallback);
+    if (target) target.focus({ preventScroll: true });
+    if (!settingsOpen) state.settingsReturnFocus = null;
+  });
+}
+function setWorkspaceTab(tab) {
+  const target = document.querySelector('[data-workspace-panel="' + tab + '"]');
+  if (!target) return;
+  state.activeWorkspaceTab = tab;
+  document.querySelectorAll('[data-workspace-tab]').forEach(function (button) { const selected = button.dataset.workspaceTab === tab; button.classList.toggle('active', selected); button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1; });
+  document.querySelectorAll('[data-workspace-panel]').forEach(function (panel) { const selected = panel.dataset.workspacePanel === tab; panel.classList.toggle('active', selected); panel.setAttribute('aria-hidden', String(!selected)); });
+}
+function runIsActive() {
+  return Boolean(state.run && ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run.status));
+}
+function modeLabel(mode) { return mode === 'semi_trust' ? '半信任模式' : '完全信任模式'; }
+function renderModeIndicator() {
+  const active = runIsActive();
+  const mode = active ? state.run.mode : state.defaultMode;
+  $('#run-mode-chip').textContent = (active ? '本次：' : '默认：') + modeLabel(mode).replace('模式', '');
+  $('#run-mode').textContent = modeLabel(state.run ? state.run.mode : state.defaultMode);
+}
 function renderProjects() {
   projectList.innerHTML = state.projects.length ? state.projects.map(function (project) {
     return '<button class="project-item ' + (state.project && state.project.id === project.id ? 'active' : '') + '" data-project-id="' + escapeHtml(project.id) + '"><strong>' + escapeHtml(project.name) + '</strong><small>' + escapeHtml(project.status) + '</small></button>';
   }).join('') : '<div class="muted" style="padding:10px">还没有项目</div>';
-  projectList.querySelectorAll('[data-project-id]').forEach(function (button) { button.addEventListener('click', function () { selectProject(button.dataset.projectId); }); });
+  projectList.querySelectorAll('[data-project-id]').forEach(function (button) { button.addEventListener('click', function () { setAppView('project'); selectProject(button.dataset.projectId); }); });
 }
 async function loadProjects() {
   const data = await api('/api/projects');
@@ -30,7 +61,9 @@ async function loadProjects() {
 }
 async function selectProject(projectId) {
   const data = await api('/api/projects/' + projectId);
-  state.project = data.project; state.datasets = data.datasets || []; state.dictionaries = data.dictionaries || []; state.runs = data.runs || []; state.run = state.runs[0] || null; state.selectedDatasetId = (state.run && state.run.dataset_id) || (state.datasets[0] && state.datasets[0].id) || null; state.mode = state.run ? state.run.mode : state.mode; state.events = []; state.providerRequests = []; state.selectionExcluded = new Set();
+  state.project = data.project; state.datasets = data.datasets || []; state.dictionaries = data.dictionaries || []; state.runs = data.runs || []; state.run = state.runs[0] || null; state.selectedDatasetId = (state.run && state.run.dataset_id) || (state.datasets[0] && state.datasets[0].id) || null; state.mode = runIsActive() ? state.run.mode : state.defaultMode; state.events = []; state.providerRequests = []; state.selectionExcluded = new Set();
+  setWorkspaceTab('overview');
+  $('#report-panel').classList.add('hidden'); $('#report-empty-state').classList.remove('hidden'); $('#report-tab').classList.remove('has-result');
   await loadConversation();
   renderProjects(); renderProject();
   await loadProviderRequests();
@@ -89,7 +122,6 @@ function renderProject() {
   if (deleteButton) { deleteButton.hidden = !hasProject; deleteButton.disabled = Boolean(state.run && ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run.status)); }
   if (!hasProject) return;
   $('#project-title').textContent = state.project.name;
-  $('#mode-toggle').textContent = state.mode === 'auto' ? '自动运行模式' : '半信任模式';
   $('#dataset-version').textContent = state.datasets.length ? 'v' + state.datasets.length : '—';
   $('#run-version').textContent = state.run ? state.run.id.slice(-6) : '—';
   renderDataset(); renderDictionaryStatus(); renderRun(); renderStages(); renderAnalysisControls(); renderConversation();
@@ -125,7 +157,7 @@ function renderRun() {
   $('#current-node').textContent = event && event.payload && event.payload.node ? phaseLabel(event.payload.node) : (status === 'idle' ? '等待导入数据' : phaseLabel(run.phase));
   $('#current-message').textContent = event && event.payload && event.payload.message ? event.payload.message : statusText(status);
   $('#inspector-status').textContent = statusLabel(status); $('#inspector-status').className = 'chip ' + statusClass(status);
-  $('#run-mode').textContent = state.mode === 'semi_trust' ? '半信任模式' : '自动运行';
+  renderModeIndicator();
   const progress = event && event.payload && event.payload.progress || (status === 'succeeded' ? 100 : 0);
   $('#progress-value').textContent = progress + '%'; $('.progress-ring').style.setProperty('--progress', progress + '%');
   $('#progress-label').textContent = status === 'succeeded' ? '已完成' : status === 'awaiting_confirmation' ? '等待确认' : status === 'failed' ? '需要处理' : status === 'idle' ? '尚未开始' : '运行中';
@@ -136,10 +168,12 @@ function statusLabel(status) { return ({ idle: '等待', queued: '排队', runni
 function statusClass(status) { return ({ running: 'running', queued: 'running', awaiting_confirmation: 'warn', paused: 'warn', failed: 'block', blocked: 'block', cancelled: 'block', succeeded: 'safe' })[status] || 'neutral'; }
 function renderStages() {
   const current = state.run && state.run.phase; const phases = [['profiling', '数据画像'], ['planning', 'Y 与计划'], ['eda', '探索分析'], ['cleaning', '数据清洗'], ['screening', '变量筛选'], ['training', '模型训练'], ['reporting', '报告与产物']]; const order = phases.map(function (item) { return item[0]; }); const currentIndex = order.indexOf(current);
+  const stageTabs = { profiling: 'data', planning: 'overview', eda: 'data', cleaning: 'data', screening: 'data', training: 'execution', reporting: 'report' };
   $('#stage-list').innerHTML = phases.map(function (item, index) {
     const done = state.run && (state.run.status === 'succeeded' || (currentIndex >= 0 && index < currentIndex)); const active = current === item[0]; const blocked = state.run && state.run.status === 'blocked' && active;
-    return '<div class="stage-item ' + (done ? 'done' : '') + ' ' + (active ? 'active' : '') + ' ' + (blocked ? 'blocked' : '') + '">' + (done ? '✓ ' : '') + item[1] + '</div>';
+    return '<button type="button" class="stage-item ' + (done ? 'done' : '') + ' ' + (active ? 'active' : '') + ' ' + (blocked ? 'blocked' : '') + '" data-stage-tab="' + stageTabs[item[0]] + '">' + (done ? '✓ ' : '') + item[1] + '</button>';
   }).join('');
+  $('#stage-list').querySelectorAll('[data-stage-tab]').forEach(function (button) { button.addEventListener('click', function () { setWorkspaceTab(button.dataset.stageTab); }); });
 }
 function renderAnalysisControls() {
   const control = $('#analysis-controls'); const button = $('#run-analysis');
@@ -278,7 +312,7 @@ function renderActionCard() {
   else card.innerHTML = '<h3>正在运行</h3><p>页面会持续接收节点和工具事件。可以离开后回来继续查看。</p>';
 }
 function renderReport(report) {
-  if (!report) return; $('#report-panel').classList.remove('hidden'); $('#report-link').href = '/api/runs/' + state.run.id + '/report.html';
+  if (!report) return; $('#report-panel').classList.remove('hidden'); $('#report-empty-state').classList.add('hidden'); $('#report-tab').classList.add('has-result'); $('#report-link').href = '/api/runs/' + state.run.id + '/report.html';
   const champion = report.champion || {}; const metrics = champion.validation || {};
   const calibration = metrics.calibration || []; const stability = report.stability && report.stability.features || [];
   const values = [['冠军建议', champion.name || '—'], ['验证 ROC-AUC', metrics.roc_auc == null ? '—' : metrics.roc_auc], ['验证 KS', metrics.ks == null ? '—' : metrics.ks], ['最终变量', report.selection && report.selection.funnel ? report.selection.funnel.final : '—']];
@@ -359,6 +393,7 @@ async function syncRun() {
 }
 async function createProject() {
   const name = window.prompt('项目名称', '我的风控建模项目'); if (!name) return;
+  setAppView('project');
   const data = await api('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name }) });
   state.project = data.project; await loadProjects(); await selectProject(data.project.id);
 }
@@ -411,7 +446,7 @@ async function startRun() {
   const dataset = activeDataset();
   if (!state.project || !dataset) return;
   try {
-    const data = await api('/api/projects/' + state.project.id + '/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: dataset.id, mode: state.mode }) });
+    const data = await api('/api/projects/' + state.project.id + '/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dataset_id: dataset.id, mode: state.defaultMode }) });
     state.run = data.run; state.events = []; state.providerRequests = []; await loadConversation(); renderProject(); await loadProviderRequests(); connectStream();
   } catch (error) { showNotice(error.message, 'block'); }
 }
@@ -503,14 +538,28 @@ function applyProviderPreset() {
 }
 async function loadSettings() {
   const data = await api('/api/config'); state.config = data.config; state.providerPresets = data.presets || state.providerPresets || {};
-  $('#provider-chip').textContent = data.provider.enabled ? 'LLM 已启用' : data.provider.configured ? 'API 已配置 · 确定性' : '未配置 LLM'; $('#provider-chip').className = 'chip ' + (data.provider.enabled ? 'safe' : 'neutral'); $('#evidence-provider').textContent = data.provider.enabled ? '外部 API · 仅 SafeEvidence' : data.provider.configured ? '已配置 · 当前仍确定性' : '确定性降级';
+  state.defaultMode = data.config && data.config.mode || 'auto'; if (!runIsActive()) state.mode = state.defaultMode;
+  const providerLabel = data.provider.enabled ? 'LLM 已启用' : data.provider.configured ? 'API 已配置 · 确定性' : '未配置 LLM';
+  $('#provider-chip').textContent = providerLabel; $('#provider-chip').className = 'chip status-chip-button ' + (data.provider.enabled ? 'safe' : 'neutral'); $('#evidence-provider').textContent = data.provider.enabled ? '外部 API · 仅 SafeEvidence' : data.provider.configured ? '已配置 · 当前仍确定性' : '确定性降级';
+  $('#settings-provider-state').textContent = providerLabel; $('#settings-provider-state').className = 'chip ' + (data.provider.enabled ? 'safe' : 'neutral');
+  const storageLabels = { environment: '已配置 · 环境变量', 'os-keychain': '已配置 · 系统钥匙串', 'local-protected-file': '已配置 · 本机保护文件', not_configured: '未配置' };
+  $('#secret-storage-status').textContent = storageLabels[data.config.secret_storage] || (data.config.api_key_configured ? '已配置' : '未配置');
   const form = $('#settings-form'); Object.entries(data.config || {}).forEach(function (entry) { if (form.elements[entry[0]] && entry[0] !== 'api_key') { if (form.elements[entry[0]].type === 'checkbox') form.elements[entry[0]].checked = Boolean(entry[1]); else form.elements[entry[0]].value = entry[1] == null ? '' : entry[1]; } });
+  const environmentKey = data.config.secret_storage === 'environment';
+  form.elements.api_key.value = ''; form.elements.api_key.disabled = environmentKey; form.elements.api_key.placeholder = environmentKey ? '由 RISK_AGENT_API_KEY 环境变量提供' : '留空表示不修改';
+  form.elements.clear_api_key.checked = false; form.elements.clear_api_key.disabled = environmentKey; form.elements.clear_api_key.closest('label').classList.toggle('disabled-setting', environmentKey);
+  $('#secret-clear-hint').textContent = environmentKey ? '环境变量中的密钥无法在页面删除，请在启动环境中移除 RISK_AGENT_API_KEY 后重启。' : '可在这里更新或清除本机钥匙串 / 保护文件中的密钥。';
   updateProviderHint();
+  renderModeIndicator();
 }
 async function saveSettings(event) {
   event.preventDefault(); const formElement = event.target; const form = new FormData(formElement); const payload = Object.fromEntries(form.entries()); payload.llm_enabled = formElement.elements.llm_enabled.checked; payload.clear_api_key = formElement.elements.clear_api_key.checked; payload.run_token_budget = Number(payload.run_token_budget || 0); payload.monthly_token_budget = Number(payload.monthly_token_budget || 0);
-  try { await api('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); $('#settings-status').textContent = '已保存到本机安全目录。'; await loadSettings(); setTimeout(function () { $('#settings-modal').classList.add('hidden'); }, 700); }
+  if (payload.clear_api_key && String(payload.api_key || '').trim()) { $('#settings-status').textContent = '更新密钥和清除密钥不能同时执行，请只选择一项。'; return; }
+  if (payload.clear_api_key && !window.confirm('确认清除这台电脑上保存的 Provider API Key？清除后外部 LLM 会停止调用，直到重新配置。')) return;
+  const submit = formElement.querySelector('button[type="submit"]'); submit.disabled = true; $('#settings-status').textContent = '正在保存本机设置…';
+  try { await api('/api/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); await loadSettings(); $('#settings-status').textContent = '设置已保存，仅对这台电脑生效。'; renderProject(); }
   catch (error) { $('#settings-status').textContent = error.message; }
+  finally { submit.disabled = false; }
 }
 async function sendFeedback(reaction) {
   if (!state.run) return; const reason = reaction === 'dislike' ? window.prompt('请告诉我们哪里需要改进（可留空）', '') : '';
@@ -534,6 +583,11 @@ async function sendMessageFeedback(messageId, reaction) {
   try { await api('/api/runs/' + state.run.id + '/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reaction: reaction, reason: reason, message_id: messageId }) }); showNotice('已记录这条 Agent 回复的反馈。'); }
   catch (error) { showNotice(error.message, 'block'); }
 }
+async function openSettingsView() {
+  state.settingsReturnFocus = document.activeElement; setAppView('settings', true); $('#settings-status').textContent = '正在读取本机设置…';
+  try { await loadSettings(); $('#settings-status').textContent = ''; }
+  catch (error) { $('#settings-status').textContent = '设置读取失败：' + error.message; }
+}
 
 $('#new-project').addEventListener('click', createProject); $('#empty-new-project').addEventListener('click', createProject); $('#empty-demo').addEventListener('click', createDemo); $('#start-run').addEventListener('click', startRun); $('#choose-file').addEventListener('click', function () { $('#file-input').click(); }); $('#file-input').addEventListener('change', function (event) { uploadFile(event.target.files[0]); });
 $('#archive-project').addEventListener('click', toggleArchiveProject); $('#delete-project').addEventListener('click', deleteProject);
@@ -542,17 +596,26 @@ $('#run-analysis').addEventListener('click', runAnalysis);
 $('#dataset-card').addEventListener('dragover', function (event) { event.preventDefault(); $('#dataset-card').classList.add('dragging'); });
 $('#dataset-card').addEventListener('dragleave', function () { $('#dataset-card').classList.remove('dragging'); });
 $('#dataset-card').addEventListener('drop', function (event) { event.preventDefault(); $('#dataset-card').classList.remove('dragging'); uploadFile(event.dataTransfer.files[0]); });
-$('#mode-toggle').addEventListener('click', function () { if (state.run && ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run.status)) { showNotice('当前 Run 已开始，模式只影响下一次 Run。', 'block'); return; } state.mode = state.mode === 'auto' ? 'semi_trust' : 'auto'; $('#mode-toggle').textContent = state.mode === 'auto' ? '自动运行模式' : '半信任模式'; renderRun(); });
-$('#open-settings').addEventListener('click', async function () { $('#settings-modal').classList.remove('hidden'); await loadSettings(); }); $('#close-settings').addEventListener('click', function () { $('#settings-modal').classList.add('hidden'); }); $('#cancel-settings').addEventListener('click', function () { $('#settings-modal').classList.add('hidden'); }); $('#settings-form').addEventListener('submit', saveSettings);
+$('#open-settings').addEventListener('click', openSettingsView); $('#provider-chip').addEventListener('click', openSettingsView); $('#open-workspace').addEventListener('click', function () { setAppView('project'); }); $('#close-settings').addEventListener('click', function () { setAppView('project', true); }); $('#cancel-settings').addEventListener('click', async function () { await loadSettings(); $('#settings-status').textContent = '已恢复为上次保存的设置。'; }); $('#settings-form').addEventListener('submit', saveSettings);
+document.querySelectorAll('[data-workspace-tab]').forEach(function (button) { button.addEventListener('click', function () { setWorkspaceTab(button.dataset.workspaceTab); }); });
+$('.workspace-tabs').addEventListener('keydown', function (event) { const tabs = Array.from(document.querySelectorAll('[data-workspace-tab]')); const current = tabs.indexOf(document.activeElement); if (current < 0) return; let next = current; if (event.key === 'ArrowRight') next = (current + 1) % tabs.length; else if (event.key === 'ArrowLeft') next = (current - 1 + tabs.length) % tabs.length; else if (event.key === 'Home') next = 0; else if (event.key === 'End') next = tabs.length - 1; else return; event.preventDefault(); setWorkspaceTab(tabs[next].dataset.workspaceTab); tabs[next].focus(); });
+document.querySelectorAll('[data-settings-target]').forEach(function (button) { button.addEventListener('click', function () { document.querySelectorAll('[data-settings-target]').forEach(function (item) { const selected = item === button; item.classList.toggle('active', selected); if (selected) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current'); }); const target = document.getElementById(button.dataset.settingsTarget); if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); target.focus({ preventScroll: true }); } }); });
+$('.settings-nav').addEventListener('keydown', function (event) { const items = Array.from(document.querySelectorAll('[data-settings-target]')); const current = items.indexOf(document.activeElement); if (current < 0) return; let next = current; if (event.key === 'ArrowDown') next = (current + 1) % items.length; else if (event.key === 'ArrowUp') next = (current - 1 + items.length) % items.length; else if (event.key === 'Home') next = 0; else if (event.key === 'End') next = items.length - 1; else return; event.preventDefault(); items[next].focus(); items[next].click(); });
 document.querySelectorAll('.feedback-button').forEach(function (button) { button.addEventListener('click', function () { sendFeedback(button.dataset.reaction); }); });
 $('#settings-form').elements.provider.addEventListener('change', applyProviderPreset); $('#settings-form').elements.api_format.addEventListener('change', applyProviderPreset);
+$('#settings-form').elements.api_key.addEventListener('input', function () { if (this.value.trim()) $('#settings-form').elements.clear_api_key.checked = false; }); $('#settings-form').elements.clear_api_key.addEventListener('change', function () { if (this.checked) $('#settings-form').elements.api_key.value = ''; });
 $('#provider-test').addEventListener('click', async function () {
-  $('#settings-status').textContent = '正在测试当前表单配置…';
+  const testButton = $('#provider-test'); testButton.disabled = true; $('#settings-status').textContent = '正在测试当前表单配置…';
   const formElement = $('#settings-form'); const form = new FormData(formElement); const payload = Object.fromEntries(form.entries());
   try {
     const result = await api('/api/config/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: payload.provider, api_format: payload.api_format, base_url: payload.base_url, model: payload.model, proxy: payload.proxy, ca_cert: payload.ca_cert, api_key: payload.api_key || '' }) });
     $('#settings-status').textContent = result.ok ? '连接成功：' + result.provider + ' · ' + result.api_format + ' · ' + result.model : (result.error_code || '连接未成功') + '：' + result.message;
   } catch (error) { $('#settings-status').textContent = error.message; }
+  finally { testButton.disabled = false; }
 });
 $('#conversation-form').addEventListener('submit', sendConversation);
-loadSettings().catch(function () {}); loadProjects().catch(function (error) { showNotice(error.message, 'block'); });
+async function bootstrap() {
+  try { await loadSettings(); } catch (error) { $('#settings-status').textContent = '设置读取失败：' + error.message; }
+  try { await loadProjects(); } catch (error) { showNotice(error.message, 'block'); }
+}
+bootstrap();
