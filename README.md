@@ -1,70 +1,86 @@
 # 风控建模 Agent
 
-当前仓库包含可在本机启动的 V0.1 风控建模 Agent 工作台，以及 1—13 份产品与研发基线文档。
+本地优先的消费信贷二分类建模工作台。产品面向懂 AUC、KS、IV 等风控指标、但不希望手写整套建模代码的业务建模人员。
 
-开源仓库：[github.com/aaaaaaa-feng/risk-model-agent](https://github.com/aaaaaaa-feng/risk-model-agent)
+公开仓库：[aaaaaaa-feng/risk-model-agent](https://github.com/aaaaaaa-feng/risk-model-agent)
 
-2026-08-20 已清除上一版原型的源码、运行数据库和旧产品文档，并依据最新讨论重新生成 1—10 项 AI 产品经理产出。上一版受 Git 跟踪的内容仍可从提交 `63349c0` 恢复，但不再作为当前方案依据。
+## V1 能做什么
 
-## 已确认的产品方向
+- 导入本机 CSV、XLSX/XLSM/XLS（含多 Sheet）和数据字典。
+- 处理订单/客户粒度、多张特征表和多个 `0/1/-1/空值` Y；每个 Y 独立冻结有效样本并顺序运行。
+- 提供四级关联兜底：Agent 推荐、可视化编辑、Agent 生成 Notebook、用户手写 Notebook；所有结果重新执行粒度、重复、样本膨胀、Y 与血缘检查。
+- 依次执行诊断、清洗、Train/Test/OOT、IV/缺失率/相关性筛选、自动或人工分箱、候选训练、校准、Reviewer 质检、报告、模型包和批量评分。
+- 支持 Dummy、WOE Logistic Scorecard、正则化 Logistic、Random Forest、Extra Trees、XGBoost、LightGBM、CatBoost；根据资源运行推荐组合，不默认全跑。
+- 默认评分范围 300—900，高分代表低风险；基准分 600、基准好坏比 20:1、PDO 50，均可在确认节点调整。
+- 由同一份结构化事实数据生成 Web、Excel、单文件 HTML 和模型包；评分结果列以模型版本名称命名。
+- 提供半信任与完全信任两种模式。Reviewer 在独立上下文审核计划、生成代码、执行证据和报告，最多三轮修复后进入受控降级；安全阻断不能被自动批准。
+- SSE 持续输出阶段、节点、Agent、工具、状态、摘要、时间和证据引用；不输出隐藏思维链。
 
-- 面向风控建模人员，V1 只处理 Y 为 0/1 的二分类任务。
-- 支持 CSV、XLSX；原始数据、客户级记录、模型文件和逐行预测不上传云端。
-- 外部 LLM API 只接收经过本地脱敏与聚合的安全证据。
-- LangGraph 负责有状态编排；不采用完整 LangChain 全家桶，也不以 Pi Agent 作为产品主运行时。
-- 主 Agent、分析/代码 Agent 与 Reviewer Agent 通过结构化消息形成“生成—审核—修复—重审”闭环。
-- 本地 Worker 是确定性 Python 工具，不是 Agent；负责画像、清洗、变量筛选、训练、指标和报告。
-- 支持自动运行模式（对应讨论中的“完全信任模式”）与半信任模式；两种模式都不能绕过安全阻断。
-- Web 界面不是一问一答聊天框，而是流程工作台、对话、证据和产物的组合。
-- 当前产品只保留可导出的 Trace 与接口；独立评测 Harness 平台后置建设。
-- 目标交付包含 macOS 与 Windows 可安装版本，但必须分别完成真实打包与验收后才能宣称支持。
+## 数据安全边界
 
-## 1—13 产品与研发文档
+- 原始表、客户级记录、逐行预测和模型文件保存在应用专属本地目录，不由产品上传到外部 LLM。
+- DeepSeek、Kimi、Kimi Code、OpenAI、Anthropic 与自定义 Provider 只能接收通过 DLP 的聚合 `SafeEvidence`；小于 30 个样本的分组被抑制。
+- API Key 优先使用系统凭据存储，失败时使用权限受限的本地密钥文件；页面不回显密钥，并可在保存前测试当前表单连接。
+- Notebook 使用项目级本地 Kernel，默认允许联网。它不是安全沙箱；用户代码和第三方包可能主动外发数据，关闭产品侧 LLM 外发不能替代操作系统网络隔离。
+- 项目迁移包使用 AES-256-GCM；密码经 scrypt 派生，并支持独立恢复密钥。
 
-1. [产品需求文档 PRD](docs/01-产品需求文档-PRD.md)
-2. [用户流程与状态机](docs/02-用户流程与状态机.md)
-3. [Agent 角色与协作协议](docs/03-Agent角色与协作协议.md)
-4. [Worker 与工具合约](docs/04-Worker与工具合约.md)
-5. [数据安全与运行边界](docs/05-数据安全与运行边界.md)
-6. [UI/UX 交互规格](docs/06-UI-UX交互规格.md)
-7. [模型产出与报告规格](docs/07-模型产出与报告规格.md)
-8. [验收标准与测试场景](docs/08-验收标准与测试场景.md)
-9. [Trace 与后续评测接入协议](docs/09-Trace与后续评测接入协议.md)
-10. [研发路线图与 Backlog](docs/10-研发路线图与Backlog.md)
+## 架构
 
-11. [产品文档基线审计意见](docs/11-产品文档审计意见.md)（外部审阅输入）
-12. [产品优化建议](docs/12-产品优化建议.md)（外部审阅输入）
-13. [需求访谈决策基线](docs/13-需求访谈决策基线.md)（当前最新需求事实源）
+- React + TypeScript + Vite：四区专业建模台（项目列表、主工作区、阶段栏、常驻 Agent 对话）。
+- Python 3.11+、FastAPI、SQLite：本地 API、领域数据和不可变数据版本。
+- LangGraph：暂停、恢复、Human in the Loop、Reviewer 循环与 SQLite checkpoint。
+- 本地 Worker：确定性数据、统计、建模、报告和评分工具；Worker 不是 Agent。
+- 强类型 Tool Registry：V1 不开放任意 MCP 工具发现，只保留未来适配边界。
 
-## 建议阅读顺序
+## 本地开发
 
-继续产品讨论或开始下一轮研发前，先阅读 13。13 记录 2026-08-20 角色访谈中已经确认的新需求；与 01—10 冲突时，以 13 为准，但它不代表相关功能已经实现。随后再按职责阅读 01—10；11、12 是已吸收的审阅输入，用于追溯修订依据。
-
-## 当前已实现与边界
-
-- 已实现：本地 FastAPI Web 服务、CSV/XLSX 导入（多 Sheet 需明确选择、导入前行列/内存预算预估）、同一项目多数据版本的明确选择与运行中锁定、项目归档/恢复/显式确认删除、数据画像与本地 EDA、Y 契约检查、半信任确认卡（清洗动作不可绕过、可明确跳过）、LangGraph 状态编排、训练集范围内 IV/缺失/ID/泄漏筛选、报告内可检索/筛选/排序的变量明细和隔离 what-if、既有评分列新 OOT 复评（冻结验证方向与阈值）、数据字典版本化与字段语义联动、WOE + Logistic 评分卡、Logistic/Random Forest/HistGradientBoosting/XGBoost 候选比较、校准分箱/PSI/训练集相关性/变量重要性、HTML/JSON/XLSX/Python/哈希清单交付物、SSE 进度与可下载 Trace、项目备份与安全恢复、项目级多轮对话与消息反馈、报告叙事 Agent 草稿/专家编辑锁定、API 配置入口、Provider 出站脱敏摘要、多维 1—4 维本地分析。
-- 已实现：Provider Gateway 支持 OpenAI Chat Completions 与 Anthropic Messages 两种 API 格式，并预置 DeepSeek、Kimi 开放平台、Kimi Code、OpenAI、Anthropic；设置页可使用当前未保存的 API Key 测试连通性，保存后 Key 仍只留在本机。外部请求只允许别名化 SafeEvidence，并在本地记录可查看的脱敏出站请求摘要/哈希；计划、代码审核失败会保留结构化原因并阻断；代码 Reviewer 使用 AST/依赖/危险调用静态门禁；项目对话外发只允许本地识别出的结构化意图，疑似凭据、邮箱、手机号/卡号或无法归类的自由文本留在本机；单 Run/单月 token 预算在本地调用前熔断并记录 usage。没有 Provider 时仍走确定性本地流程。
-- 已实现：类别不平衡采用算法级处理而非重采样：Logistic/Random Forest/HistGradientBoosting 使用类别权重，XGBoost 使用训练分区计算的 `scale_pos_weight`；训练正负样本数、策略、`fit_scope=train` 和 `resampling=none` 写入 JSON/HTML/XLSX 报告，验证集与 OOT 不参与权重拟合。
-- 已验证：本地单元、集成和端到端测试；变量筛选的 IV、WOE 和 OOF 诊断只从训练分区拟合（OOF 按折重新拟合 WOE）；生成代码只作为交付物，不在产品内执行；Reviewer 阻断不会被标成成功；JSON、HTML、XLSX 由同一次 Run 产物生成并写入 checksums；批准的去重/异常值动作会创建新的本地数据版本；Baseline 会在同一冻结样本上输出固定通过率和 swap set 聚合比较；what-if 会隔离为实验 Run。
-- 尚未宣称：真实供应商 API 的生产连通性/费用验证、超参数搜索、两端签名/安装/升级/卸载验收、OS Keychain/Credential Manager 在目标机器上的真实验收、XLSX 大文件的目标规模实测和独立评测 Harness。当前已在本机 macOS arm64 真实构建并启动 onedir 包，并在 GitHub Actions 中完成 macOS arm64 与 Windows x64 的构建、健康/首页烟测和 artifact 上传；这仍不能替代正式签名安装和目标机器验收。当前资源估算是导入前保护性边界，不等于 8GB 机器的最终支持规模；PSI、相关性和树模型变量重要性已实现为复核证据，不等于自动通过或生产稳定性结论。可选 `.[secure]` 依赖会优先使用系统凭据存储，失败时回退到 600 权限本地文件。训练分区提供受资源上限约束的 3-fold OOF 诊断，但冠军仍只按冻结验证集选择。Reviewer 现在支持最多三轮“冻结方案 → 受控模板重生成 → 重审”，但不是任意自然语言代码的语义修复器。
-
-## 本机运行
+需要 Python 3.11—3.13、Node.js 22+。
 
 ```bash
-python3.9 -m venv .venv
-.venv/bin/pip install ".[dev]" --no-build-isolation
-.venv/bin/python -m app.main
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+cd frontend
+npm ci
+npm run build
+cd ..
+RISK_AGENT_OPEN_BROWSER=0 .venv/bin/python run_local.py
 ```
 
-浏览器打开 `http://127.0.0.1:8765`。如果暂时不配置外部 Provider，页面会明确显示“确定性降级”，仍可使用本地 Worker 完成演示流程。
+打开 `http://127.0.0.1:8765/`。不配置 LLM 时，系统明确显示“本地降级”，确定性 Worker 和本地 Reviewer 门禁仍可运行。
 
-服务默认只绑定本机回环地址；只有在明确设置 `RISK_AGENT_ALLOW_REMOTE=1` 时才允许非回环绑定。远程绑定会扩大本地数据服务的暴露面，应由部署方自行配置认证、网络隔离和访问控制。
+Windows PowerShell 使用 `.venv\Scripts\python.exe`，其余步骤一致。
 
-测试命令：
+## 验证
 
 ```bash
-.venv/bin/python -m pytest -q
-.venv/bin/ruff check app tests
-node --check app/static/app.js
+.venv/bin/ruff check app tests scripts
+.venv/bin/python -m pytest
 .venv/bin/python scripts/run_golden_cases.py
+cd frontend && npm run typecheck && npm run build
 ```
+
+打包前检查与本机 macOS 构建：
+
+```bash
+.venv/bin/python -m pip install -e ".[package]"
+.venv/bin/python scripts/verify_packaging.py
+./scripts/build_mac.sh
+```
+
+Windows 使用 `scripts/build_windows.ps1`。GitHub Actions 同时构建 macOS 13+ Apple Silicon 与 Windows 10/11 x64 候选产物，但在签名安装和真实目标机验收完成前，不应宣传为正式安装版。
+
+## 本地数据与升级
+
+- macOS：`~/Library/Application Support/RiskModelAgent`
+- Windows：`%LOCALAPPDATA%\RiskModelAgent`
+- Linux 开发环境：`$XDG_DATA_HOME/risk-model-agent` 或 `~/.local/share/risk-model-agent`
+
+首次从旧版启动时，系统先快照旧数据库，再复制完整旧运行目录；可兼容的项目/数据版本迁入 V1，不兼容 Run 作为只读记录保留。源数据不会由迁移器静默删除。
+
+## 正式规格
+
+`docs/01`—`docs/10` 是 V1 的正式产品与研发规格；原始访谈基线保存在 `docs/archive/13-需求访谈决策基线.md`，仅用于追溯。独立评测 Harness、多用户权限、内网多人部署、代码签名和生产部署验收均属于后续项目，不伪装成 V1 已交付能力。
+
+## License
+
+[MIT](LICENSE)

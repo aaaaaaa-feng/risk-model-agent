@@ -1,7 +1,7 @@
 # Build with: python -m PyInstaller packaging/risk_model_agent.spec --noconfirm --clean
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 
 # PyInstaller exposes ``SPECPATH`` as the directory containing this spec.
@@ -9,19 +9,44 @@ from PyInstaller.utils.hooks import collect_submodules
 # would silently point at the enclosing "8、新项目" folder.
 ROOT = Path(SPECPATH).resolve().parent
 datas = [
-    (str(ROOT / "app" / "templates"), "app/templates"),
-    (str(ROOT / "app" / "static"), "app/static"),
+    (str(ROOT / "frontend" / "dist"), "frontend_dist"),
+    # The exported model package includes a standalone scoring helper.  Python
+    # source modules live inside PyInstaller's archive, so keep this source file
+    # as data at the path expected by ``app.workers.model_package``.
+    (str(ROOT / "app" / "workers" / "scoring.py"), "app/workers"),
 ]
+binaries = []
+
+
+def runtime_submodule(name):
+    """Exclude dependency test suites from the shipped application bundle."""
+    return not ({"test", "tests", "testing"} & set(name.split(".")))
+
+
 hiddenimports = [
     "openpyxl",
-    "xgboost",
+    "xlrd",
+    "ipykernel_launcher",
+    "skops.io",
     *collect_submodules("langgraph"),
+    *collect_submodules("langgraph.checkpoint.sqlite"),
 ]
+for package in (
+    "xgboost", "lightgbm", "catboost", "skops", "polars", "duckdb", "debugpy",
+):
+    package_datas, package_binaries, package_hidden = collect_all(
+        package,
+        filter_submodules=runtime_submodule,
+        exclude_datas=["**/test/**", "**/tests/**", "**/testing/**"],
+    )
+    datas.extend(package_datas)
+    binaries.extend(package_binaries)
+    hiddenimports.extend(package_hidden)
 
 a = Analysis(
     [str(ROOT / "run_local.py")],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

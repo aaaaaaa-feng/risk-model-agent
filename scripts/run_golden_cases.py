@@ -1,63 +1,80 @@
-"""Run the small deterministic Agent safety regression set.
-
-This is deliberately not a benchmark or evaluation Harness. It is a cheap
-release gate for structural behaviors that must not drift when prompts or
-Provider settings change.
-"""
+"""Run the deterministic end-to-end synthetic V1 release gate."""
 
 from __future__ import annotations
 
 import json
-import sys
+import os
+import tempfile
+import time
 from pathlib import Path
+import sys
 
-import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.agent import review_generated_code, review_plan  # noqa: E402
-from app.worker import profile_table, target_summary  # noqa: E402
-
-
-def _case(name: str, passed: bool, observed: object, expected: object) -> dict:
-    return {"name": name, "passed": bool(passed), "observed": observed, "expected": expected}
+from app.core.config import SettingsStore  # noqa: E402
+from app.core.paths import AppPaths  # noqa: E402
+from app.runtime import AppContext  # noqa: E402
+from app.workers.demo import install_demo_project  # noqa: E402
 
 
 def main() -> int:
-    cases = []
-
-    invalid_target = pd.DataFrame({"bad_flag": [0, 1, -1, None], "income": [10, 20, 30, 40]})
-    invalid_summary = target_summary(invalid_target, "bad_flag")
-    cases.append(_case("invalid_target_contract_blocks", not invalid_summary["contract_ok"], invalid_summary["contract_ok"], False))
-
-    leakage = pd.DataFrame({"bad_flag": [0, 1] * 20, "post_loan_overdue_days": list(range(40))})
-    leakage_profile = profile_table(leakage)
-    leakage_review = review_plan({"target": "bad_flag"}, leakage_profile, target_summary(leakage, "bad_flag"))
-    leakage_codes = [item.get("code") for item in leakage_review["findings"]]
-    cases.append(_case("post_outcome_feature_blocks", leakage_review["verdict"] == "block", leakage_codes, "SUSPECTED_POST_OUTCOME_FEATURE"))
-
-    historical = pd.DataFrame({"bad_flag": [0, 1] * 20, "prior_delinquencies": list(range(40))})
-    historical_review = review_plan({"target": "bad_flag"}, profile_table(historical), target_summary(historical, "bad_flag"))
-    historical_codes = [item.get("code") for item in historical_review["findings"]]
-    cases.append(_case("historical_feature_is_not_auto_blocked", "SUSPECTED_POST_OUTCOME_FEATURE" not in historical_codes, historical_codes, "no leakage block"))
-
-    dangerous_review = review_generated_code("import requests\nrequests.get('https://example.test')")
-    dangerous_codes = [item.get("code") for item in dangerous_review["findings"]]
-    cases.append(_case("dangerous_code_blocks", dangerous_review["verdict"] == "block", dangerous_codes, "DANGEROUS_IMPORT"))
-
-    safe_review = review_generated_code("import pandas as pd\nfrom sklearn.linear_model import LogisticRegression")
-    cases.append(_case("allowlisted_code_passes", safe_review["verdict"] == "pass", safe_review["verdict"], "pass"))
-
-    result = {
-        "schema_version": "risk-golden-regression/v1",
-        "cases": cases,
-        "passed": sum(1 for item in cases if item["passed"]),
-        "total": len(cases),
-    }
-    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0 if result["passed"] == result["total"] else 1
+    root = Path(os.getenv("RISK_AGENT_GOLDEN_DIR") or tempfile.mkdtemp(prefix="risk-agent-golden-"))
+    context = AppContext.create(AppPaths(root).ensure())
+    try:
+        SettingsStore(context.paths).save(
+            {
+                "llm_enabled": False,
+                "default_models": [
+                    "dummy",
+                    "scorecard",
+                    "regularized_logistic",
+                    "xgboost",
+                ],
+            }
+        )
+        demo = install_demo_project(context.catalog, mode="fully_trusted", rows=800)
+        created = context.engine.create_run(
+            demo["project"]["id"], demo["target_tasks"][0]["id"], "fully_trusted"
+        )
+        deadline = time.monotonic() + 300
+        run = created
+        while time.monotonic() < deadline:
+            run = context.catalog.require("runs", created["id"])
+            if run["status"] in {"succeeded", "failed", "blocked"}:
+                break
+            time.sleep(0.1)
+        state = run.get("state") or {}
+        candidates = state.get("model_result", {}).get("candidates", [])
+        trained = [item["candidate"] for item in candidates if item.get("status") == "trained"]
+        result = {
+            "schema_version": "risk-golden-regression/v1",
+            "synthetic": True,
+            "seed": demo["synthetic_evidence"]["seed"],
+            "run_id": run["id"],
+            "status": run["status"],
+            "trained_models": trained,
+            "other_targets_blocked": all(
+                item.get("reason") == "OTHER_TARGET"
+                for item in state.get("screening", {}).get("excluded", [])
+                if item.get("column") in {"FPD7", "MOB30"}
+            ),
+            "oot_used_for_selection": state.get("model_result", {}).get(
+                "oot_used_for_selection"
+            ),
+        }
+        result["passed"] = (
+            result["status"] == "succeeded"
+            and {"dummy", "scorecard", "regularized_logistic", "xgboost"}.issubset(trained)
+            and result["other_targets_blocked"] is True
+            and result["oot_used_for_selection"] is False
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if result["passed"] else 1
+    finally:
+        context.shutdown()
 
 
 if __name__ == "__main__":

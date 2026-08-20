@@ -1,0 +1,813 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, Callable
+
+import pandas as pd
+from pydantic import BaseModel, Field
+
+from app.agents.codegen import (
+    extract_generated_spec,
+    generate_reproducible_notebook_code,
+    write_reproducible_notebook,
+)
+from app.agents.evidence import build_safe_evidence
+from app.agents.reviewer import IndependentReviewer
+from app.core.config import SettingsStore
+from app.core.database import Database, new_id, now_iso
+from app.core.paths import AppPaths, get_paths
+from app.core.security import sha256_bytes
+from app.providers.gateway import ProviderGateway
+from app.tooling.registry import ToolRegistry
+from app.workers.binning import apply_manual_binning, fit_binning
+from app.workers.io import plan_resources, read_table
+from app.workers.modeling import ModelBundle, available_models, recommend_models, train_candidates
+from app.workers.profiling import (
+    apply_cleaning,
+    cleaning_plan,
+    diagnose_frame,
+    target_summary,
+)
+from app.workers.screening import restore_features, screen_features
+from app.workers.splitting import freeze_target_samples, split_dataset
+
+from .artifacts import ArtifactService
+from .catalog import CatalogService
+
+
+class RunToolInput(BaseModel):
+    run_id: str = Field(min_length=4)
+    state: dict[str, Any]
+
+
+class RunPipeline:
+    """Deterministic local stage implementation invoked by LangGraph nodes."""
+
+    def __init__(
+        self,
+        database: Database | None = None,
+        paths: AppPaths | None = None,
+        catalog: CatalogService | None = None,
+        artifacts: ArtifactService | None = None,
+    ):
+        self.paths = paths or get_paths()
+        self.database = database or Database(paths=self.paths)
+        self.catalog = catalog or CatalogService(self.database, self.paths)
+        self.artifacts = artifacts or ArtifactService(self.database, self.paths, self.catalog)
+        self._bundles: dict[str, dict[str, ModelBundle]] = {}
+        self.registry = ToolRegistry()
+        self._register_tools()
+
+    def _register_tools(self) -> None:
+        tools: list[tuple[str, str, str, Callable[[str, dict[str, Any]], dict[str, Any]]]] = [
+            ("prepare_target", "target_confirmation", "冻结 0/1 有效样本并提出 Y 证据", self.prepare_target),
+            ("diagnose_data", "data_diagnosis", "本地数据质量、粒度和泄漏诊断", self.diagnose),
+            ("apply_cleaning", "cleaning", "按已确认动作生成新的清洗数据版本", self.clean),
+            ("propose_split", "split", "推荐 Train/Test/OOT 与客户隔离方案", self.propose_split),
+            ("execute_split", "split", "执行并校验样本切分", self.execute_split),
+            ("screen_features", "screening", "Train-only 缺失率、IV、相关性与泄漏筛选", self.screen),
+            ("finalize_screening", "screening", "应用有理由的人工变量恢复", self.finalize_screening),
+            ("fit_binning", "binning", "Train-only 自动单调分箱", self.bin_features),
+            ("finalize_binning", "binning", "验证人工分箱并使下游产物失效", self.finalize_binning),
+            ("propose_models", "model_plan", "按资源与 Provider 建议候选模型", self.propose_models),
+            ("finalize_model_plan", "model_plan", "应用用户确认的模型与评分参数", self.finalize_model_plan),
+            ("generate_and_review_code", "code_review", "主 Agent 生成 Notebook，独立 Reviewer 闭环审核", self.generate_and_review_code),
+            ("train_and_review", "training", "本地训练、校准、选型与独立执行质检", self.train_and_review),
+            ("build_and_review_report", "reporting", "生成唯一结构化报告并独立质检", self.build_and_review_report),
+            ("write_artifacts", "reporting", "导出 Web/Excel/HTML/模型包与评分入口", self.write_artifacts),
+        ]
+        for name, stage, description, handler in tools:
+            self.registry.register(
+                name,
+                stage,
+                description,
+                RunToolInput,
+                lambda value, target=handler: target(value.run_id, value.state),
+            )
+
+    def invoke(self, name: str, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        return self.registry.invoke(name, {"run_id": run_id, "state": state})
+
+    def prepare_target(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        task, dataset, frame = self._context(run_id)
+        summary = target_summary(frame, task["target_column"])
+        profile = dataset.get("profile") or diagnose_frame(frame, task["target_column"])["profile"]
+        evidence = {
+            key: value for key, value in summary.items() if key not in {"valid_mask", "normalized"}
+        }
+        reviewer = self._reviewer(run_id)
+        deterministic = reviewer.review_plan(
+            {"split": {"method": "random_stratified"}}, {"issues": evidence.get("issues", [])}
+        )
+        safe, _ = build_safe_evidence(profile, evidence)
+        review = reviewer.combine(
+            "target", deterministic, reviewer.llm_review("target", safe)
+        )
+        self._record_review(run_id, review)
+        return {
+            "target": task["target_column"],
+            "target_evidence": evidence,
+            "profile": profile,
+            "working_dataset_version_id": dataset["id"],
+            "target_gate": {
+                "title": "确认 Y 与有效样本",
+                "summary": {"target": evidence, "review": review},
+                "editable": ["positive_label", "negative_label", "excluded_labels"],
+            },
+            "target_review": review,
+        }
+
+    def diagnose(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        frame = self._working_frame(state)
+        diagnostics = diagnose_frame(
+            frame,
+            state["target"],
+            _first_candidate(state["profile"], "time_candidate"),
+        )
+        proposed_cleaning = cleaning_plan(
+            frame,
+            state["target"],
+            _first_candidate(state["profile"], "time_candidate"),
+        )
+        reviewer = self._reviewer(run_id)
+        deterministic = reviewer.review_plan(
+            {
+                "split": {
+                    "method": "time_holdout" if _first_candidate(state["profile"], "time_candidate") else "random_stratified",
+                    "time_column": _first_candidate(state["profile"], "time_candidate"),
+                }
+            },
+            diagnostics,
+        )
+        safe, aliases = build_safe_evidence(diagnostics["profile"], diagnostics["target"])
+        llm = reviewer.llm_review("data_diagnosis", safe)
+        review = reviewer.combine("data_diagnosis", deterministic, llm)
+        self._record_review(run_id, review)
+        return {
+            "diagnostics": diagnostics,
+            "cleaning_plan": proposed_cleaning,
+            "field_aliases": aliases,
+            "data_review": review,
+            "data_gate": {
+                "title": "确认数据诊断与清洗",
+                "summary": {
+                    "issues": diagnostics["issues"],
+                    "actions": proposed_cleaning["actions"],
+                    "review": review,
+                },
+                "editable": ["accepted_action_ids"],
+            },
+        }
+
+    def clean(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        frame = self._working_frame(state)
+        actions = list(state["cleaning_plan"].get("actions", []))
+        decision = state.get("data_decision") or {}
+        accepted = (decision.get("edits") or {}).get("accepted_action_ids")
+        if accepted is not None:
+            accepted_set = set(accepted)
+            actions = [item for item in actions if item.get("id") in accepted_set]
+        if not actions:
+            return {"cleaning_result": {"applied": [], "rows": len(frame), "columns": len(frame.columns)}}
+        cleaned, evidence = apply_cleaning(frame, actions)
+        run = self.catalog.require("runs", run_id)
+        version = self.catalog.create_dataset_version(
+            run["project_id"],
+            cleaned,
+            f"Run {run_id[-6:]} · 清洗版本",
+            [state["working_dataset_version_id"]],
+            {"kind": "cleaning", "run_id": run_id, "actions": evidence["applied"]},
+        )
+        return {
+            "working_dataset_version_id": version["id"],
+            "cleaning_result": evidence,
+            "profile": version["profile"],
+        }
+
+    def propose_split(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        time_column = _first_candidate(state["profile"], "time_candidate")
+        customer_key = _preferred_customer_key(state["profile"])
+        plan = {
+            "method": "time_holdout" if time_column else "random_stratified",
+            "time_column": time_column,
+            "customer_key": customer_key,
+            "test_size": 0.20,
+            "oot_size": 0.20 if time_column else 0,
+            "random_state": 42,
+            "customer_isolation": bool(customer_key),
+        }
+        reviewer = self._reviewer(run_id)
+        deterministic = reviewer.review_plan(
+            {"split": plan}, state["diagnostics"], state.get("screening")
+        )
+        safe, _ = build_safe_evidence(state["profile"], state["target_evidence"])
+        review = reviewer.combine(
+            "split", deterministic, reviewer.llm_review("split", safe)
+        )
+        self._record_review(run_id, review)
+        return {
+            "split_plan": plan,
+            "split_review": review,
+            "split_gate": {
+                "title": "确认 Train / Test / OOT 切分",
+                "summary": {"plan": plan, "review": review},
+                "editable": ["method", "time_column", "customer_key", "test_size", "oot_size"],
+            },
+        }
+
+    def execute_split(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
+        plan = {**state["split_plan"], **((state.get("split_decision") or {}).get("edits") or {})}
+        split = split_dataset(
+            frame,
+            state["target"],
+            method=plan["method"],
+            time_column=plan.get("time_column"),
+            customer_key=plan.get("customer_key"),
+            test_size=float(plan.get("test_size", 0.2)),
+            oot_size=float(plan.get("oot_size", 0.2)),
+            random_state=int(plan.get("random_state", 42)),
+        )
+        run = self.catalog.require("runs", run_id)
+        self.database.update(
+            "target_tasks", run["target_task_id"], {"split_json": split, "updated_at": now_iso()}
+        )
+        return {"split": split, "split_plan": plan}
+
+    def screen(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
+        train = frame.iloc[state["split"]["indices"]["train"]]
+        screening = screen_features(
+            train,
+            state["target"],
+            protected_targets=state["profile"].get("binary_candidates", []),
+        )
+        run = self.catalog.require("runs", run_id)
+        self.database.update(
+            "target_tasks", run["target_task_id"], {"screening_json": screening, "updated_at": now_iso()}
+        )
+        reviewer = self._reviewer(run_id)
+        deterministic = reviewer.review_plan(
+            {"split": state["split_plan"]}, state["diagnostics"], screening
+        )
+        safe, _ = build_safe_evidence(
+            state["profile"], state["target_evidence"], screening
+        )
+        review = reviewer.combine(
+            "screening", deterministic, reviewer.llm_review("screening", safe)
+        )
+        self._record_review(run_id, review)
+        return {
+            "screening": screening,
+            "screening_review": review,
+            "screening_gate": {
+                "title": "确认变量筛选",
+                "summary": {
+                    "thresholds": screening["thresholds"],
+                    "included": screening["included"],
+                    "excluded": screening["excluded"],
+                    "review": review,
+                },
+                "editable": ["restore_features"],
+                "non_recoverable": [
+                    "PII",
+                    "LEAKAGE",
+                    "TARGET",
+                    "OTHER_TARGET",
+                    "IDENTIFIER",
+                    "CONSTANT",
+                ],
+            },
+        }
+
+    def finalize_screening(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        requests = ((state.get("screening_decision") or {}).get("edits") or {}).get("restore_features", [])
+        screening = state["screening"]
+        if requests:
+            screening = restore_features(screening, requests)
+        if not screening.get("included"):
+            raise ValueError("NO_FEATURES_AFTER_SCREENING")
+        run = self.catalog.require("runs", run_id)
+        self.database.update(
+            "target_tasks", run["target_task_id"], {"screening_json": screening, "updated_at": now_iso()}
+        )
+        return {"screening": screening}
+
+    def bin_features(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
+        train = frame.iloc[state["split"]["indices"]["train"]]
+        binning = fit_binning(train, state["target"], state["screening"]["included"])
+        non_monotonic = [name for name, spec in binning["specs"].items() if not spec.get("monotonic")]
+        reviewer = self._reviewer(run_id)
+        deterministic = {
+            "scope": "binning",
+            "status": "revise" if non_monotonic else "pass",
+            "issues": [
+                {
+                    "code": "NON_MONOTONIC_BINNING",
+                    "severity": "warning",
+                    "message": "存在未达到绝对单调的变量，可在确认节点人工调整。",
+                    "columns": non_monotonic,
+                }
+            ] if non_monotonic else [],
+            "evidence": {"fit_scope": "train_only", "binning_version": binning["version"]},
+        }
+        safe, _ = build_safe_evidence(
+            state["profile"], state["target_evidence"], state["screening"]
+        )
+        review = reviewer.combine(
+            "binning", deterministic, reviewer.llm_review("binning", safe)
+        )
+        self._record_review(run_id, review)
+        return {
+            "binning": binning,
+            "binning_review": review,
+            "binning_gate": {
+                "title": "确认自动分箱",
+                "summary": {"version": binning["version"], "non_monotonic": non_monotonic, "specs": binning["specs"], "review": review},
+                "editable": ["manual_specs"],
+            },
+        }
+
+    def finalize_binning(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        manual = ((state.get("binning_decision") or {}).get("edits") or {}).get("manual_specs", {})
+        binning = state["binning"]
+        if manual:
+            frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
+            train = frame.iloc[state["split"]["indices"]["train"]]
+            for column, spec in manual.items():
+                binning = apply_manual_binning(binning, train, state["target"], column, spec)
+        run = self.catalog.require("runs", run_id)
+        self.database.update(
+            "target_tasks", run["target_task_id"], {"binning_json": binning, "updated_at": now_iso()}
+        )
+        return {"binning": binning}
+
+    def propose_models(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
+        settings = SettingsStore(self.paths).load()
+        resource = plan_resources(len(frame), len(frame.columns), settings.memory_budget_mb)
+        availability = available_models()
+        configured = [
+            name for name in (settings.default_models or []) if availability.get(name, False)
+        ]
+        models = list(dict.fromkeys(configured or recommend_models(resource)))
+        plan = {
+            "models": models,
+            "resource_plan": resource.as_dict(),
+            "score": {
+                "minimum": 300,
+                "maximum": 900,
+                "base_score": 600,
+                "base_odds": 20,
+                "pdo": 50,
+            },
+            "selection_reference": {"auc": 0.55, "ks": 0.15, "hard_threshold": False, "absolute_ordering_required": True},
+        }
+        safe, aliases = build_safe_evidence(
+            state["profile"], state["target_evidence"], state["screening"]
+        )
+        gateway = self._gateway(run_id)
+        if gateway.enabled:
+            payload, result = gateway.complete_json(
+                "You are the main risk-model planning Agent. Return JSON with a models array chosen from dummy, scorecard, regularized_logistic, random_forest, extra_trees, xgboost, lightgbm, catboost. Respect resource constraints; do not recommend all models by default.",
+                {"planning_material": safe, "deterministic_recommendation": models},
+                purpose="main_agent_model_plan",
+            )
+            proposed = payload.get("models", []) if payload else []
+            valid = [name for name in proposed if name in available_models() and available_models()[name]]
+            if valid:
+                plan["models"] = list(dict.fromkeys(["dummy", *valid]))
+                plan["source"] = "llm_reviewed_and_locally_validated"
+                plan["provider_evidence"] = {"model": result.model, "payload_hash": result.payload_hash}
+        reviewer = self._reviewer(run_id)
+        deterministic = reviewer.review_plan(
+            {"split": state["split_plan"], "models": plan["models"]}, state["diagnostics"], state["screening"]
+        )
+        llm = reviewer.llm_review("model_plan", safe)
+        review = reviewer.combine("model_plan", deterministic, llm)
+        self._record_review(run_id, review)
+        return {
+            "model_plan": plan,
+            "field_aliases": aliases,
+            "model_plan_review": review,
+            "model_gate": {
+                "title": "确认候选模型与评分参数",
+                "summary": {"plan": plan, "review": review},
+                "editable": ["models", "score"],
+            },
+        }
+
+    def finalize_model_plan(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        edits = ((state.get("model_decision") or {}).get("edits") or {})
+        plan = {**state["model_plan"]}
+        if "models" in edits:
+            availability = available_models()
+            models = [name for name in edits["models"] if availability.get(name, False)]
+            if not models:
+                raise ValueError("NO_AVAILABLE_MODELS")
+            plan["models"] = list(dict.fromkeys(models))
+        if "score" in edits:
+            plan["score"] = {**plan["score"], **edits["score"]}
+        _validate_score_config(plan["score"])
+        run = self.catalog.require("runs", run_id)
+        self.database.update(
+            "target_tasks", run["target_task_id"], {"model_plan_json": plan, "updated_at": now_iso()}
+        )
+        return {"model_plan": plan}
+
+    def generate_and_review_code(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        dataset = self.catalog.require("dataset_versions", state["working_dataset_version_id"])
+        source = generate_reproducible_notebook_code(
+            dataset_file=dataset["stored_path"],
+            target=state["target"],
+            features=state["screening"]["included"],
+            split=state["split"],
+            models=state["model_plan"]["models"],
+            score_config=state["model_plan"]["score"],
+        )
+        aliases = dict(state.get("field_aliases", {}))
+        expected_spec = extract_generated_spec(source)
+        reviewer = self._reviewer(run_id)
+        main_gateway = self._gateway(run_id)
+        safe, _ = build_safe_evidence(
+            state["profile"], state["target_evidence"], state["screening"]
+        )
+        combined: dict[str, Any] = {}
+        for repair_round in range(1, 4):
+            safe_source = _sanitize_generated_code(source, dataset["stored_path"], aliases)
+            deterministic = reviewer.review_code(source)
+            llm = reviewer.llm_review(
+                "generated_code",
+                {
+                    **safe,
+                    "sanitized_code": safe_source,
+                    "code_sha256": sha256_bytes(source.encode("utf-8")),
+                    "repair_round": repair_round,
+                    "prior_review_issues": combined.get("issues", []),
+                },
+            )
+            combined = reviewer.combine("code", deterministic, llm)
+            combined["repair_round"] = repair_round
+            if combined["status"] == "pass":
+                self._record_review(run_id, combined)
+                break
+            repair_evidence: dict[str, Any] = {
+                "attempted": False,
+                "accepted": False,
+                "feedback_issue_codes": [
+                    str(item.get("code") or "UNSPECIFIED")
+                    for item in combined.get("issues", [])
+                ],
+            }
+            if main_gateway.enabled:
+                repair_evidence["attempted"] = True
+                payload, result = main_gateway.complete_json(
+                    "You are the main Agent repairing a generated modeling notebook after an independent Reviewer response. Return JSON with one code string. Keep the immutable SPEC exactly unchanged, keep <LOCAL_DATASET> as the only data path, use only pathlib/json/pandas/numpy/app imports, and do not add network, shell, dynamic execution, file mutation, PII, credentials, or raw data.",
+                    {
+                        **safe,
+                        "sanitized_code": safe_source,
+                        "review_issues": combined.get("issues", []),
+                        "immutable_spec": extract_generated_spec(safe_source),
+                        "repair_round": repair_round,
+                        "response_schema": {"code": "string"},
+                    },
+                    purpose="main_agent_code_repair",
+                )
+                repair_evidence.update(
+                    provider_error=result.error_code,
+                    model=result.model,
+                    payload_hash=result.payload_hash,
+                )
+                candidate = (payload or {}).get("code")
+                if isinstance(candidate, str) and 0 < len(candidate) <= 100_000:
+                    candidate = _strip_code_fence(candidate)
+                    if (
+                        "<LOCAL_DATASET>" in candidate
+                        and dataset["stored_path"] not in candidate
+                        and _generated_spec_matches(
+                            candidate, extract_generated_spec(safe_source)
+                        )
+                    ):
+                        restored = _restore_generated_code(
+                            candidate, dataset["stored_path"], aliases
+                        )
+                        local_review = reviewer.review_code(restored)
+                        if (
+                            local_review["status"] == "pass"
+                            and _generated_spec_matches(restored, expected_spec)
+                        ):
+                            source = restored
+                            repair_evidence["accepted"] = True
+                            repair_evidence["repaired_code_sha256"] = sha256_bytes(
+                                source.encode("utf-8")
+                            )
+            combined.setdefault("evidence", {})["main_agent_repair"] = repair_evidence
+            self._record_review(run_id, combined)
+        if combined.get("status") != "pass":
+            if deterministic["status"] != "pass":
+                raise ValueError("GENERATED_CODE_REVIEW_BLOCKED")
+            combined = {
+                "scope": "code",
+                "status": "fallback_pass",
+                "issues": combined.get("issues", []),
+                "evidence": {"safe_downgrade": "deterministic_template_after_three_reviewer_rounds"},
+            }
+            self._record_review(run_id, combined)
+        path = self.artifacts.run_dir(
+            self.catalog.require("runs", run_id)["project_id"], run_id
+        ) / "reproducible-modeling.ipynb"
+        write_reproducible_notebook(
+            path,
+            source,
+            {"run_id": run_id, "review_status": combined["status"], "raw_data_embedded": False},
+        )
+        return {"generated_code_path": str(path), "code_review": combined}
+
+    def train_and_review(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
+        resource_dict = state["model_plan"]["resource_plan"]
+        from app.workers.io import ResourcePlan
+
+        resource = ResourcePlan(**resource_dict)
+        models = list(state["model_plan"]["models"])
+        reviewer = self._reviewer(run_id)
+        final_review: dict[str, Any] = {}
+        result: dict[str, Any] = {}
+        bundles: dict[str, ModelBundle] = {}
+        for repair_round in range(1, 4):
+            result, bundles = train_candidates(
+                frame,
+                state["target"],
+                state["screening"]["included"],
+                state["split"],
+                models=models,
+                resource=resource,
+                score_config=state["model_plan"]["score"],
+            )
+            deterministic = reviewer.review_execution(result)
+            safe, _ = build_safe_evidence(
+                state["profile"], state["target_evidence"], state["screening"], result
+            )
+            llm = reviewer.llm_review(
+                "execution", {**safe, "repair_round": repair_round, "prior_review_issues": final_review.get("issues", [])}
+            )
+            final_review = reviewer.combine("execution", deterministic, llm)
+            final_review["repair_round"] = repair_round
+            self._record_review(run_id, final_review)
+            if final_review["status"] == "pass":
+                break
+            trained = [item["candidate"] for item in result["candidates"] if item["status"] == "trained"]
+            safe_core = [name for name in ("dummy", "scorecard", "regularized_logistic", "extra_trees") if name in trained or available_models().get(name)]
+            models = list(dict.fromkeys(safe_core))
+        if final_review.get("status") != "pass":
+            deterministic = reviewer.review_execution(result)
+            if deterministic["status"] != "pass":
+                raise ValueError("EXECUTION_REVIEW_BLOCKED")
+            final_review = {
+                "scope": "execution",
+                "status": "fallback_pass",
+                "issues": final_review.get("issues", []),
+                "evidence": {"safe_downgrade": "locally_validated_model_after_three_reviewer_rounds"},
+            }
+            self._record_review(run_id, final_review)
+        self._bundles[run_id] = bundles
+        return {"model_result": result, "execution_review": final_review, "effective_models": models}
+
+    def build_and_review_report(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        run = self.catalog.require("runs", run_id)
+        frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
+        report_run = {**run, "status": "succeeded", "stage": "completed"}
+        report = self.artifacts.build_structured_report(report_run, state, frame)
+        reviewer = self._reviewer(run_id)
+        deterministic = reviewer.review_report(report)
+        safe, _ = build_safe_evidence(
+            state["profile"], state["target_evidence"], state["screening"], state["model_result"]
+        )
+        final_review: dict[str, Any] = {}
+        for repair_round in range(1, 4):
+            llm = reviewer.llm_review(
+                "report", {**safe, "report_schema": report["schema_version"], "repair_round": repair_round, "prior_review_issues": final_review.get("issues", [])}
+            )
+            final_review = reviewer.combine("report", deterministic, llm)
+            final_review["repair_round"] = repair_round
+            self._record_review(run_id, final_review)
+            if final_review["status"] == "pass":
+                break
+        if final_review.get("status") != "pass":
+            if deterministic["status"] != "pass":
+                raise ValueError("REPORT_REVIEW_BLOCKED")
+            final_review = {
+                "scope": "report",
+                "status": "fallback_pass",
+                "issues": final_review.get("issues", []),
+                "evidence": {"safe_downgrade": "structured_report_after_three_reviewer_rounds"},
+            }
+            self._record_review(run_id, final_review)
+        return {"report": report, "report_review": final_review}
+
+    def write_artifacts(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        run = self.catalog.require("runs", run_id)
+        task = self.catalog.require("target_tasks", run["target_task_id"])
+        frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
+        bundles = self._bundles.get(run_id)
+        if not bundles or state["model_result"]["champion"] not in bundles:
+            replay = self.train_and_review(run_id, state)
+            bundles = self._bundles[run_id]
+            state = {**state, **replay}
+        champion = state["model_result"]["champion"]
+        model_version, package_manifest = self.artifacts.write_model_artifacts(
+            run, task, bundles[champion], frame
+        )
+        notebook = self.artifacts.register(
+            run_id, "reproducible_notebook", Path(state["generated_code_path"]), {"reviewed": True}
+        )
+        report_run = {**run, "status": "succeeded", "stage": "completed"}
+        report = self.artifacts.build_structured_report(report_run, state, frame)
+        report["artifacts"] = [
+            {"name": notebook["name"], "kind": notebook["kind"]},
+            {"name": f"{model_version['name']}-model-package.zip", "kind": "model_package"},
+        ]
+        report, report_artifacts = self.artifacts.write_report_artifacts(report_run, report)
+        return {
+            "report": report,
+            "model_version_id": model_version["id"],
+            "package_manifest": package_manifest,
+            "artifact_ids": [notebook["id"], *[item["id"] for item in report_artifacts]],
+        }
+
+    def _context(self, run_id: str) -> tuple[dict[str, Any], dict[str, Any], pd.DataFrame]:
+        run = self.catalog.require("runs", run_id)
+        task = self.catalog.require("target_tasks", run["target_task_id"])
+        dataset = self.catalog.require("dataset_versions", task["dataset_version_id"])
+        return task, dataset, read_table(Path(dataset["stored_path"]), dataset.get("sheet"))
+
+    def _working_frame(self, state: dict[str, Any]) -> pd.DataFrame:
+        dataset = self.catalog.require("dataset_versions", state["working_dataset_version_id"])
+        return read_table(Path(dataset["stored_path"]), dataset.get("sheet"))
+
+    def _reviewer(self, run_id: str) -> IndependentReviewer:
+        return IndependentReviewer(self._gateway(run_id))
+
+    def _gateway(self, run_id: str) -> ProviderGateway:
+        settings = SettingsStore(self.paths).load()
+        active_requests: list[str] = []
+
+        def request_callback(purpose: str, evidence: dict[str, Any], model: str) -> None:
+            identifier = new_id("provider")
+            active_requests.append(identifier)
+            digest = sha256_bytes(
+                json.dumps(evidence, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+            )
+            self.database.insert(
+                "provider_requests",
+                {
+                    "id": identifier,
+                    "run_id": run_id,
+                    "provider": settings.provider,
+                    "model": model,
+                    "status": "requested",
+                    "safe_payload_hash": digest,
+                    "usage_json": {"purpose": purpose},
+                    "response_summary": "",
+                    "created_at": now_iso(),
+                },
+            )
+
+        def usage_callback(tokens: int, model: str) -> None:
+            if active_requests:
+                record = self.database.get("provider_requests", active_requests[-1])
+                usage = dict((record or {}).get("usage") or {})
+                usage.update(total_tokens=tokens, model=model)
+                self.database.update(
+                    "provider_requests", active_requests[-1], {"status": "succeeded", "usage_json": usage}
+                )
+
+        def budget_guard(requested: int) -> str | None:
+            records = self.database.list("provider_requests", {"run_id": run_id}, limit=5000)
+            used = sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in records)
+            if settings.run_token_budget and used + requested > settings.run_token_budget:
+                return "本 Run 的 Token 预算不足。"
+            if settings.monthly_token_budget:
+                current_month = now_iso()[:7]
+                monthly = self.database.list("provider_requests", limit=5000)
+                monthly_used = sum(
+                    int((item.get("usage") or {}).get("total_tokens") or 0)
+                    for item in monthly
+                    if str(item.get("created_at", ""))[:7] == current_month
+                )
+                if monthly_used + requested > settings.monthly_token_budget:
+                    return "本月 Token 预算不足。"
+            return None
+
+        return ProviderGateway(
+            settings=settings,
+            budget_guard=budget_guard,
+            usage_callback=usage_callback,
+            request_callback=request_callback,
+            paths=self.paths,
+        )
+
+    def _record_review(self, run_id: str, review: dict[str, Any]) -> dict[str, Any]:
+        existing = self.database.list(
+            "review_records", {"run_id": run_id}, order_by="round ASC", limit=500
+        )
+        return self.database.insert(
+            "review_records",
+            {
+                "id": new_id("rev"),
+                "run_id": run_id,
+                "round": len(existing) + 1,
+                "scope": review["scope"],
+                "status": review["status"],
+                "issues_json": review.get("issues", []),
+                "evidence_json": review.get("evidence", {}),
+                "created_at": now_iso(),
+            },
+        )
+
+
+def _first_candidate(profile: dict[str, Any], key: str) -> str | None:
+    for item in profile.get("columns_detail", []):
+        if item.get(key) and not item.get("pii"):
+            return str(item["name"])
+    return None
+
+
+def _preferred_customer_key(profile: dict[str, Any]) -> str | None:
+    """Prefer person-level identifiers over order-level identifiers for isolation."""
+    candidates = [
+        item
+        for item in profile.get("columns_detail", [])
+        if item.get("id_candidate") and not item.get("pii")
+    ]
+    if not candidates:
+        return None
+
+    def rank(item: dict[str, Any]) -> tuple[int, int]:
+        name = str(item.get("name") or "").lower()
+        person_tokens = (
+            "customer", "cust", "user", "person", "borrower", "client",
+            "客户", "用户", "借款人",
+        )
+        order_tokens = ("order", "loan", "application", "contract", "订单", "借据", "申请")
+        score = 2 if any(token in name for token in person_tokens) else 0
+        score -= 2 if any(token in name for token in order_tokens) else 0
+        # Repeated identifiers are more likely to represent a customer across
+        # multiple orders than a row-level technical key.
+        rows = max(int(profile.get("rows") or 0), 1)
+        repeated = int(item.get("unique_count") or 0) < rows
+        return score, int(repeated)
+
+    return str(max(candidates, key=rank).get("name"))
+
+
+def _sanitize_generated_code(
+    source: str, dataset_path: str, aliases: dict[str, str]
+) -> str:
+    value = source.replace(dataset_path, "<LOCAL_DATASET>")
+    for original, alias in sorted(
+        aliases.items(), key=lambda item: len(item[0]), reverse=True
+    ):
+        value = value.replace(original, alias)
+    return value
+
+
+def _restore_generated_code(
+    source: str, dataset_path: str, aliases: dict[str, str]
+) -> str:
+    value = source.replace("<LOCAL_DATASET>", dataset_path)
+    for original, alias in sorted(
+        aliases.items(), key=lambda item: len(item[1]), reverse=True
+    ):
+        value = value.replace(alias, original)
+    return value
+
+
+def _strip_code_fence(source: str) -> str:
+    value = source.strip()
+    if not value.startswith("```"):
+        return value
+    lines = value.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _generated_spec_matches(source: str, expected: dict[str, Any]) -> bool:
+    try:
+        return extract_generated_spec(source) == expected
+    except (SyntaxError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def _validate_score_config(config: dict[str, Any]) -> None:
+    minimum = float(config["minimum"])
+    maximum = float(config["maximum"])
+    if not (0 <= minimum < maximum <= 5000):
+        raise ValueError("SCORE_RANGE_INVALID")
+    if float(config["base_odds"]) <= 0 or float(config["pdo"]) <= 0:
+        raise ValueError("SCORE_SCALING_INVALID")
