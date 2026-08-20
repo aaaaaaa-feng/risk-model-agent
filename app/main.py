@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .agent import ProviderGateway, answer_chat
+from .agent import ProviderGateway, answer_chat, provider_presets
 from .config import MAX_BACKUP_BYTES, MAX_UPLOAD_BYTES, ensure_runtime, load_config, new_id, public_config, save_config
 from .orchestrator import _report_html, _write_checksums, _write_report_xlsx, resume_after_confirmation, resume_after_pause, start_run
 from .storage import dumps, sha256_file, store
@@ -74,7 +74,8 @@ class BaselineReevaluationPayload(BaseModel):
 
 
 class ConfigPayload(BaseModel):
-    provider: str = "OpenAI-compatible"
+    provider: str = "custom"
+    api_format: str = Field(default="openai", pattern="^(openai|anthropic)$")
     base_url: str = ""
     model: str = ""
     reviewer_model: str = ""
@@ -86,6 +87,18 @@ class ConfigPayload(BaseModel):
     run_token_budget: int = Field(default=0, ge=0, le=10_000_000)
     monthly_token_budget: int = Field(default=0, ge=0, le=100_000_000)
     mode: str = Field(default="auto", pattern="^(auto|semi_trust)$")
+
+
+class ProviderTestPayload(BaseModel):
+    """Unsaved settings accepted only for a connectivity probe."""
+
+    provider: Optional[str] = None
+    api_format: Optional[str] = Field(default=None, pattern="^(openai|anthropic)$")
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    proxy: Optional[str] = None
+    ca_cert: Optional[str] = None
+    api_key: str = ""
 
 
 ALLOWED_MODELS = {
@@ -159,23 +172,43 @@ def list_tools() -> Dict[str, Any]:
 
 @app.get("/api/config")
 def get_config() -> Dict[str, Any]:
-    return {"config": public_config(load_config()), "provider": ProviderGateway().status()}
+    return {"config": public_config(load_config()), "provider": ProviderGateway().status(), "presets": provider_presets()}
 
 
 @app.put("/api/config")
 def put_config(payload: ConfigPayload) -> Dict[str, Any]:
-    return {"config": save_config(payload.model_dump()), "provider": ProviderGateway().status()}
+    return {"config": save_config(payload.model_dump()), "provider": ProviderGateway().status(), "presets": provider_presets()}
 
 
 @app.post("/api/config/test")
-def test_provider_config() -> Dict[str, Any]:
-    result = ProviderGateway().connectivity_check()
+def test_provider_config(payload: Optional[ProviderTestPayload] = None) -> Dict[str, Any]:
+    if payload is None:
+        gateway = ProviderGateway()
+    else:
+        config = load_config()
+        values = payload.model_dump(exclude_none=True)
+        api_key = str(values.pop("api_key", "") or "").strip() or None
+        # A probe is explicit user intent and should not require saving or
+        # enabling the configuration first. It still uses the same DLP and
+        # timeout path as normal Agent calls.
+        config.update(values)
+        config["llm_enabled"] = True
+        gateway = ProviderGateway(config=config, api_key=api_key)
+    result = gateway.connectivity_check()
     return {
         "ok": result.ok,
         "error_code": result.error_code,
         "message": result.error_message or "Provider 连通性检查成功。",
         "model": result.model,
+        "provider": gateway.config.get("provider", "custom"),
+        "api_format": gateway.api_format,
+        "endpoint": gateway._endpoint() if gateway.config.get("base_url") else "",
     }
+
+
+@app.get("/api/config/presets")
+def get_provider_presets() -> Dict[str, Any]:
+    return {"presets": provider_presets()}
 
 
 @app.get("/api/projects")

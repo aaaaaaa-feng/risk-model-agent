@@ -23,6 +23,55 @@ SENSITIVE_EVIDENCE_KEYS = {
 }
 
 
+# Provider presets are convenience defaults only. Users can still override the
+# endpoint and model for an internal gateway; the wire protocol remains an
+# explicit setting so a Kimi/DeepSeek Anthropic-compatible endpoint is not
+# accidentally called with OpenAI headers.
+PROVIDER_PRESETS: Dict[str, Dict[str, Any]] = {
+    "custom": {
+        "label": "自定义 Provider",
+        "formats": ["openai", "anthropic"],
+        "defaults": {"openai": {"base_url": "", "model": ""}, "anthropic": {"base_url": "", "model": ""}},
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "formats": ["openai", "anthropic"],
+        "defaults": {
+            "openai": {"base_url": "https://api.deepseek.com", "model": "deepseek-v4-flash"},
+            "anthropic": {"base_url": "https://api.deepseek.com/anthropic", "model": "deepseek-v4-flash"},
+        },
+    },
+    "kimi": {
+        "label": "Kimi 开放平台",
+        "formats": ["openai"],
+        "defaults": {"openai": {"base_url": "https://api.moonshot.ai/v1", "model": "kimi-k2.5"}},
+    },
+    "kimi_code": {
+        "label": "Kimi Code",
+        "formats": ["openai", "anthropic"],
+        "defaults": {
+            "openai": {"base_url": "https://api.kimi.com/coding/v1", "model": "kimi-for-coding"},
+            "anthropic": {"base_url": "https://api.kimi.com/coding/", "model": "kimi-for-coding"},
+        },
+    },
+    "openai": {
+        "label": "OpenAI",
+        "formats": ["openai"],
+        "defaults": {"openai": {"base_url": "https://api.openai.com/v1", "model": "gpt-5"}},
+    },
+    "anthropic": {
+        "label": "Anthropic Claude",
+        "formats": ["anthropic"],
+        "defaults": {"anthropic": {"base_url": "https://api.anthropic.com", "model": "claude-opus-4-6"}},
+    },
+}
+
+
+def provider_presets() -> Dict[str, Dict[str, Any]]:
+    """Return a JSON-safe copy for the settings UI without any secrets."""
+    return json.loads(json.dumps(PROVIDER_PRESETS, ensure_ascii=False))
+
+
 @dataclass
 class ProviderResult:
     ok: bool
@@ -71,8 +120,10 @@ def _parse_json_content(content: str) -> Dict[str, Any]:
 
 
 class ProviderGateway:
-    """OpenAI-compatible Provider boundary with an explicit opt-in switch.
+    """Local egress boundary for OpenAI Chat and Anthropic Messages APIs.
 
+    DeepSeek and Kimi Code expose both protocols, while the Kimi Open Platform
+    and the native OpenAI/Anthropic services use their respective protocol.
     The domain layer never receives the API key and never sends a DataFrame. A
     configured key alone does not enable network calls; the user must explicitly
     turn on ``llm_enabled`` in the local settings page.
@@ -86,8 +137,10 @@ class ProviderGateway:
         usage_callback: Optional[Callable[[int, str], None]] = None,
         request_callback: Optional[Callable[[str, Dict[str, Any], str], None]] = None,
         purpose: str = "agent",
+        api_key: Optional[str] = None,
     ):
         self.config = config or load_config()
+        self._api_key_override = api_key.strip() if isinstance(api_key, str) and api_key.strip() else None
         self._client_factory = client_factory or httpx.Client
         self._budget_guard = budget_guard
         self._usage_callback = usage_callback
@@ -99,12 +152,27 @@ class ProviderGateway:
         return bool(self.config.get("llm_enabled"))
 
     @property
+    def api_format(self) -> str:
+        value = str(self.config.get("api_format") or "").strip().lower()
+        if value in {"openai", "anthropic"}:
+            return value
+        provider = str(self.config.get("provider") or "").strip().lower()
+        return "anthropic" if provider in {"anthropic", "claude"} else "openai"
+
+    def _api_key(self) -> str:
+        return self._api_key_override or provider_key()
+
+    @property
     def configured(self) -> bool:
-        return bool(provider_key() and self.config.get("base_url") and self.config.get("model"))
+        return bool(self._api_key() and self.config.get("base_url") and self.config.get("model"))
 
     def _endpoint(self) -> str:
         base_url = str(self.config.get("base_url") or "").strip().rstrip("/")
-        return base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
+        if self.api_format == "openai":
+            return base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
+        if base_url.endswith("/messages"):
+            return base_url
+        return f"{base_url}/messages" if base_url.endswith("/v1") else f"{base_url}/v1/messages"
 
     def status(self) -> Dict[str, Any]:
         configured = self.configured
@@ -121,12 +189,77 @@ class ProviderGateway:
         return {
             "configured": configured,
             "enabled": active,
-            "provider": self.config.get("provider", "OpenAI-compatible"),
+            "provider": self.config.get("provider", "custom"),
+            "api_format": self.api_format,
+            "endpoint": self._endpoint() if self.config.get("base_url") else "",
             "model": self.config.get("model", ""),
             "reviewer_model": self.config.get("reviewer_model", ""),
             "mode": mode,
             "message": message,
         }
+
+    def _request_body(self, system_prompt: str, user_payload: Dict[str, Any], model: str, max_tokens: int) -> Dict[str, Any]:
+        user_content = json.dumps(user_payload, ensure_ascii=False, sort_keys=True)
+        if self.api_format == "anthropic":
+            return {
+                "model": model,
+                "system": system_prompt,
+                "max_tokens": max_tokens,
+                "temperature": 0,
+                "messages": [{"role": "user", "content": user_content}],
+            }
+        return {
+            "model": model,
+            "temperature": 0,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+        }
+
+    def _headers(self) -> Dict[str, str]:
+        if self.api_format == "anthropic":
+            return {
+                "x-api-key": self._api_key(),
+                "anthropic-version": str(self.config.get("anthropic_version") or "2023-06-01"),
+                "Content-Type": "application/json",
+            }
+        return {"Authorization": f"Bearer {self._api_key()}", "Content-Type": "application/json"}
+
+    def _extract_response(self, payload: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+        if self.api_format == "anthropic":
+            blocks = payload.get("content") or []
+            content = "".join(str(item.get("text", "")) for item in blocks if isinstance(item, dict) and item.get("type") == "text")
+            if not content.strip():
+                raise ValueError("PROVIDER_EMPTY_RESPONSE: missing Anthropic text content")
+            usage = dict(payload.get("usage") or {})
+            if "total_tokens" not in usage:
+                usage["total_tokens"] = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+            return content.strip(), usage
+        usage = dict(payload.get("usage") or {})
+        return _extract_message_content(payload), usage
+
+    @staticmethod
+    def _http_error(exc: httpx.HTTPStatusError) -> tuple[str, str]:
+        status_code = exc.response.status_code
+        error_code = "PROVIDER_HTTP_ERROR"
+        if status_code in {401, 403}:
+            error_code = "PROVIDER_AUTH_FAILED"
+        elif status_code == 429:
+            error_code = "PROVIDER_RATE_LIMITED"
+        message = f"HTTP {status_code}"
+        try:
+            payload = exc.response.json()
+            if isinstance(payload, dict):
+                error = payload.get("error")
+                if isinstance(error, dict):
+                    message = str(error.get("message") or message)
+                elif payload.get("message"):
+                    message = str(payload["message"])
+        except (ValueError, TypeError):
+            pass
+        return error_code, message[:300]
 
     def complete(
         self,
@@ -149,19 +282,12 @@ class ProviderGateway:
             budget_error = self._budget_guard(selected_max_tokens)
             if budget_error:
                 return ProviderResult(ok=False, error_code="PROVIDER_BUDGET_EXCEEDED", error_message=budget_error)
-        body = {
-            "model": model or self.config.get("model"),
-            "temperature": 0,
-            "max_tokens": selected_max_tokens,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False, sort_keys=True)},
-            ],
-        }
-        headers = {"Authorization": f"Bearer {provider_key()}", "Content-Type": "application/json"}
+        selected_model = str(model or self.config.get("model"))
+        body = self._request_body(system_prompt, user_payload, selected_model, selected_max_tokens)
+        headers = self._headers()
         if self._request_callback:
             try:
-                self._request_callback(self._purpose, user_payload, str(body["model"]))
+                self._request_callback(self._purpose, user_payload, selected_model)
             except Exception:
                 # Request logging must never change the provider safety path.
                 pass
@@ -178,23 +304,18 @@ class ProviderGateway:
                 response = client.post(self._endpoint(), headers=headers, json=body)
                 response.raise_for_status()
                 response_payload = response.json()
-                content = _extract_message_content(response_payload)
-                usage = response_payload.get("usage") if isinstance(response_payload, dict) else None
-                if self._usage_callback and isinstance(usage, dict):
+                content, usage = self._extract_response(response_payload)
+                if self._usage_callback:
                     try:
-                        self._usage_callback(int(usage.get("total_tokens") or 0), str(body["model"]))
+                        self._usage_callback(int(usage.get("total_tokens") or 0), selected_model)
                     except (TypeError, ValueError):
                         pass
-                return ProviderResult(
-                    ok=True,
-                    content=content,
-                    model=str(body["model"]),
-                    usage=usage,
-                )
+                return ProviderResult(ok=True, content=content, model=selected_model, usage=usage)
         except httpx.HTTPStatusError as exc:
-            return ProviderResult(ok=False, error_code="PROVIDER_HTTP_ERROR", error_message=f"HTTP {exc.response.status_code}")
-        except (httpx.HTTPError, OSError, ValueError) as exc:
-            return ProviderResult(ok=False, error_code="PROVIDER_REQUEST_FAILED", error_message=str(exc)[:300])
+            code, message = self._http_error(exc)
+            return ProviderResult(ok=False, error_code=code, error_message=message, model=selected_model)
+        except (httpx.HTTPError, OSError, ValueError, TypeError) as exc:
+            return ProviderResult(ok=False, error_code="PROVIDER_REQUEST_FAILED", error_message=str(exc)[:300], model=selected_model)
 
     def complete_json(
         self,

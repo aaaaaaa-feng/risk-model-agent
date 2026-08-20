@@ -25,10 +25,11 @@
 16. 数据字典与 Provider 设置的页面操作补齐：XLSX 数据字典复用本地 Sheet 预检并要求明确选择，设置页提供清除本机 API Key 的显式动作。
 17. 完成 Run 的行动面板原先没有直接下载完整交付物，且页面不展示代码 Reviewer 与训练类别计数；现在可下载 `artifacts.zip`，并在报告卡中显示 Reviewer 结论和训练正/负类证据。
 18. 项目生命周期原先只有存储层删除能力，页面和 API 没有可审计的归档边界；现在支持归档、恢复和“先归档 + `confirm=true`”删除，归档期间禁止写入、分析和新 Run，并有 API 回归覆盖。
+19. Provider 配置原先只有 OpenAI-compatible 单一路径，且设置页的新 Key 不会参与“测试连接”；现在增加 OpenAI Chat Completions/Anthropic Messages 适配、DeepSeek/Kimi/Kimi Code/OpenAI/Anthropic 预置，并让连通性测试使用当前未保存表单值且不落盘。
 
 ## 已验证证据
 
-- `35 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算/出站摘要、报告导出、Trace 脱敏与事件链、资源边界、数据字典、校准/稳定性/评分卡映射、训练集筛选、高维分析守卫、类别不平衡训练策略、多数据版本与本地画像、Tool Registry、清洗版本、清洗确认门禁、Baseline/新 OOT 复评和 what-if 隔离、项目多轮对话、报告叙事锁定、聊天文本边界、项目归档/恢复/显式删除、跨平台打包契约和黄金回归。
+- `39 passed`（当前本地环境）：单元、Worker、API、半信任恢复、XLSX Sheet、Provider DLP/预算/出站摘要、OpenAI/Anthropic 请求协议、DeepSeek/Kimi/Kimi Code 预置、未保存 Key 连通性探测、报告导出、Trace 脱敏与事件链、资源边界、数据字典、校准/稳定性/评分卡映射、训练集筛选、高维分析守卫、类别不平衡训练策略、多数据版本与本地画像、Tool Registry、清洗版本、清洗确认门禁、Baseline/新 OOT 复评和 what-if 隔离、项目多轮对话、报告叙事锁定、聊天文本边界、项目归档/恢复/显式删除、跨平台打包契约和黄金回归。
 - `ruff check app tests scripts/*.py`：通过。
 - `node --check app/static/app.js`：通过。
 - `git diff --check`：通过。
@@ -36,6 +37,7 @@
 - 当前 Mac 真实构建：PyInstaller 6.22.2、macOS arm64，`dist/risk-model-agent/risk-model-agent` 构建成功；启动发行包后 `/api/health` 和首页均返回 200。
 - GitHub Actions 的跨平台打包运行 [32301800829](https://github.com/aaaaaaa-feng/risk-model-agent/actions/runs/32301800829) 已成功（对应提交 `7665a6d`）：`macOS arm64 onedir` 与 `Windows x64 onedir` 均完成构建、契约检查、目标平台本机回环健康/首页烟测和 artifact 上传；对应的测试运行 [32301800879](https://github.com/aaaaaaa-feng/risk-model-agent/actions/runs/32301800879) 也已成功。该证据覆盖 CI 构建与烟测，不等于签名、安装、升级/卸载或目标客户机器验收。
 - `.venv/bin/python scripts/run_golden_cases.py`：5/5 通过；这是最小确定性回归门禁，不等价于独立评测 Harness。
+- Provider 协议回归覆盖 OpenAI Chat Completions 的 Bearer 请求、Anthropic Messages 的 `x-api-key`/`anthropic-version`/`/v1/messages` 请求，以及未保存表单 Key 的连通性探测；本环境没有真实供应商密钥，因此不把 mock 回归写成真实账户连通性证据。
 - 真实本机回环烟测（短暂启动 Uvicorn）：`GET /api/health` 返回 200 且明确 `runtime=local`/确定性降级，首页返回 200，并包含项目生命周期、变量明细和 API Key 清除入口；这证明服务可启动和 HTML 可返回，但不替代目标系统安装验收或完整浏览器视觉验收。
 - 本轮相关 Git 提交（列表不作为远端发布证据）：
   - `f82a78e ci: build and smoke test macos and windows bundles`

@@ -481,9 +481,31 @@ async function reevaluateBaseline() {
     renderReport(result.report); renderActionCard(); await loadProviderRequests();
   } catch (error) { showNotice(error.message, 'block'); }
 }
+function selectedProviderPreset() {
+  const form = $('#settings-form'); const provider = form && form.elements.provider ? form.elements.provider.value : 'custom';
+  return (state.providerPresets || {})[provider] || null;
+}
+function updateProviderHint() {
+  const hint = $('#provider-hint'); const preset = selectedProviderPreset(); const form = $('#settings-form');
+  if (!hint || !form) return;
+  const format = form.elements.api_format.value; const defaults = preset && preset.defaults && preset.defaults[format];
+  if (preset && defaults) hint.textContent = preset.label + ' · ' + (format === 'anthropic' ? 'Anthropic Messages' : 'OpenAI Chat Completions') + ' · 预置地址 ' + (defaults.base_url || '请填写自定义地址');
+  else if (preset) hint.textContent = preset.label + ' 不提供当前 API 格式，请切换格式或使用自定义 Provider。';
+  else hint.textContent = '可选择预置，也可以使用自定义 Base URL；API Key 只用于本机请求。';
+}
+function applyProviderPreset() {
+  const form = $('#settings-form'); const preset = selectedProviderPreset(); if (!form || !preset) { updateProviderHint(); return; }
+  const available = preset.formats || ['openai', 'anthropic'];
+  if (!available.includes(form.elements.api_format.value)) form.elements.api_format.value = available[0];
+  const defaults = preset.defaults && preset.defaults[form.elements.api_format.value];
+  if (defaults) { form.elements.base_url.value = defaults.base_url || ''; form.elements.model.value = defaults.model || ''; }
+  updateProviderHint();
+}
 async function loadSettings() {
-  const data = await api('/api/config'); state.config = data.config; $('#provider-chip').textContent = data.provider.enabled ? 'LLM 已启用' : data.provider.configured ? 'API 已配置 · 确定性' : '未配置 LLM'; $('#provider-chip').className = 'chip ' + (data.provider.enabled ? 'safe' : 'neutral'); $('#evidence-provider').textContent = data.provider.enabled ? '外部 API · 仅 SafeEvidence' : data.provider.configured ? '已配置 · 当前仍确定性' : '确定性降级';
+  const data = await api('/api/config'); state.config = data.config; state.providerPresets = data.presets || state.providerPresets || {};
+  $('#provider-chip').textContent = data.provider.enabled ? 'LLM 已启用' : data.provider.configured ? 'API 已配置 · 确定性' : '未配置 LLM'; $('#provider-chip').className = 'chip ' + (data.provider.enabled ? 'safe' : 'neutral'); $('#evidence-provider').textContent = data.provider.enabled ? '外部 API · 仅 SafeEvidence' : data.provider.configured ? '已配置 · 当前仍确定性' : '确定性降级';
   const form = $('#settings-form'); Object.entries(data.config || {}).forEach(function (entry) { if (form.elements[entry[0]] && entry[0] !== 'api_key') { if (form.elements[entry[0]].type === 'checkbox') form.elements[entry[0]].checked = Boolean(entry[1]); else form.elements[entry[0]].value = entry[1] == null ? '' : entry[1]; } });
+  updateProviderHint();
 }
 async function saveSettings(event) {
   event.preventDefault(); const formElement = event.target; const form = new FormData(formElement); const payload = Object.fromEntries(form.entries()); payload.llm_enabled = formElement.elements.llm_enabled.checked; payload.clear_api_key = formElement.elements.clear_api_key.checked; payload.run_token_budget = Number(payload.run_token_budget || 0); payload.monthly_token_budget = Number(payload.monthly_token_budget || 0);
@@ -523,6 +545,14 @@ $('#dataset-card').addEventListener('drop', function (event) { event.preventDefa
 $('#mode-toggle').addEventListener('click', function () { if (state.run && ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(state.run.status)) { showNotice('当前 Run 已开始，模式只影响下一次 Run。', 'block'); return; } state.mode = state.mode === 'auto' ? 'semi_trust' : 'auto'; $('#mode-toggle').textContent = state.mode === 'auto' ? '自动运行模式' : '半信任模式'; renderRun(); });
 $('#open-settings').addEventListener('click', async function () { $('#settings-modal').classList.remove('hidden'); await loadSettings(); }); $('#close-settings').addEventListener('click', function () { $('#settings-modal').classList.add('hidden'); }); $('#cancel-settings').addEventListener('click', function () { $('#settings-modal').classList.add('hidden'); }); $('#settings-form').addEventListener('submit', saveSettings);
 document.querySelectorAll('.feedback-button').forEach(function (button) { button.addEventListener('click', function () { sendFeedback(button.dataset.reaction); }); });
-$('#provider-test').addEventListener('click', async function () { $('#settings-status').textContent = '正在测试…'; try { const result = await api('/api/config/test', { method: 'POST' }); $('#settings-status').textContent = result.ok ? '连接成功。' : (result.error_code || '连接未成功') + '：' + result.message; } catch (error) { $('#settings-status').textContent = error.message; } });
+$('#settings-form').elements.provider.addEventListener('change', applyProviderPreset); $('#settings-form').elements.api_format.addEventListener('change', applyProviderPreset);
+$('#provider-test').addEventListener('click', async function () {
+  $('#settings-status').textContent = '正在测试当前表单配置…';
+  const formElement = $('#settings-form'); const form = new FormData(formElement); const payload = Object.fromEntries(form.entries());
+  try {
+    const result = await api('/api/config/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: payload.provider, api_format: payload.api_format, base_url: payload.base_url, model: payload.model, proxy: payload.proxy, ca_cert: payload.ca_cert, api_key: payload.api_key || '' }) });
+    $('#settings-status').textContent = result.ok ? '连接成功：' + result.provider + ' · ' + result.api_format + ' · ' + result.model : (result.error_code || '连接未成功') + '：' + result.message;
+  } catch (error) { $('#settings-status').textContent = error.message; }
+});
 $('#conversation-form').addEventListener('submit', sendConversation);
 loadSettings().catch(function () {}); loadProjects().catch(function (error) { showNotice(error.message, 'block'); });

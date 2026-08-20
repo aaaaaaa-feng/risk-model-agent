@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from app import agent as agent_module
-from app.agent import ProviderGateway, _safe_plan_payload, answer_chat, build_safe_evidence, generate_reproducible_code, propose_plan, repair_generated_code, review_generated_code, review_plan
+from app.agent import ProviderGateway, _safe_plan_payload, answer_chat, build_safe_evidence, generate_reproducible_code, propose_plan, provider_presets, repair_generated_code, review_generated_code, review_plan
 from app.tools import registry_manifest, require_tool
 from app.worker import build_cleaning_plan, estimate_table_resources, evaluate_baseline, parse_data_dictionary, profile_table, quality_analysis, read_table, reevaluate_baseline, segment_analysis, select_features, split_frame, target_summary, train_candidates
 
@@ -255,6 +255,91 @@ def test_provider_gateway_sends_only_safe_payload(monkeypatch) -> None:
     assert "test-key" in captured["headers"]["Authorization"]
     assert "f_0001" in captured["json"]["messages"][1]["content"]
     assert "raw_rows" not in captured["json"]["messages"][1]["content"]
+
+
+def test_provider_presets_cover_requested_vendors_and_protocols() -> None:
+    presets = provider_presets()
+    assert {"deepseek", "kimi", "kimi_code", "openai", "anthropic"}.issubset(presets)
+    assert presets["deepseek"]["formats"] == ["openai", "anthropic"]
+    assert presets["kimi_code"]["defaults"]["openai"]["base_url"].endswith("/coding/v1")
+    assert presets["kimi_code"]["defaults"]["anthropic"]["base_url"].endswith("/coding/")
+    assert presets["kimi"]["formats"] == ["openai"]
+
+
+def test_anthropic_gateway_uses_messages_wire_format(monkeypatch) -> None:
+    monkeypatch.setattr(agent_module, "provider_key", lambda: "saved-key-should-not-win")
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"content": [{"type": "text", "text": "{\"status\":\"ok\"}"}], "usage": {"input_tokens": 4, "output_tokens": 3}}
+
+    class Client:
+        def __init__(self, **kwargs):
+            captured["kwargs"] = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers, json):
+            captured.update({"url": url, "headers": headers, "json": json})
+            return Response()
+
+    gateway = ProviderGateway(
+        config={"llm_enabled": True, "api_format": "anthropic", "base_url": "https://api.anthropic.com", "model": "claude-test"},
+        api_key="unsaved-test-key",
+        client_factory=Client,
+    )
+    result = gateway.complete("System guard", {"schema_version": "risk-safe-evidence/v1"})
+    assert result.ok is True
+    assert result.usage["total_tokens"] == 7
+    assert captured["url"] == "https://api.anthropic.com/v1/messages"
+    assert captured["headers"]["x-api-key"] == "unsaved-test-key"
+    assert "Authorization" not in captured["headers"]
+    assert captured["headers"]["anthropic-version"] == "2023-06-01"
+    assert captured["json"]["system"] == "System guard"
+    assert captured["json"]["messages"][0]["role"] == "user"
+
+
+def test_kimi_code_openai_endpoint_and_bearer_header(monkeypatch) -> None:
+    monkeypatch.setattr(agent_module, "provider_key", lambda: "unused")
+    captured = {}
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers, json):
+            captured.update({"url": url, "headers": headers})
+            return Response()
+
+    gateway = ProviderGateway(
+        config={"llm_enabled": True, "provider": "kimi_code", "api_format": "openai", "base_url": "https://api.kimi.com/coding/v1", "model": "kimi-for-coding"},
+        api_key="kimi-code-key",
+        client_factory=Client,
+    )
+    assert gateway.connectivity_check().ok is True
+    assert captured["url"] == "https://api.kimi.com/coding/v1/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer kimi-code-key"
 
 
 def test_safe_plan_aliases_excluded_columns_before_provider_boundary() -> None:

@@ -22,6 +22,25 @@ KEYRING_SERVICE = "risk-model-agent"
 KEYRING_USERNAME = "provider-api-key"
 
 
+def _config_defaults() -> Dict[str, Any]:
+    """Return provider defaults shared by new and migrated local configs."""
+    return {
+        "provider": "custom",
+        "api_format": "openai",
+        "base_url": "",
+        "model": "",
+        "reviewer_model": "",
+        "llm_enabled": False,
+        "proxy": "",
+        "ca_cert": "",
+        "run_token_budget": 0,
+        "monthly_token_budget": 0,
+        "mode": "auto",
+        "api_key_configured": bool(os.getenv("RISK_AGENT_API_KEY")),
+        "secret_storage": "environment" if os.getenv("RISK_AGENT_API_KEY") else "not_configured",
+    }
+
+
 def ensure_runtime() -> None:
     for path in (RUNTIME_DIR, DATA_DIR, SECRETS_DIR):
         path.mkdir(parents=True, exist_ok=True)
@@ -34,24 +53,19 @@ def ensure_runtime() -> None:
 def load_config() -> Dict[str, Any]:
     ensure_runtime()
     if not CONFIG_PATH.exists():
-        return {
-            "provider": "OpenAI-compatible",
-            "base_url": "",
-            "model": "",
-            "reviewer_model": "",
-            "llm_enabled": False,
-            "proxy": "",
-            "ca_cert": "",
-            "run_token_budget": 0,
-            "monthly_token_budget": 0,
-            "mode": "auto",
-            "api_key_configured": bool(os.getenv("RISK_AGENT_API_KEY")),
-            "secret_storage": "environment" if os.getenv("RISK_AGENT_API_KEY") else "not_configured",
-        }
+        return _config_defaults()
     try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        loaded = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            return _config_defaults()
+        defaults = _config_defaults()
+        defaults.update(loaded)
+        # Older V0.1 configs used an OpenAI-compatible provider label without
+        # storing the wire protocol. Preserve that behavior on migration.
+        defaults["api_format"] = str(defaults.get("api_format") or "openai").lower()
+        return defaults
     except (OSError, json.JSONDecodeError):
-        return {}
+        return _config_defaults()
 
 
 def save_config(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -59,6 +73,7 @@ def save_config(payload: Dict[str, Any]) -> Dict[str, Any]:
     current = load_config()
     allowed = {
         "provider",
+        "api_format",
         "base_url",
         "model",
         "reviewer_model",

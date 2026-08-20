@@ -167,10 +167,11 @@
     <div class="modal-backdrop"></div>
     <section class="modal-card">
       <div class="modal-header"><div><span class="section-kicker">本机设置</span><h2>Provider 配置</h2></div><button id="close-settings" class="icon-button">×</button></div>
-      <p class="modal-intro">API Key 只提交到本地服务，界面不会回显完整 Key。当前版本保留 Provider 配置入口，但仍以本地确定性流程作为事实源。</p>
+      <p class="modal-intro">API Key 只提交到本地服务，界面不会回显完整 Key。支持 DeepSeek、Kimi、Kimi Code、OpenAI 和 Anthropic；“测试连接”会用当前表单值探测，不会自动保存。</p>
       <form id="settings-form" class="settings-form">
-        <label>供应商<input name="provider" placeholder="OpenAI-compatible" /></label>
-        <div class="form-two"><label>Base URL<input name="base_url" placeholder="https://api.example.com/v1" /></label><label>主模型<input name="model" placeholder="model-name" /></label></div>
+        <div class="form-two"><label>供应商<select name="provider"><option value="custom">自定义 Provider</option><option value="deepseek">DeepSeek</option><option value="kimi">Kimi 开放平台</option><option value="kimi_code">Kimi Code</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic Claude</option></select></label><label>API 格式<select name="api_format"><option value="openai">OpenAI Chat Completions</option><option value="anthropic">Anthropic Messages</option></select></label></div>
+        <small id="provider-hint" class="muted">可选择预置，也可以使用自定义 Base URL；Kimi 开放平台目前走 OpenAI 格式。</small>
+        <div class="form-two"><label>Base URL<input name="base_url" placeholder="https://api.example.com/v1" /></label><label>主模型<input name="model" placeholder="按供应商账户可用模型填写" /></label></div>
         <div class="form-two"><label>Reviewer 模型<input name="reviewer_model" placeholder="reviewer-model" /></label><label>HTTP 代理<input name="proxy" placeholder="可选" /></label></div>
         <label>API Key<input name="api_key" type="password" placeholder="留空表示不修改" autocomplete="off" /></label>
         <label class="toggle-line"><input name="clear_api_key" type="checkbox" />清除本机已保存的 API Key</label>

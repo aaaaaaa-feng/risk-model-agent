@@ -68,6 +68,9 @@ def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
     tools = client.get("/api/tools").json()
     assert tools["mcp"]["enabled"] is False
     assert any(item["name"] == "segment_analysis" for item in tools["tools"])
+    presets = client.get("/api/config/presets")
+    assert presets.status_code == 200
+    assert {"deepseek", "kimi", "kimi_code", "openai", "anthropic"}.issubset(presets.json()["presets"])
     root = client.get("/")
     assert root.status_code == 200
     assert "风控建模 Agent" in root.text
@@ -163,6 +166,46 @@ def test_health_config_masks_provider_key_and_auto_run_completes() -> None:
     cleared = client.put("/api/config", json={"clear_api_key": True})
     cleared.raise_for_status()
     assert cleared.json()["config"]["api_key"] == ""
+
+
+def test_provider_connectivity_probe_uses_unsaved_form_values(monkeypatch) -> None:
+    captured = {}
+
+    class Result:
+        ok = True
+        error_code = None
+        error_message = None
+        model = "kimi-for-coding"
+
+    class FakeGateway:
+        def __init__(self, config=None, api_key=None):
+            captured["config"] = config
+            captured["api_key"] = api_key
+            self.config = config or {}
+            self.api_format = self.config.get("api_format")
+
+        def connectivity_check(self):
+            return Result()
+
+        def _endpoint(self):
+            return "https://api.kimi.com/coding/v1/chat/completions"
+
+    monkeypatch.setattr(main_module, "ProviderGateway", FakeGateway)
+    response = client.post(
+        "/api/config/test",
+        json={
+            "provider": "kimi_code",
+            "api_format": "openai",
+            "base_url": "https://api.kimi.com/coding/v1",
+            "model": "kimi-for-coding",
+            "api_key": "unsaved-key",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert captured["api_key"] == "unsaved-key"
+    assert captured["config"]["llm_enabled"] is True
+    assert captured["config"]["provider"] == "kimi_code"
 
 
 def test_demo_label_and_reupload_preserve_dataset_versions() -> None:
