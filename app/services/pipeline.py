@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
@@ -17,12 +19,17 @@ from app.agents.reviewer import IndependentReviewer
 from app.core.config import SettingsStore
 from app.core.database import Database, new_id, now_iso
 from app.core.paths import AppPaths, get_paths
-from app.core.security import sha256_bytes
+from app.core.security import sha256_bytes, sha256_file
 from app.providers.gateway import ProviderGateway
 from app.tooling.registry import ToolRegistry
 from app.workers.binning import apply_manual_binning, fit_binning
 from app.workers.io import plan_resources, read_table
 from app.workers.modeling import ModelBundle, available_models, recommend_models, train_candidates
+from app.workers.package_runtime import (
+    SKOPS_POLICY_VERSION,
+    inspect_skops_types,
+    load_skops_model,
+)
 from app.workers.profiling import (
     apply_cleaning,
     cleaning_plan,
@@ -61,21 +68,61 @@ class RunPipeline:
 
     def _register_tools(self) -> None:
         tools: list[tuple[str, str, str, Callable[[str, dict[str, Any]], dict[str, Any]]]] = [
-            ("prepare_target", "target_confirmation", "冻结 0/1 有效样本并提出 Y 证据", self.prepare_target),
+            (
+                "prepare_target",
+                "target_confirmation",
+                "冻结 0/1 有效样本并提出 Y 证据",
+                self.prepare_target,
+            ),
             ("diagnose_data", "data_diagnosis", "本地数据质量、粒度和泄漏诊断", self.diagnose),
             ("apply_cleaning", "cleaning", "按已确认动作生成新的清洗数据版本", self.clean),
             ("propose_split", "split", "推荐 Train/Test/OOT 与客户隔离方案", self.propose_split),
             ("execute_split", "split", "执行并校验样本切分", self.execute_split),
-            ("screen_features", "screening", "Train-only 缺失率、IV、相关性与泄漏筛选", self.screen),
-            ("finalize_screening", "screening", "应用有理由的人工变量恢复", self.finalize_screening),
+            (
+                "screen_features",
+                "screening",
+                "Train-only 缺失率、IV、相关性与泄漏筛选",
+                self.screen,
+            ),
+            (
+                "finalize_screening",
+                "screening",
+                "应用有理由的人工变量恢复",
+                self.finalize_screening,
+            ),
             ("fit_binning", "binning", "Train-only 自动单调分箱", self.bin_features),
             ("finalize_binning", "binning", "验证人工分箱并使下游产物失效", self.finalize_binning),
             ("propose_models", "model_plan", "按资源与 Provider 建议候选模型", self.propose_models),
-            ("finalize_model_plan", "model_plan", "应用用户确认的模型与评分参数", self.finalize_model_plan),
-            ("generate_and_review_code", "code_review", "主 Agent 生成 Notebook，独立 Reviewer 闭环审核", self.generate_and_review_code),
-            ("train_and_review", "training", "本地训练、校准、选型与独立执行质检", self.train_and_review),
-            ("build_and_review_report", "reporting", "生成唯一结构化报告并独立质检", self.build_and_review_report),
-            ("write_artifacts", "reporting", "导出 Web/Excel/HTML/模型包与评分入口", self.write_artifacts),
+            (
+                "finalize_model_plan",
+                "model_plan",
+                "应用用户确认的模型与评分参数",
+                self.finalize_model_plan,
+            ),
+            (
+                "generate_and_review_code",
+                "code_review",
+                "主 Agent 生成 Notebook，独立 Reviewer 闭环审核",
+                self.generate_and_review_code,
+            ),
+            (
+                "train_and_review",
+                "training",
+                "本地训练、校准、选型与独立执行质检",
+                self.train_and_review,
+            ),
+            (
+                "build_and_review_report",
+                "reporting",
+                "生成唯一结构化报告并独立质检",
+                self.build_and_review_report,
+            ),
+            (
+                "write_artifacts",
+                "reporting",
+                "导出 Web/Excel/HTML/模型包与评分入口",
+                self.write_artifacts,
+            ),
         ]
         for name, stage, description, handler in tools:
             self.registry.register(
@@ -101,9 +148,7 @@ class RunPipeline:
             {"split": {"method": "random_stratified"}}, {"issues": evidence.get("issues", [])}
         )
         safe, _ = build_safe_evidence(profile, evidence)
-        review = reviewer.combine(
-            "target", deterministic, reviewer.llm_review("target", safe)
-        )
+        review = reviewer.combine("target", deterministic, reviewer.llm_review("target", safe))
         self._record_review(run_id, review)
         return {
             "target": task["target_column"],
@@ -134,7 +179,9 @@ class RunPipeline:
         deterministic = reviewer.review_plan(
             {
                 "split": {
-                    "method": "time_holdout" if _first_candidate(state["profile"], "time_candidate") else "random_stratified",
+                    "method": "time_holdout"
+                    if _first_candidate(state["profile"], "time_candidate")
+                    else "random_stratified",
                     "time_column": _first_candidate(state["profile"], "time_candidate"),
                 }
             },
@@ -169,7 +216,13 @@ class RunPipeline:
             accepted_set = set(accepted)
             actions = [item for item in actions if item.get("id") in accepted_set]
         if not actions:
-            return {"cleaning_result": {"applied": [], "rows": len(frame), "columns": len(frame.columns)}}
+            return {
+                "cleaning_result": {
+                    "applied": [],
+                    "rows": len(frame),
+                    "columns": len(frame.columns),
+                }
+            }
         cleaned, evidence = apply_cleaning(frame, actions)
         run = self.catalog.require("runs", run_id)
         version = self.catalog.create_dataset_version(
@@ -202,9 +255,7 @@ class RunPipeline:
             {"split": plan}, state["diagnostics"], state.get("screening")
         )
         safe, _ = build_safe_evidence(state["profile"], state["target_evidence"])
-        review = reviewer.combine(
-            "split", deterministic, reviewer.llm_review("split", safe)
-        )
+        review = reviewer.combine("split", deterministic, reviewer.llm_review("split", safe))
         self._record_review(run_id, review)
         return {
             "split_plan": plan,
@@ -245,15 +296,15 @@ class RunPipeline:
         )
         run = self.catalog.require("runs", run_id)
         self.database.update(
-            "target_tasks", run["target_task_id"], {"screening_json": screening, "updated_at": now_iso()}
+            "target_tasks",
+            run["target_task_id"],
+            {"screening_json": screening, "updated_at": now_iso()},
         )
         reviewer = self._reviewer(run_id)
         deterministic = reviewer.review_plan(
             {"split": state["split_plan"]}, state["diagnostics"], screening
         )
-        safe, _ = build_safe_evidence(
-            state["profile"], state["target_evidence"], screening
-        )
+        safe, _ = build_safe_evidence(state["profile"], state["target_evidence"], screening)
         review = reviewer.combine(
             "screening", deterministic, reviewer.llm_review("screening", safe)
         )
@@ -282,7 +333,9 @@ class RunPipeline:
         }
 
     def finalize_screening(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
-        requests = ((state.get("screening_decision") or {}).get("edits") or {}).get("restore_features", [])
+        requests = ((state.get("screening_decision") or {}).get("edits") or {}).get(
+            "restore_features", []
+        )
         screening = state["screening"]
         if requests:
             screening = restore_features(screening, requests)
@@ -290,7 +343,9 @@ class RunPipeline:
             raise ValueError("NO_FEATURES_AFTER_SCREENING")
         run = self.catalog.require("runs", run_id)
         self.database.update(
-            "target_tasks", run["target_task_id"], {"screening_json": screening, "updated_at": now_iso()}
+            "target_tasks",
+            run["target_task_id"],
+            {"screening_json": screening, "updated_at": now_iso()},
         )
         return {"screening": screening}
 
@@ -298,7 +353,9 @@ class RunPipeline:
         frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
         train = frame.iloc[state["split"]["indices"]["train"]]
         binning = fit_binning(train, state["target"], state["screening"]["included"])
-        non_monotonic = [name for name, spec in binning["specs"].items() if not spec.get("monotonic")]
+        non_monotonic = [
+            name for name, spec in binning["specs"].items() if not spec.get("monotonic")
+        ]
         reviewer = self._reviewer(run_id)
         deterministic = {
             "scope": "binning",
@@ -310,22 +367,27 @@ class RunPipeline:
                     "message": "存在未达到绝对单调的变量，可在确认节点人工调整。",
                     "columns": non_monotonic,
                 }
-            ] if non_monotonic else [],
+            ]
+            if non_monotonic
+            else [],
             "evidence": {"fit_scope": "train_only", "binning_version": binning["version"]},
         }
         safe, _ = build_safe_evidence(
             state["profile"], state["target_evidence"], state["screening"]
         )
-        review = reviewer.combine(
-            "binning", deterministic, reviewer.llm_review("binning", safe)
-        )
+        review = reviewer.combine("binning", deterministic, reviewer.llm_review("binning", safe))
         self._record_review(run_id, review)
         return {
             "binning": binning,
             "binning_review": review,
             "binning_gate": {
                 "title": "确认自动分箱",
-                "summary": {"version": binning["version"], "non_monotonic": non_monotonic, "specs": binning["specs"], "review": review},
+                "summary": {
+                    "version": binning["version"],
+                    "non_monotonic": non_monotonic,
+                    "specs": binning["specs"],
+                    "review": review,
+                },
                 "editable": ["manual_specs"],
             },
         }
@@ -340,7 +402,9 @@ class RunPipeline:
                 binning = apply_manual_binning(binning, train, state["target"], column, spec)
         run = self.catalog.require("runs", run_id)
         self.database.update(
-            "target_tasks", run["target_task_id"], {"binning_json": binning, "updated_at": now_iso()}
+            "target_tasks",
+            run["target_task_id"],
+            {"binning_json": binning, "updated_at": now_iso()},
         )
         return {"binning": binning}
 
@@ -363,7 +427,12 @@ class RunPipeline:
                 "base_odds": 20,
                 "pdo": 50,
             },
-            "selection_reference": {"auc": 0.55, "ks": 0.15, "hard_threshold": False, "absolute_ordering_required": True},
+            "selection_reference": {
+                "auc": 0.55,
+                "ks": 0.15,
+                "hard_threshold": False,
+                "absolute_ordering_required": True,
+            },
         }
         safe, aliases = build_safe_evidence(
             state["profile"], state["target_evidence"], state["screening"]
@@ -376,14 +445,21 @@ class RunPipeline:
                 purpose="main_agent_model_plan",
             )
             proposed = payload.get("models", []) if payload else []
-            valid = [name for name in proposed if name in available_models() and available_models()[name]]
+            valid = [
+                name for name in proposed if name in available_models() and available_models()[name]
+            ]
             if valid:
                 plan["models"] = list(dict.fromkeys(["dummy", *valid]))
                 plan["source"] = "llm_reviewed_and_locally_validated"
-                plan["provider_evidence"] = {"model": result.model, "payload_hash": result.payload_hash}
+                plan["provider_evidence"] = {
+                    "model": result.model,
+                    "payload_hash": result.payload_hash,
+                }
         reviewer = self._reviewer(run_id)
         deterministic = reviewer.review_plan(
-            {"split": state["split_plan"], "models": plan["models"]}, state["diagnostics"], state["screening"]
+            {"split": state["split_plan"], "models": plan["models"]},
+            state["diagnostics"],
+            state["screening"],
         )
         llm = reviewer.llm_review("model_plan", safe)
         review = reviewer.combine("model_plan", deterministic, llm)
@@ -400,7 +476,7 @@ class RunPipeline:
         }
 
     def finalize_model_plan(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
-        edits = ((state.get("model_decision") or {}).get("edits") or {})
+        edits = (state.get("model_decision") or {}).get("edits") or {}
         plan = {**state["model_plan"]}
         if "models" in edits:
             availability = available_models()
@@ -413,7 +489,9 @@ class RunPipeline:
         _validate_score_config(plan["score"])
         run = self.catalog.require("runs", run_id)
         self.database.update(
-            "target_tasks", run["target_task_id"], {"model_plan_json": plan, "updated_at": now_iso()}
+            "target_tasks",
+            run["target_task_id"],
+            {"model_plan_json": plan, "updated_at": now_iso()},
         )
         return {"model_plan": plan}
 
@@ -457,8 +535,7 @@ class RunPipeline:
                 "attempted": False,
                 "accepted": False,
                 "feedback_issue_codes": [
-                    str(item.get("code") or "UNSPECIFIED")
-                    for item in combined.get("issues", [])
+                    str(item.get("code") or "UNSPECIFIED") for item in combined.get("issues", [])
                 ],
             }
             if main_gateway.enabled:
@@ -486,17 +563,14 @@ class RunPipeline:
                     if (
                         "<LOCAL_DATASET>" in candidate
                         and dataset["stored_path"] not in candidate
-                        and _generated_spec_matches(
-                            candidate, extract_generated_spec(safe_source)
-                        )
+                        and _generated_spec_matches(candidate, extract_generated_spec(safe_source))
                     ):
                         restored = _restore_generated_code(
                             candidate, dataset["stored_path"], aliases
                         )
                         local_review = reviewer.review_code(restored)
-                        if (
-                            local_review["status"] == "pass"
-                            and _generated_spec_matches(restored, expected_spec)
+                        if local_review["status"] == "pass" and _generated_spec_matches(
+                            restored, expected_spec
                         ):
                             source = restored
                             repair_evidence["accepted"] = True
@@ -512,12 +586,15 @@ class RunPipeline:
                 "scope": "code",
                 "status": "fallback_pass",
                 "issues": combined.get("issues", []),
-                "evidence": {"safe_downgrade": "deterministic_template_after_three_reviewer_rounds"},
+                "evidence": {
+                    "safe_downgrade": "deterministic_template_after_three_reviewer_rounds"
+                },
             }
             self._record_review(run_id, combined)
-        path = self.artifacts.run_dir(
-            self.catalog.require("runs", run_id)["project_id"], run_id
-        ) / "reproducible-modeling.ipynb"
+        path = (
+            self.artifacts.run_dir(self.catalog.require("runs", run_id)["project_id"], run_id)
+            / "reproducible-modeling.ipynb"
+        )
         write_reproducible_notebook(
             path,
             source,
@@ -551,15 +628,26 @@ class RunPipeline:
                 state["profile"], state["target_evidence"], state["screening"], result
             )
             llm = reviewer.llm_review(
-                "execution", {**safe, "repair_round": repair_round, "prior_review_issues": final_review.get("issues", [])}
+                "execution",
+                {
+                    **safe,
+                    "repair_round": repair_round,
+                    "prior_review_issues": final_review.get("issues", []),
+                },
             )
             final_review = reviewer.combine("execution", deterministic, llm)
             final_review["repair_round"] = repair_round
             self._record_review(run_id, final_review)
             if final_review["status"] == "pass":
                 break
-            trained = [item["candidate"] for item in result["candidates"] if item["status"] == "trained"]
-            safe_core = [name for name in ("dummy", "scorecard", "regularized_logistic", "extra_trees") if name in trained or available_models().get(name)]
+            trained = [
+                item["candidate"] for item in result["candidates"] if item["status"] == "trained"
+            ]
+            safe_core = [
+                name
+                for name in ("dummy", "scorecard", "regularized_logistic", "extra_trees")
+                if name in trained or available_models().get(name)
+            ]
             models = list(dict.fromkeys(safe_core))
         if final_review.get("status") != "pass":
             deterministic = reviewer.review_execution(result)
@@ -569,11 +657,19 @@ class RunPipeline:
                 "scope": "execution",
                 "status": "fallback_pass",
                 "issues": final_review.get("issues", []),
-                "evidence": {"safe_downgrade": "locally_validated_model_after_three_reviewer_rounds"},
+                "evidence": {
+                    "safe_downgrade": "locally_validated_model_after_three_reviewer_rounds"
+                },
             }
             self._record_review(run_id, final_review)
         self._bundles[run_id] = bundles
-        return {"model_result": result, "execution_review": final_review, "effective_models": models}
+        bundle_manifest_sha256 = self._persist_bundles(run_id, bundles)
+        return {
+            "model_result": result,
+            "execution_review": final_review,
+            "effective_models": models,
+            "worker_bundle_manifest_sha256": bundle_manifest_sha256,
+        }
 
     def build_and_review_report(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
         run = self.catalog.require("runs", run_id)
@@ -588,7 +684,13 @@ class RunPipeline:
         final_review: dict[str, Any] = {}
         for repair_round in range(1, 4):
             llm = reviewer.llm_review(
-                "report", {**safe, "report_schema": report["schema_version"], "repair_round": repair_round, "prior_review_issues": final_review.get("issues", [])}
+                "report",
+                {
+                    **safe,
+                    "report_schema": report["schema_version"],
+                    "repair_round": repair_round,
+                    "prior_review_issues": final_review.get("issues", []),
+                },
             )
             final_review = reviewer.combine("report", deterministic, llm)
             final_review["repair_round"] = repair_round
@@ -612,6 +714,10 @@ class RunPipeline:
         task = self.catalog.require("target_tasks", run["target_task_id"])
         frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
         bundles = self._bundles.get(run_id)
+        if not bundles:
+            bundles = self._load_bundles(run_id, state.get("worker_bundle_manifest_sha256"))
+            if bundles:
+                self._bundles[run_id] = bundles
         if not bundles or state["model_result"]["champion"] not in bundles:
             replay = self.train_and_review(run_id, state)
             bundles = self._bundles[run_id]
@@ -641,24 +747,120 @@ class RunPipeline:
         run = self.catalog.require("runs", run_id)
         task = self.catalog.require("target_tasks", run["target_task_id"])
         dataset = self.catalog.require("dataset_versions", task["dataset_version_id"])
-        return task, dataset, read_table(Path(dataset["stored_path"]), dataset.get("sheet"))
+        budget = SettingsStore(self.paths).load().memory_budget_mb
+        return (
+            task,
+            dataset,
+            read_table(Path(dataset["stored_path"]), dataset.get("sheet"), memory_budget_mb=budget),
+        )
 
     def _working_frame(self, state: dict[str, Any]) -> pd.DataFrame:
         dataset = self.catalog.require("dataset_versions", state["working_dataset_version_id"])
-        return read_table(Path(dataset["stored_path"]), dataset.get("sheet"))
+        budget = SettingsStore(self.paths).load().memory_budget_mb
+        return read_table(
+            Path(dataset["stored_path"]), dataset.get("sheet"), memory_budget_mb=budget
+        )
 
     def _reviewer(self, run_id: str) -> IndependentReviewer:
         return IndependentReviewer(self._gateway(run_id))
 
+    def _bundle_dir(self, run_id: str) -> Path:
+        run = self.catalog.require("runs", run_id)
+        return self.artifacts.run_dir(run["project_id"], run_id) / ".worker-bundles"
+
+    def _persist_bundles(self, run_id: str, bundles: dict[str, ModelBundle]) -> str:
+        try:
+            import skops.io as sio
+        except ImportError as exc:  # pragma: no cover - dependency contract
+            raise RuntimeError("SKOPS_DEPENDENCY_REQUIRED") from exc
+        destination = self._bundle_dir(run_id)
+        stage = Path(tempfile.mkdtemp(prefix=".worker-bundles-", dir=destination.parent))
+        manifest: dict[str, Any] = {
+            "schema_version": "risk-worker-bundles/v1",
+            "skops_policy": SKOPS_POLICY_VERSION,
+            "bundles": {},
+        }
+        try:
+            for name, bundle in bundles.items():
+                path = stage / f"{name}.skops"
+                sio.dump(bundle.estimator, path)
+                trusted = inspect_skops_types(path, bundle.algorithm)
+                manifest["bundles"][name] = {
+                    "file": path.name,
+                    "sha256": sha256_file(path),
+                    "algorithm": bundle.algorithm,
+                    "name": bundle.name,
+                    "features": bundle.features,
+                    "calibration": bundle.calibration,
+                    "score_config": bundle.score_config,
+                    "metrics": bundle.metrics,
+                    "trusted_types": trusted,
+                }
+            (stage / "manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2, default=_json_serializable),
+                encoding="utf-8",
+            )
+            if destination.exists():
+                shutil.rmtree(destination)
+            stage.replace(destination)
+            return sha256_file(destination / "manifest.json")
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
+
+    def _load_bundles(
+        self, run_id: str, expected_manifest_sha256: str | None
+    ) -> dict[str, ModelBundle]:
+        directory = self._bundle_dir(run_id)
+        manifest_path = directory / "manifest.json"
+        if not expected_manifest_sha256 or not manifest_path.is_file():
+            return {}
+        if sha256_file(manifest_path) != expected_manifest_sha256:
+            raise ValueError("WORKER_BUNDLE_MANIFEST_CHECKSUM_MISMATCH")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            raise ValueError("WORKER_BUNDLE_MANIFEST_INVALID") from exc
+        if (
+            manifest.get("schema_version") != "risk-worker-bundles/v1"
+            or manifest.get("skops_policy") != SKOPS_POLICY_VERSION
+            or not isinstance(manifest.get("bundles"), dict)
+        ):
+            raise ValueError("WORKER_BUNDLE_MANIFEST_INVALID")
+        result: dict[str, ModelBundle] = {}
+        for key, details in manifest["bundles"].items():
+            if not isinstance(details, dict):
+                raise ValueError("WORKER_BUNDLE_MANIFEST_INVALID")
+            filename = str(details.get("file") or "")
+            if Path(filename).name != filename:
+                raise ValueError("WORKER_BUNDLE_PATH_INVALID")
+            path = directory / filename
+            if not path.is_file() or sha256_file(path) != details.get("sha256"):
+                raise ValueError("WORKER_BUNDLE_CHECKSUM_MISMATCH")
+            estimator = load_skops_model(
+                path,
+                str(details.get("algorithm") or ""),
+                details.get("trusted_types") or [],
+            )
+            result[str(key)] = ModelBundle(
+                str(details.get("name") or key),
+                str(details["algorithm"]),
+                estimator,
+                list(details.get("features") or []),
+                str(details.get("calibration") or "uncalibrated"),
+                dict(details.get("score_config") or {}),
+                dict(details.get("metrics") or {}),
+            )
+        return result
+
     def _gateway(self, run_id: str) -> ProviderGateway:
         settings = SettingsStore(self.paths).load()
-        active_requests: list[str] = []
 
-        def request_callback(purpose: str, evidence: dict[str, Any], model: str) -> None:
+        def request_callback(purpose: str, evidence: dict[str, Any], model: str) -> str:
             identifier = new_id("provider")
-            active_requests.append(identifier)
             digest = sha256_bytes(
-                json.dumps(evidence, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+                json.dumps(evidence, ensure_ascii=False, sort_keys=True, default=str).encode(
+                    "utf-8"
+                )
             )
             self.database.insert(
                 "provider_requests",
@@ -674,24 +876,39 @@ class RunPipeline:
                     "created_at": now_iso(),
                 },
             )
+            return identifier
 
-        def usage_callback(tokens: int, model: str) -> None:
-            if active_requests:
-                record = self.database.get("provider_requests", active_requests[-1])
-                usage = dict((record or {}).get("usage") or {})
-                usage.update(total_tokens=tokens, model=model)
-                self.database.update(
-                    "provider_requests", active_requests[-1], {"status": "succeeded", "usage_json": usage}
-                )
+        def result_callback(identifier: str, result: Any) -> None:
+            record = self.database.get("provider_requests", identifier)
+            if not record:
+                return
+            usage = dict(record.get("usage") or {})
+            usage.update(result.usage or {})
+            usage["model"] = result.model
+            if result.upstream_request_id:
+                usage["upstream_request_id"] = result.upstream_request_id
+            self.database.update(
+                "provider_requests",
+                identifier,
+                {
+                    "status": "succeeded" if result.ok else "failed",
+                    "usage_json": usage,
+                    "response_summary": (
+                        "ok"
+                        if result.ok
+                        else str(result.error_code or "PROVIDER_REQUEST_FAILED")[:300]
+                    ),
+                },
+            )
 
         def budget_guard(requested: int) -> str | None:
-            records = self.database.list("provider_requests", {"run_id": run_id}, limit=5000)
+            records = self.database.list_all("provider_requests", {"run_id": run_id})
             used = sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in records)
             if settings.run_token_budget and used + requested > settings.run_token_budget:
                 return "本 Run 的 Token 预算不足。"
             if settings.monthly_token_budget:
                 current_month = now_iso()[:7]
-                monthly = self.database.list("provider_requests", limit=5000)
+                monthly = self.database.list_all("provider_requests")
                 monthly_used = sum(
                     int((item.get("usage") or {}).get("total_tokens") or 0)
                     for item in monthly
@@ -704,8 +921,8 @@ class RunPipeline:
         return ProviderGateway(
             settings=settings,
             budget_guard=budget_guard,
-            usage_callback=usage_callback,
             request_callback=request_callback,
+            result_callback=result_callback,
             paths=self.paths,
         )
 
@@ -748,8 +965,15 @@ def _preferred_customer_key(profile: dict[str, Any]) -> str | None:
     def rank(item: dict[str, Any]) -> tuple[int, int]:
         name = str(item.get("name") or "").lower()
         person_tokens = (
-            "customer", "cust", "user", "person", "borrower", "client",
-            "客户", "用户", "借款人",
+            "customer",
+            "cust",
+            "user",
+            "person",
+            "borrower",
+            "client",
+            "客户",
+            "用户",
+            "借款人",
         )
         order_tokens = ("order", "loan", "application", "contract", "订单", "借据", "申请")
         score = 2 if any(token in name for token in person_tokens) else 0
@@ -763,24 +987,16 @@ def _preferred_customer_key(profile: dict[str, Any]) -> str | None:
     return str(max(candidates, key=rank).get("name"))
 
 
-def _sanitize_generated_code(
-    source: str, dataset_path: str, aliases: dict[str, str]
-) -> str:
+def _sanitize_generated_code(source: str, dataset_path: str, aliases: dict[str, str]) -> str:
     value = source.replace(dataset_path, "<LOCAL_DATASET>")
-    for original, alias in sorted(
-        aliases.items(), key=lambda item: len(item[0]), reverse=True
-    ):
+    for original, alias in sorted(aliases.items(), key=lambda item: len(item[0]), reverse=True):
         value = value.replace(original, alias)
     return value
 
 
-def _restore_generated_code(
-    source: str, dataset_path: str, aliases: dict[str, str]
-) -> str:
+def _restore_generated_code(source: str, dataset_path: str, aliases: dict[str, str]) -> str:
     value = source.replace("<LOCAL_DATASET>", dataset_path)
-    for original, alias in sorted(
-        aliases.items(), key=lambda item: len(item[1]), reverse=True
-    ):
+    for original, alias in sorted(aliases.items(), key=lambda item: len(item[1]), reverse=True):
         value = value.replace(alias, original)
     return value
 
@@ -811,3 +1027,13 @@ def _validate_score_config(config: dict[str, Any]) -> None:
         raise ValueError("SCORE_RANGE_INVALID")
     if float(config["base_odds"]) <= 0 or float(config["pdo"]) <= 0:
         raise ValueError("SCORE_SCALING_INVALID")
+
+
+def _json_serializable(value: Any) -> Any:
+    if hasattr(value, "item"):
+        return value.item()
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    if isinstance(value, Path):
+        return str(value)
+    return str(value)

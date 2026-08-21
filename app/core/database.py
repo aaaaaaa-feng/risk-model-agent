@@ -283,17 +283,34 @@ class Database:
 
     def insert(self, table: str, data: dict[str, Any]) -> dict[str, Any]:
         table = self._table(table)
-        encoded = self._encode(data)
-        columns = ", ".join(encoded)
-        placeholders = ", ".join("?" for _ in encoded)
         with self.transaction() as connection:
-            connection.execute(
-                f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", tuple(encoded.values())
-            )
+            self._insert_on_connection(connection, table, data)
         result = self.get(table, str(data["id"]))
         if result is None:  # pragma: no cover
             raise RuntimeError("INSERT_NOT_VISIBLE")
         return result
+
+    def _insert_on_connection(
+        self, connection: sqlite3.Connection, table: str, data: dict[str, Any]
+    ) -> None:
+        table = self._table(table)
+        encoded = self._encode(data)
+        columns = ", ".join(encoded)
+        placeholders = ", ".join("?" for _ in encoded)
+        connection.execute(
+            f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
+            tuple(encoded.values()),
+        )
+
+    def insert_many_atomic(self, rows: list[tuple[str, dict[str, Any]]]) -> None:
+        """Insert related rows in one SQLite transaction.
+
+        This is intentionally small and table-allowlisted; archive restoration and
+        migrations use it to avoid publishing a partially imported graph.
+        """
+        with self.transaction() as connection:
+            for table, data in rows:
+                self._insert_on_connection(connection, table, data)
 
     def get(self, table: str, identifier: str) -> dict[str, Any] | None:
         table = self._table(table)
@@ -317,6 +334,31 @@ class Database:
             rows = connection.execute(
                 f"SELECT * FROM {table} WHERE {where} ORDER BY {order_by} LIMIT ?",
                 (*filters.values(), min(max(limit, 1), 5000)),
+            ).fetchall()
+        return [self._decode(row) or {} for row in rows]
+
+    def list_all(
+        self,
+        table: str,
+        filters: dict[str, Any] | None = None,
+        order_by: str = "created_at DESC",
+    ) -> list[dict[str, Any]]:
+        """Return a complete internal export without the interactive API cap."""
+        table = self._table(table)
+        filters = filters or {}
+        if not re_safe_order(order_by):
+            raise ValueError("UNSAFE_ORDER_BY")
+        with self.connect() as connection:
+            columns = {
+                str(row["name"])
+                for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if not set(filters).issubset(columns):
+                raise ValueError("UNKNOWN_FILTER_COLUMN")
+            where = " AND ".join(f"{key}=?" for key in filters) or "1=1"
+            rows = connection.execute(
+                f"SELECT * FROM {table} WHERE {where} ORDER BY {order_by}",
+                tuple(filters.values()),
             ).fetchall()
         return [self._decode(row) or {} for row in rows]
 
@@ -344,6 +386,45 @@ class Database:
         table = self._table(table)
         with self.transaction() as connection:
             connection.execute(f"DELETE FROM {table} WHERE id=?", (identifier,))
+
+    def claim_decision(
+        self,
+        run_id: str,
+        decision_id: str,
+        response: dict[str, Any],
+    ) -> bool:
+        """Atomically claim one pending Human-in-the-Loop decision.
+
+        Persisting the response before queueing the graph makes retries
+        compare-and-set safe and lets startup recovery resume a claimed decision
+        even if the process stopped between the database commit and submission.
+        """
+        with self.transaction() as connection:
+            decision_row = connection.execute(
+                "SELECT * FROM decisions WHERE id=? AND run_id=? AND status='pending'",
+                (decision_id, run_id),
+            ).fetchone()
+            run_row = connection.execute(
+                "SELECT status FROM runs WHERE id=?",
+                (run_id,),
+            ).fetchone()
+            if decision_row is None or run_row is None or run_row["status"] != "awaiting_decision":
+                return False
+            payload = json.loads(decision_row["payload_json"] or "{}")
+            payload["response"] = response
+            changed = connection.execute(
+                "UPDATE decisions SET status='submitted', payload_json=? "
+                "WHERE id=? AND status='pending'",
+                (json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str), decision_id),
+            )
+            if changed.rowcount != 1:
+                return False
+            connection.execute(
+                "UPDATE runs SET status='queued', updated_at=? "
+                "WHERE id=? AND status='awaiting_decision'",
+                (now_iso(), run_id),
+            )
+        return True
 
     def append_event(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         with self.transaction() as connection:
@@ -386,9 +467,7 @@ class Database:
     def restore_from_backup(self, source: Path) -> Path:
         """Atomically replace the active database without replaying stale WAL pages."""
         source = source.resolve()
-        staged = self.path.with_name(
-            f".{self.path.name}.restore-{secrets.token_hex(6)}"
-        )
+        staged = self.path.with_name(f".{self.path.name}.restore-{secrets.token_hex(6)}")
         with self._lock:
             try:
                 shutil.copy2(source, staged)

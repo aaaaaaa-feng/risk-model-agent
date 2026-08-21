@@ -1,4 +1,6 @@
 const API_ROOT = "/api/v1";
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+let localSessionToken = "";
 
 export class ApiError extends Error {
   status: number;
@@ -13,7 +15,11 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
+  const method = (init?.method || "GET").toUpperCase();
   if (init?.body && !(init.body instanceof FormData)) headers.set("content-type", "application/json");
+  if (MUTATING_METHODS.has(method) && localSessionToken) {
+    headers.set("x-risk-agent-session", localSessionToken);
+  }
   const response = await fetch(`${API_ROOT}${path}`, { ...init, headers });
   if (!response.ok) {
     let body: any = {};
@@ -24,8 +30,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export async function initializeLocalSession(): Promise<void> {
+  const response = await fetch(`${API_ROOT}/session`, {
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`LOCAL_SESSION_${response.status}`);
+  const body = await response.json() as { request_token?: string };
+  if (!body.request_token) throw new Error("LOCAL_SESSION_TOKEN_MISSING");
+  localSessionToken = body.request_token;
+}
+
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  get: <T>(path: string, init?: RequestInit) => request<T>(path, init),
   post: <T>(path: string, payload?: unknown) => request<T>(path, { method: "POST", body: payload === undefined ? undefined : JSON.stringify(payload) }),
   put: <T>(path: string, payload: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(payload) }),
   patch: <T>(path: string, payload: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(payload) }),

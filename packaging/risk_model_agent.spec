@@ -10,10 +10,10 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 ROOT = Path(SPECPATH).resolve().parent
 datas = [
     (str(ROOT / "frontend" / "dist"), "frontend_dist"),
-    # The exported model package includes a standalone scoring helper.  Python
-    # source modules live inside PyInstaller's archive, so keep this source file
-    # as data at the path expected by ``app.workers.model_package``.
-    (str(ROOT / "app" / "workers" / "scoring.py"), "app/workers"),
+    # Exported model packages copy this standalone runtime as source. Python
+    # modules otherwise live only inside PyInstaller's archive, so keep the file
+    # at the path expected by ``app.workers.model_package``.
+    (str(ROOT / "app" / "workers" / "package_runtime.py"), "app/workers"),
 ]
 binaries = []
 

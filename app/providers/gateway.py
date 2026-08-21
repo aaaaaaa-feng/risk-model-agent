@@ -9,7 +9,7 @@ import httpx
 
 from app.core.config import Settings, SettingsStore
 from app.core.paths import AppPaths
-from app.core.security import sha256_bytes, validate_safe_evidence
+from app.core.security import sanitize_safe_evidence, sha256_bytes, validate_safe_evidence
 
 from .secrets import SecretStore
 
@@ -23,6 +23,8 @@ class ProviderResult:
     model: str = ""
     usage: dict[str, Any] | None = None
     payload_hash: str = ""
+    provider_request_id: str = ""
+    upstream_request_id: str = ""
 
 
 def _parse_json_content(content: str) -> dict[str, Any]:
@@ -46,7 +48,8 @@ class ProviderGateway:
         client_factory: Any = None,
         budget_guard: Callable[[int], str | None] | None = None,
         usage_callback: Callable[[int, str], None] | None = None,
-        request_callback: Callable[[str, dict[str, Any], str], None] | None = None,
+        request_callback: Callable[[str, dict[str, Any], str], str | None] | None = None,
+        result_callback: Callable[[str, ProviderResult], None] | None = None,
         paths: AppPaths | None = None,
     ):
         self.settings = settings or SettingsStore().load()
@@ -55,6 +58,7 @@ class ProviderGateway:
         self._budget_guard = budget_guard
         self._usage_callback = usage_callback
         self._request_callback = request_callback
+        self._result_callback = result_callback
         self._secrets = SecretStore(paths)
 
     @property
@@ -168,14 +172,18 @@ class ProviderGateway:
         allow_disabled_for_test: bool = False,
     ) -> ProviderResult:
         if not self.configured or (not self.settings.llm_enabled and not allow_disabled_for_test):
-            return ProviderResult(False, error_code="PROVIDER_DISABLED", error_message="Provider 未启用或配置不完整")
+            return ProviderResult(
+                False, error_code="PROVIDER_DISABLED", error_message="Provider 未启用或配置不完整"
+            )
         try:
-            validate_safe_evidence(evidence)
+            safe_evidence = sanitize_safe_evidence(evidence)
             validate_safe_evidence({"prompt": system_prompt})
         except ValueError as exc:
             return ProviderResult(False, error_code="DLP_BLOCK", error_message=str(exc))
         selected_model = model or self.settings.model
-        safe_serialized = json.dumps(evidence, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        safe_serialized = json.dumps(safe_evidence, ensure_ascii=False, sort_keys=True).encode(
+            "utf-8"
+        )
         payload_hash = sha256_bytes(safe_serialized)
         if self._budget_guard:
             reason = self._budget_guard(max_tokens)
@@ -187,46 +195,90 @@ class ProviderGateway:
                     model=selected_model,
                     payload_hash=payload_hash,
                 )
+        provider_request_id = ""
         if self._request_callback:
-            self._request_callback(purpose, evidence, selected_model)
+            provider_request_id = str(
+                self._request_callback(purpose, safe_evidence, selected_model) or ""
+            )
         client_kwargs: dict[str, Any] = {"timeout": httpx.Timeout(45, connect=10)}
         if self.settings.proxy:
             client_kwargs["proxy"] = self.settings.proxy
         if self.settings.ca_cert:
             client_kwargs["verify"] = self.settings.ca_cert
+        result: ProviderResult | None = None
         try:
             with self._client_factory(**client_kwargs) as client:
                 response = client.post(
                     self.endpoint(),
                     headers=self._headers(),
-                    json=self._body(system_prompt, evidence, selected_model, max_tokens),
+                    json=self._body(system_prompt, safe_evidence, selected_model, max_tokens),
                 )
                 response.raise_for_status()
                 content, usage = self._response(response.json())
+                headers = getattr(response, "headers", {}) or {}
+                upstream_request_id = str(
+                    headers.get("x-request-id")
+                    or headers.get("request-id")
+                    or headers.get("x-amzn-requestid")
+                    or ""
+                )
             if self._usage_callback:
                 self._usage_callback(int(usage.get("total_tokens") or 0), selected_model)
-            return ProviderResult(True, content, model=selected_model, usage=usage, payload_hash=payload_hash)
+            result = ProviderResult(
+                True,
+                content,
+                model=selected_model,
+                usage=usage,
+                payload_hash=payload_hash,
+                provider_request_id=provider_request_id,
+                upstream_request_id=upstream_request_id,
+            )
         except httpx.HTTPStatusError as exc:
             code = "PROVIDER_HTTP_ERROR"
             if exc.response.status_code in {401, 403}:
                 code = "PROVIDER_AUTH_FAILED"
             elif exc.response.status_code == 429:
                 code = "PROVIDER_RATE_LIMITED"
-            return ProviderResult(
+            result = ProviderResult(
                 False,
                 error_code=code,
                 error_message=f"HTTP {exc.response.status_code}",
                 model=selected_model,
                 payload_hash=payload_hash,
+                provider_request_id=provider_request_id,
+                upstream_request_id=str(exc.response.headers.get("x-request-id") or ""),
             )
         except (httpx.HTTPError, OSError, ValueError, TypeError) as exc:
-            return ProviderResult(
+            result = ProviderResult(
                 False,
                 error_code="PROVIDER_REQUEST_FAILED",
                 error_message=str(exc)[:300],
                 model=selected_model,
                 payload_hash=payload_hash,
+                provider_request_id=provider_request_id,
             )
+        except Exception as exc:  # provider adapters must still close their trace
+            result = ProviderResult(
+                False,
+                error_code="PROVIDER_REQUEST_FAILED",
+                error_message=type(exc).__name__,
+                model=selected_model,
+                payload_hash=payload_hash,
+                provider_request_id=provider_request_id,
+            )
+        finally:
+            if provider_request_id and self._result_callback:
+                final_result = result or ProviderResult(
+                    False,
+                    error_code="PROVIDER_REQUEST_INTERRUPTED",
+                    model=selected_model,
+                    payload_hash=payload_hash,
+                    provider_request_id=provider_request_id,
+                )
+                self._result_callback(provider_request_id, final_result)
+        if result is None:  # pragma: no cover - BaseException is re-raised after finally
+            raise RuntimeError("PROVIDER_RESULT_MISSING")
+        return result
 
     def complete_json(
         self,
@@ -244,11 +296,13 @@ class ProviderGateway:
             result.ok = False
             result.error_code = "PROVIDER_SCHEMA_INVALID"
             result.error_message = str(exc)[:300]
+            if result.provider_request_id and self._result_callback:
+                self._result_callback(result.provider_request_id, result)
             return None, result
 
     def connectivity_check(self) -> ProviderResult:
         return self.complete(
-            "Return exactly a JSON object: {\"status\":\"ok\"}.",
+            'Return exactly a JSON object: {"status":"ok"}.',
             {"health_check": True, "schema_version": "provider-health/v1"},
             max_tokens=32,
             purpose="connectivity_check",

@@ -147,7 +147,11 @@ def _preprocessor(frame: pd.DataFrame, features: Sequence[str], scale: bool) -> 
 
 def available_models() -> dict[str, bool]:
     result = {name: True for name in SUPPORTED_MODELS}
-    for name, module in (("xgboost", "xgboost"), ("lightgbm", "lightgbm"), ("catboost", "catboost")):
+    for name, module in (
+        ("xgboost", "xgboost"),
+        ("lightgbm", "lightgbm"),
+        ("catboost", "catboost"),
+    ):
         try:
             __import__(module)
         except ImportError:
@@ -291,6 +295,7 @@ def _candidate(
                         random_seed=42,
                         verbose=False,
                         thread_count=1,
+                        allow_writing_files=False,
                     ),
                 ),
             ]
@@ -298,11 +303,20 @@ def _candidate(
     raise ValueError(f"UNSUPPORTED_MODEL: {name}")
 
 
-def _calibrators(estimator: Any, rows: int, positives: int) -> list[tuple[str, Any]]:
+def _calibrators(
+    estimator: Any, rows: int, positives: int, algorithm: str
+) -> list[tuple[str, Any]]:
     candidates: list[tuple[str, Any]] = [("uncalibrated", clone(estimator))]
+    # The deployable scorecard is a transparent JSON WOE + logistic rule set.
+    # Wrapping it in cross-validated calibration would require serializing several
+    # fold-specific scorecards and would no longer be a conventional scorecard.
+    if algorithm == "scorecard":
+        return candidates
     candidates.append(("platt", CalibratedClassifierCV(clone(estimator), method="sigmoid", cv=3)))
     if rows >= 500 and positives >= 50:
-        candidates.append(("isotonic", CalibratedClassifierCV(clone(estimator), method="isotonic", cv=3)))
+        candidates.append(
+            ("isotonic", CalibratedClassifierCV(clone(estimator), method="isotonic", cv=3))
+        )
     return candidates
 
 
@@ -347,7 +361,7 @@ def _fit_one_candidate(
     oof_metrics = binary_metrics(train[target].to_numpy(dtype=int), oof_probability)
     calibration_candidates: list[dict[str, Any]] = []
     fitted: dict[str, Any] = {}
-    for calibration_name, estimator in _calibrators(base, len(train), positive):
+    for calibration_name, estimator in _calibrators(base, len(train), positive, name):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             estimator.fit(train[list(features)], train[target].astype(int))
@@ -357,12 +371,8 @@ def _fit_one_candidate(
         fitted[calibration_name] = estimator
     calibration_candidates.sort(
         key=lambda item: (
-            item["metrics"].get("brier")
-            if item["metrics"].get("brier") is not None
-            else 99,
-            item["metrics"].get("log_loss")
-            if item["metrics"].get("log_loss") is not None
-            else 99,
+            item["metrics"].get("brier") if item["metrics"].get("brier") is not None else 99,
+            item["metrics"].get("log_loss") if item["metrics"].get("log_loss") is not None else 99,
         )
     )
     selected_calibration = calibration_candidates[0]["method"]
@@ -376,9 +386,7 @@ def _fit_one_candidate(
         partition_metrics[partition_name] = binary_metrics(
             sample[target].to_numpy(dtype=int), probability
         )
-        partition_lift[partition_name] = lift_table(
-            sample[target].to_numpy(dtype=int), probability
-        )
+        partition_lift[partition_name] = lift_table(sample[target].to_numpy(dtype=int), probability)
     monotonic = score_monotonicity(partition_lift["test"])
     stability = psi(probabilities["train"], probabilities["test"])
     selection_score = _selection_score(partition_metrics["test"], monotonic)
@@ -428,7 +436,11 @@ def train_candidates(
 ) -> tuple[dict[str, Any], dict[str, ModelBundle]]:
     selected_models = list(models or recommend_models(resource))
     availability = available_models()
-    selected_models = [name for name in selected_models if name in SUPPORTED_MODELS and availability.get(name, True)]
+    selected_models = [
+        name
+        for name in selected_models
+        if name in SUPPORTED_MODELS and availability.get(name, True)
+    ]
     if not selected_models:
         raise ValueError("NO_AVAILABLE_MODELS")
     indices = {key: np.asarray(value, dtype=int) for key, value in split["indices"].items()}
@@ -475,9 +487,7 @@ def train_candidates(
         champion["oot_metrics"] = binary_metrics(oot[target].to_numpy(dtype=int), oot_probability)
         champion["lift"]["oot"] = lift_table(oot[target].to_numpy(dtype=int), oot_probability)
         champion["oot_monotonicity"] = score_monotonicity(champion["lift"]["oot"])
-        champion["test_oot_score_psi"] = psi(
-            champion_bundle.predict_proba(test), oot_probability
-        )
+        champion["test_oot_score_psi"] = psi(champion_bundle.predict_proba(test), oot_probability)
         champion["oot_calibration"] = calibration_table(
             oot[target].to_numpy(dtype=int), oot_probability
         )

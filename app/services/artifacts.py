@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,11 @@ from app.workers.binning import bin_report
 from app.workers.io import read_table, write_table
 from app.workers.model_package import build_model_package
 from app.workers.modeling import ModelBundle
+from app.workers.package_runtime import (
+    safe_extract_model_package,
+    score_package_directory,
+    validate_frame_contract,
+)
 from app.workers.reporting import (
     build_report,
     write_report_excel,
@@ -90,10 +96,13 @@ class ArtifactService:
         self, run: dict[str, Any], report: dict[str, Any]
     ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         directory = self.run_dir(run["project_id"], run["id"])
-        paths = [directory / "model-report.json", directory / "model-report.xlsx", directory / "model-report.html"]
+        paths = [
+            directory / "model-report.json",
+            directory / "model-report.xlsx",
+            directory / "model-report.html",
+        ]
         declared = {
-            (item.get("name"), item.get("kind")): item
-            for item in report.get("artifacts", [])
+            (item.get("name"), item.get("kind")): item for item in report.get("artifacts", [])
         }
         for path in paths:
             declared[(path.name, _kind(path))] = {"name": path.name, "kind": _kind(path)}
@@ -115,11 +124,21 @@ class ArtifactService:
         model_name = f"{task['target_column']}-{bundle.algorithm}-{run['id'][-6:]}"
         bundle.name = model_name
         contract = {
-            "schema_version": "risk-field-contract/v1",
+            "schema_version": "risk-field-contract/v2",
             "model_name": model_name,
             "target_excluded": task["target_column"],
             "required_fields": bundle.features,
             "dtypes": {column: str(frame[column].dtype) for column in bundle.features},
+            "field_types": {
+                column: (
+                    "numeric"
+                    if pd.api.types.is_numeric_dtype(frame[column])
+                    else "datetime"
+                    if pd.api.types.is_datetime64_any_dtype(frame[column])
+                    else "categorical"
+                )
+                for column in bundle.features
+            },
             "missing_policy": "pipeline_imputation_or_woe_missing_bin",
             "unknown_category_policy": "ignore_or_other_bin",
             "score_config": bundle.score_config,
@@ -131,7 +150,6 @@ class ArtifactService:
             directory / f"{model_name}-model-package.zip",
             dependencies,
         )
-        executable = package.parent / f"{package.stem}_contents" / "scoring_pipeline.skops"
         model_version = self.database.insert(
             "model_versions",
             {
@@ -142,9 +160,9 @@ class ArtifactService:
                 "algorithm": bundle.algorithm,
                 "status": "ready",
                 "metrics_json": bundle.metrics,
-                "artifact_path": str(executable),
+                "artifact_path": str(package),
                 "contract_json": contract,
-                "checksum": sha256_file(executable),
+                "checksum": sha256_file(package),
                 "champion": True,
                 "created_at": now_iso(),
             },
@@ -163,25 +181,36 @@ class ArtifactService:
         if asset["project_id"] != run["project_id"]:
             raise ValueError("CROSS_PROJECT_SCORING_FORBIDDEN")
         frame = read_table(Path(asset["stored_path"]), asset.get("sheet"))
-        contract = model["contract"]
-        missing = sorted(set(contract["required_fields"]) - set(frame.columns))
-        if missing:
-            raise ValueError(f"MISSING_REQUIRED_FIELDS: {missing}")
-        executable = Path(model["artifact_path"])
-        if sha256_file(executable) != model["checksum"]:
+        artifact_path = Path(model["artifact_path"])
+        if not artifact_path.is_file() or sha256_file(artifact_path) != model["checksum"]:
             raise ValueError("MODEL_ARTIFACT_CHECKSUM_MISMATCH")
-        try:
-            import skops.io as sio
-        except ImportError as exc:  # pragma: no cover - dependency contract
-            raise RuntimeError("SKOPS_DEPENDENCY_REQUIRED") from exc
-        trusted = sio.get_untrusted_types(file=executable)
-        estimator = sio.load(executable, trusted=trusted)
-        probability = estimator.predict_proba(frame[contract["required_fields"]])[:, 1]
+        if artifact_path.suffix.lower() == ".zip":
+            with tempfile.TemporaryDirectory(prefix="risk-model-score-") as temporary:
+                package_root = safe_extract_model_package(
+                    artifact_path, Path(temporary) / "package"
+                )
+                probability, contract, score_config, manifest = score_package_directory(
+                    package_root, frame
+                )
+        else:
+            # Read-only compatibility for checksum-verified V1 model records.
+            package_root = artifact_path.parent
+            probability, contract, score_config, manifest = score_package_directory(
+                package_root, frame, allow_legacy=True
+            )
+        if (
+            manifest.get("model_name") != model["name"]
+            or manifest.get("algorithm") != model["algorithm"]
+            or contract != model["contract"]
+            or score_config != dict(contract.get("score_config") or {})
+        ):
+            raise ValueError("MODEL_PACKAGE_DATABASE_CONTRACT_MISMATCH")
+        validate_frame_contract(frame, contract)
         scored, evidence = append_scores(
             frame,
             probability,
             model["name"],
-            _score_config(model),
+            score_config,
         )
         identifier = new_id("score")
         destination = self.paths.project_dir(run["project_id"]) / "scores" / f"{identifier}.csv"
@@ -230,9 +259,7 @@ class ArtifactService:
         )
 
     def _refresh(self, artifact: dict[str, Any], path: Path) -> dict[str, Any]:
-        return self.database.update(
-            "artifacts", artifact["id"], {"checksum": sha256_file(path)}
-        )
+        return self.database.update("artifacts", artifact["id"], {"checksum": sha256_file(path)})
 
 
 def _kind(path: Path) -> str:
@@ -241,7 +268,15 @@ def _kind(path: Path) -> str:
 
 def _dependency_lock() -> list[str]:
     names = [
-        "python", "numpy", "pandas", "scikit-learn", "skops", "xgboost", "lightgbm", "catboost"
+        "python",
+        "numpy",
+        "pandas",
+        "scikit-learn",
+        "skops",
+        "openpyxl",
+        "xgboost",
+        "lightgbm",
+        "catboost",
     ]
     values = [f"python=={__import__('platform').python_version()}"]
     for name in names[1:]:

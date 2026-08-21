@@ -74,7 +74,11 @@ class CatalogService:
 
     def update_project(self, project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self.get_project(project_id)
-        allowed = {key: payload[key] for key in ("name", "description", "mode", "metadata_json") if key in payload}
+        allowed = {
+            key: payload[key]
+            for key in ("name", "description", "mode", "metadata_json")
+            if key in payload
+        }
         if "mode" in allowed and allowed["mode"] not in {"semi_trusted", "fully_trusted"}:
             raise ValueError("PROJECT_MODE_INVALID")
         allowed["updated_at"] = now_iso()
@@ -144,11 +148,17 @@ class CatalogService:
                 "rows": estimate.get("rows"),
                 "columns": estimate.get("columns"),
                 "status": status,
-                "metadata_json": {**(metadata or {}), "sheets": estimate.get("sheets", []), "resource_plan": estimate.get("resource_plan")},
+                "metadata_json": {
+                    **(metadata or {}),
+                    "sheets": estimate.get("sheets", []),
+                    "resource_plan": estimate.get("resource_plan"),
+                },
                 "created_at": now_iso(),
             },
         )
-        self.database.update("projects", project_id, {"status": "data_imported", "updated_at": now_iso()})
+        self.database.update(
+            "projects", project_id, {"status": "data_imported", "updated_at": now_iso()}
+        )
         return asset
 
     def choose_asset_sheet(self, asset_id: str, sheet: str) -> dict[str, Any]:
@@ -162,7 +172,11 @@ class CatalogService:
                 "rows": estimate["rows"],
                 "columns": estimate["columns"],
                 "status": "ready",
-                "metadata_json": {**asset.get("metadata", {}), "sheets": estimate.get("sheets", []), "resource_plan": estimate["resource_plan"]},
+                "metadata_json": {
+                    **asset.get("metadata", {}),
+                    "sheets": estimate.get("sheets", []),
+                    "resource_plan": estimate["resource_plan"],
+                },
             },
         )
 
@@ -171,7 +185,9 @@ class CatalogService:
         dictionary_asset = self.require("data_assets", dictionary_asset_id)
         if asset["project_id"] != dictionary_asset["project_id"]:
             raise ValueError("CROSS_PROJECT_DICTIONARY_FORBIDDEN")
-        dictionary_frame = read_table(Path(dictionary_asset["stored_path"]), dictionary_asset.get("sheet"))
+        dictionary_frame = read_table(
+            Path(dictionary_asset["stored_path"]), dictionary_asset.get("sheet")
+        )
         dictionary = parse_data_dictionary(dictionary_frame)
         metadata = dict(asset.get("metadata") or {})
         metadata["dictionary_asset_id"] = dictionary_asset_id
@@ -189,7 +205,11 @@ class CatalogService:
             frame,
             label or f"{asset['name']} · 原始版本",
             parent_ids=[asset_id],
-            lineage={"kind": "materialize_asset", "asset_id": asset_id, "source_sha256": asset["sha256"]},
+            lineage={
+                "kind": "materialize_asset",
+                "asset_id": asset_id,
+                "source_sha256": asset["sha256"],
+            },
             dictionary=dictionary,
         )
 
@@ -329,7 +349,9 @@ class CatalogService:
         parents = [base_asset["id"]]
         dictionary_fields: dict[str, Any] = {}
         dictionary_mapping: dict[str, Any] = {}
-        for name, value in ((base_asset.get("metadata") or {}).get("dictionary") or {}).get("fields", {}).items():
+        for name, value in (
+            ((base_asset.get("metadata") or {}).get("dictionary") or {}).get("fields", {}).items()
+        ):
             dictionary_fields[name] = value
         for raw in plan["steps"]:
             step = JoinStep(**raw)
@@ -501,35 +523,43 @@ def serialize_project_resources(database: Database, project_id: str) -> dict[str
         "notebooks",
         "score_jobs",
     ):
-        payload[table] = database.list(table, {"project_id": project_id}, limit=5000)
+        payload[table] = database.list_all(table, {"project_id": project_id})
     run_ids = [row["id"] for row in payload["runs"]]
     conversation_ids = [row["id"] for row in payload["conversations"]]
-    for table in ("checkpoints", "review_records", "model_versions", "artifacts", "decisions", "events"):
+    for table in (
+        "checkpoints",
+        "review_records",
+        "model_versions",
+        "artifacts",
+        "decisions",
+        "events",
+        "provider_requests",
+    ):
         payload[table] = [
             item
             for run_id in run_ids
-            for item in database.list(table, {"run_id": run_id}, order_by="created_at ASC", limit=5000)
+            for item in database.list_all(table, {"run_id": run_id}, order_by="created_at ASC")
         ]
     payload["conversation_messages"] = [
         item
         for conversation_id in conversation_ids
-        for item in database.list(
-            "conversation_messages", {"conversation_id": conversation_id}, order_by="created_at ASC", limit=5000
+        for item in database.list_all(
+            "conversation_messages", {"conversation_id": conversation_id}, order_by="created_at ASC"
         )
     ]
     payload["conversation_events"] = [
         item
         for conversation_id in conversation_ids
-        for item in database.list(
-            "conversation_events", {"conversation_id": conversation_id}, order_by="seq ASC", limit=5000
+        for item in database.list_all(
+            "conversation_events", {"conversation_id": conversation_id}, order_by="seq ASC"
         )
     ]
     message_ids = [item["id"] for item in payload["conversation_messages"]]
     payload["message_feedback"] = [
         item
         for message_id in message_ids
-        for item in database.list(
-            "message_feedback", {"message_id": message_id}, order_by="created_at ASC", limit=100
+        for item in database.list_all(
+            "message_feedback", {"message_id": message_id}, order_by="created_at ASC"
         )
     ]
     return json.loads(json.dumps(payload, ensure_ascii=False, default=str))

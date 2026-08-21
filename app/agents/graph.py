@@ -11,6 +11,7 @@ from app.core.database import Database, new_id, now_iso
 from app.core.paths import AppPaths, get_paths
 from app.services.catalog import CatalogService
 from app.services.pipeline import RunPipeline
+from app.workers.process_runner import WorkerProcessRunner
 
 
 class RunState(TypedDict, total=False):
@@ -59,11 +60,18 @@ class RunState(TypedDict, total=False):
     effective_models: list[str]
     model_version_id: str
     package_manifest: dict[str, Any]
+    worker_bundle_manifest_sha256: str
     artifact_ids: list[str]
 
 
 TOOL_NODES = [
-    ("prepare_target", "target_confirmation", "main_agent", "prepare_target", "已检查 Y 与有效样本"),
+    (
+        "prepare_target",
+        "target_confirmation",
+        "main_agent",
+        "prepare_target",
+        "已检查 Y 与有效样本",
+    ),
     ("diagnose", "data_diagnosis", "main_agent", "diagnose_data", "已完成建模前诊断"),
     ("clean", "cleaning", "local_worker", "apply_cleaning", "已生成清洗数据版本"),
     ("propose_split", "split", "main_agent", "propose_split", "已提出样本切分方案"),
@@ -74,10 +82,34 @@ TOOL_NODES = [
     ("finalize_binning", "binning", "main_agent", "finalize_binning", "已冻结分箱版本"),
     ("propose_models", "model_plan", "main_agent", "propose_models", "已提出候选模型与评分方案"),
     ("finalize_models", "model_plan", "main_agent", "finalize_model_plan", "已冻结建模方案"),
-    ("code_review", "code_review", "reviewer_agent", "generate_and_review_code", "代码已完成独立质检"),
-    ("train_review", "training", "reviewer_agent", "train_and_review", "训练、校准与执行质检已完成"),
-    ("report_review", "reporting", "reviewer_agent", "build_and_review_report", "结构化报告已完成独立质检"),
-    ("write_artifacts", "reporting", "local_worker", "write_artifacts", "报告、模型包与评分入口已生成"),
+    (
+        "code_review",
+        "code_review",
+        "reviewer_agent",
+        "generate_and_review_code",
+        "代码已完成独立质检",
+    ),
+    (
+        "train_review",
+        "training",
+        "reviewer_agent",
+        "train_and_review",
+        "训练、校准与执行质检已完成",
+    ),
+    (
+        "report_review",
+        "reporting",
+        "reviewer_agent",
+        "build_and_review_report",
+        "结构化报告已完成独立质检",
+    ),
+    (
+        "write_artifacts",
+        "reporting",
+        "local_worker",
+        "write_artifacts",
+        "报告、模型包与评分入口已生成",
+    ),
 ]
 
 GATES = {
@@ -102,6 +134,7 @@ class RunEngine:
         self.database = database or Database(paths=self.paths)
         self.catalog = catalog or CatalogService(self.database, self.paths)
         self.pipeline = pipeline or RunPipeline(self.database, self.paths, self.catalog)
+        self.worker = WorkerProcessRunner(self.paths)
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="risk-model-worker")
         self._submit_lock = threading.RLock()
         self._checkpointer, self.persistence_mode = self._create_checkpointer()
@@ -226,7 +259,9 @@ class RunEngine:
         self._submit(identifier, state)
         return self.catalog.require("runs", identifier)
 
-    def resume(self, run_id: str, decision_id: str, approved: bool, edits: dict[str, Any] | None = None) -> dict[str, Any]:
+    def resume(
+        self, run_id: str, decision_id: str, approved: bool, edits: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         run = self.catalog.require("runs", run_id)
         decision = self.catalog.require("decisions", decision_id)
         if decision["run_id"] != run_id or decision["status"] != "pending":
@@ -236,7 +271,8 @@ class RunEngine:
         from langgraph.types import Command
 
         response = {"decision_id": decision_id, "approved": approved, "edits": edits or {}}
-        self.database.update("runs", run_id, {"status": "queued", "updated_at": now_iso()})
+        if not self.database.claim_decision(run_id, decision_id, response):
+            raise ValueError("DECISION_NOT_PENDING")
         self._submit(run_id, Command(resume=response))
         return self.catalog.require("runs", run_id)
 
@@ -288,25 +324,57 @@ class RunEngine:
             self.database.update(
                 "runs",
                 run_id,
-                {"status": "running", "stage": stage, "node": node, "started_at": self.catalog.require("runs", run_id).get("started_at") or now_iso(), "updated_at": now_iso()},
+                {
+                    "status": "running",
+                    "stage": stage,
+                    "node": node,
+                    "started_at": self.catalog.require("runs", run_id).get("started_at")
+                    or now_iso(),
+                    "updated_at": now_iso(),
+                },
             )
             self.database.append_event(
                 run_id,
-                {"stage": stage, "node": node, "agent": agent, "tool": tool, "status": "running", "summary": f"正在执行：{summary}", "evidence": {"tool_contract": tool}},
+                {
+                    "stage": stage,
+                    "node": node,
+                    "agent": agent,
+                    "tool": tool,
+                    "status": "running",
+                    "summary": f"正在执行：{summary}",
+                    "evidence": {"tool_contract": tool},
+                },
             )
-            update = self.pipeline.invoke(tool, run_id, dict(state))
+            update = self.worker.invoke(tool, run_id, dict(state))
             merged = _jsonable({**state, **update})
             progress = (_node_position(node) + 1) / len(TOOL_NODES)
             event = self.database.append_event(
                 run_id,
-                {"stage": stage, "node": node, "agent": agent, "tool": tool, "status": "completed", "summary": summary, "evidence": {"result_keys": sorted(update), "checkpoint": True}},
+                {
+                    "stage": stage,
+                    "node": node,
+                    "agent": agent,
+                    "tool": tool,
+                    "status": "completed",
+                    "summary": summary,
+                    "evidence": {"result_keys": sorted(update), "checkpoint": True},
+                },
             )
             self.database.insert(
                 "checkpoints",
-                {"id": new_id("chk"), "run_id": run_id, "node": node, "seq": event["seq"], "state_json": merged, "created_at": now_iso()},
+                {
+                    "id": new_id("chk"),
+                    "run_id": run_id,
+                    "node": node,
+                    "seq": event["seq"],
+                    "state_json": merged,
+                    "created_at": now_iso(),
+                },
             )
             self.database.update(
-                "runs", run_id, {"state_json": merged, "progress": min(progress, 0.98), "updated_at": now_iso()}
+                "runs",
+                run_id,
+                {"state_json": merged, "progress": min(progress, 0.98), "updated_at": now_iso()},
             )
             return update
 
@@ -321,7 +389,9 @@ class RunEngine:
             existing = [
                 item
                 for item in self.database.list("decisions", {"run_id": run_id}, limit=500)
-                if item["stage"] == stage and item["kind"] == node and item["status"] == "pending"
+                if item["stage"] == stage
+                and item["kind"] == node
+                and item["status"] in {"pending", "submitted"}
             ]
             if existing:
                 decision = existing[-1]
@@ -339,19 +409,47 @@ class RunEngine:
                         "created_at": now_iso(),
                     },
                 )
-            if state["mode"] == "fully_trusted":
-                response = {"decision_id": decision["id"], "approved": True, "edits": {}, "source": "fully_trusted_auto_approval"}
+            if decision["status"] == "submitted":
+                response = (decision.get("payload") or {}).get("response")
+            elif state["mode"] == "fully_trusted":
+                response = {
+                    "decision_id": decision["id"],
+                    "approved": True,
+                    "edits": {},
+                    "source": "fully_trusted_auto_approval",
+                }
             else:
                 if not existing:
                     self.database.append_event(
                         run_id,
-                        {"stage": stage, "node": node, "agent": "main_agent", "tool": None, "status": "awaiting_decision", "summary": details["title"], "evidence": {"decision_id": decision["id"], "review_completed": True}},
+                        {
+                            "stage": stage,
+                            "node": node,
+                            "agent": "main_agent",
+                            "tool": None,
+                            "status": "awaiting_decision",
+                            "summary": details["title"],
+                            "evidence": {"decision_id": decision["id"], "review_completed": True},
+                        },
                     )
                 self.database.update(
-                    "runs", run_id, {"status": "awaiting_decision", "stage": stage, "node": node, "updated_at": now_iso()}
+                    "runs",
+                    run_id,
+                    {
+                        "status": "awaiting_decision",
+                        "stage": stage,
+                        "node": node,
+                        "updated_at": now_iso(),
+                    },
                 )
                 response = interrupt(
-                    {"decision_id": decision["id"], "stage": stage, "title": details["title"], "summary": details["summary"], "editable": details.get("editable", [])}
+                    {
+                        "decision_id": decision["id"],
+                        "stage": stage,
+                        "title": details["title"],
+                        "summary": details["summary"],
+                        "editable": details.get("editable", []),
+                    }
                 )
             if not isinstance(response, dict) or response.get("decision_id") != decision["id"]:
                 raise ValueError("DECISION_RESPONSE_INVALID")
@@ -360,23 +458,53 @@ class RunEngine:
             self.database.update(
                 "decisions",
                 decision["id"],
-                {"status": status, "payload_json": {**details, "response": response}, "resolved_at": now_iso()},
+                {
+                    "status": status,
+                    "payload_json": {**details, "response": response},
+                    "resolved_at": now_iso(),
+                },
             )
             if not approved:
                 self.database.update(
-                    "runs", run_id, {"status": "blocked", "stage": stage, "node": node, "updated_at": now_iso(), "finished_at": now_iso()}
+                    "runs",
+                    run_id,
+                    {
+                        "status": "blocked",
+                        "stage": stage,
+                        "node": node,
+                        "updated_at": now_iso(),
+                        "finished_at": now_iso(),
+                    },
                 )
                 self.database.update(
-                    "target_tasks", state["target_task_id"], {"status": "blocked", "updated_at": now_iso()}
+                    "target_tasks",
+                    state["target_task_id"],
+                    {"status": "blocked", "updated_at": now_iso()},
                 )
                 self.database.append_event(
                     run_id,
-                    {"stage": stage, "node": node, "agent": "human", "tool": None, "status": "blocked", "summary": "用户未批准当前阶段，Run 已安全停止", "evidence": {"decision_id": decision["id"]}},
+                    {
+                        "stage": stage,
+                        "node": node,
+                        "agent": "human",
+                        "tool": None,
+                        "status": "blocked",
+                        "summary": "用户未批准当前阶段，Run 已安全停止",
+                        "evidence": {"decision_id": decision["id"]},
+                    },
                 )
                 return {output_key: response, "halted": True}
             self.database.append_event(
                 run_id,
-                {"stage": stage, "node": node, "agent": "human" if state["mode"] == "semi_trusted" else "reviewer_agent", "tool": None, "status": "approved", "summary": "阶段方案已确认", "evidence": {"decision_id": decision["id"], "mode": state["mode"]}},
+                {
+                    "stage": stage,
+                    "node": node,
+                    "agent": "human" if state["mode"] == "semi_trusted" else "reviewer_agent",
+                    "tool": None,
+                    "status": "approved",
+                    "summary": "阶段方案已确认",
+                    "evidence": {"decision_id": decision["id"], "mode": state["mode"]},
+                },
             )
             self.database.update("runs", run_id, {"status": "running", "updated_at": now_iso()})
             return {output_key: response, "halted": False}
@@ -394,15 +522,33 @@ class RunEngine:
         self.database.update(
             "runs",
             run_id,
-            {"status": "succeeded", "stage": "completed", "node": "complete", "progress": 1, "state_json": merged, "finished_at": timestamp, "updated_at": timestamp},
+            {
+                "status": "succeeded",
+                "stage": "completed",
+                "node": "complete",
+                "progress": 1,
+                "state_json": merged,
+                "finished_at": timestamp,
+                "updated_at": timestamp,
+            },
         )
         if run.get("target_task_id"):
             self.database.update(
-                "target_tasks", run["target_task_id"], {"status": "succeeded", "updated_at": timestamp}
+                "target_tasks",
+                run["target_task_id"],
+                {"status": "succeeded", "updated_at": timestamp},
             )
         self.database.append_event(
             run_id,
-            {"stage": "completed", "node": "complete", "agent": "orchestrator", "tool": None, "status": "succeeded", "summary": "本 Y 任务已完成，可查看报告或批量评分", "evidence": {"model_version_id": merged.get("model_version_id")}},
+            {
+                "stage": "completed",
+                "node": "complete",
+                "agent": "orchestrator",
+                "tool": None,
+                "status": "succeeded",
+                "summary": "本 Y 任务已完成，可查看报告或批量评分",
+                "evidence": {"model_version_id": merged.get("model_version_id")},
+            },
         )
 
     def _mark_failure(self, run_id: str, error: Exception) -> None:
@@ -423,10 +569,19 @@ class RunEngine:
             )
         self.database.append_event(
             run_id,
-            {"stage": run["stage"], "node": run["node"], "agent": "orchestrator", "tool": None, "status": "failed", "summary": "当前节点执行失败，其他 Y 任务不受影响", "evidence": {"error_code": code, "error_type": type(error).__name__}},
+            {
+                "stage": run["stage"],
+                "node": run["node"],
+                "agent": "orchestrator",
+                "tool": None,
+                "status": "failed",
+                "summary": "当前节点执行失败，其他 Y 任务不受影响",
+                "evidence": {"error_code": code, "error_type": type(error).__name__},
+            },
         )
 
     def shutdown(self) -> None:
+        self.worker.shutdown()
         self._executor.shutdown(wait=False, cancel_futures=False)
         connection = getattr(self, "_checkpoint_connection", None)
         if connection is not None:
