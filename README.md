@@ -67,7 +67,15 @@ cd frontend && npm run typecheck && npm run build
 ./scripts/build_mac.sh
 ```
 
-Windows 使用 `scripts/build_windows.ps1`。GitHub Actions 同时构建 macOS 13+ Apple Silicon 与 Windows 10/11 x64 候选产物，但在签名安装和真实目标机验收完成前，不应宣传为正式安装版。
+Windows 使用 `scripts/build_windows.ps1`，它会依次构建前端、PyInstaller 本地服务目录和 Inno Setup 安装程序：
+
+```powershell
+.\scripts\build_windows.ps1
+```
+
+安装程序输出到 `dist\installer\RiskModelAgent-<version>-windows-x64-setup.exe`，同时生成 SHA-256 校验文件。它采用当前用户安装，不要求管理员权限，包含开始菜单、可选桌面快捷方式和标准卸载入口。卸载只移除应用程序，默认保留 `%LOCALAPPDATA%\RiskModelAgent` 中的项目、配置、密钥和模型数据。
+
+GitHub Actions 会在 Windows Runner 上真实执行“构建安装器 → 静默安装 → 启动本地服务 → Notebook/建模/报告/评分整链路 → 静默卸载 → 验证用户数据仍保留”。未配置 Authenticode 代码签名证书，因此当前安装程序仍属于未签名候选版，可能触发 Windows SmartScreen；签名和真实用户电脑验收完成前，不宣传为正式发行版。
 
 ## 本地数据与升级
 

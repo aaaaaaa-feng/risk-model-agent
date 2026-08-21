@@ -18,8 +18,11 @@ def main() -> int:
     required_files = [
         "run_local.py",
         "packaging/risk_model_agent.spec",
+        "packaging/windows_installer.iss",
         "scripts/build_mac.sh",
         "scripts/build_windows.ps1",
+        "scripts/compile_windows_installer.ps1",
+        "scripts/smoke_windows_installer.ps1",
         "scripts/smoke_packaged_service.py",
         "scripts/start_mac.command",
         "scripts/start_windows.ps1",
@@ -30,6 +33,11 @@ def main() -> int:
     missing = [path for path in required_files if not (ROOT / path).is_file()]
     spec = (ROOT / "packaging/risk_model_agent.spec").read_text(encoding="utf-8") if not missing else ""
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    installer = (
+        (ROOT / "packaging/windows_installer.iss").read_text(encoding="utf-8")
+        if not missing
+        else ""
+    )
     contract = {
         "schema_version": "risk-packaging-contract/v1",
         "required_files": len(required_files),
@@ -48,6 +56,15 @@ def main() -> int:
         "spec_has_launcher": "run_local.py" in spec,
         "spec_uses_repository_root": "ROOT = Path(SPECPATH).resolve().parent\n" in spec,
         "pyinstaller_optional_dependency": "pyinstaller" in pyproject.lower(),
+        "windows_installer_is_per_user": (
+            "PrivilegesRequired=lowest" in installer
+            and "DefaultDirName={localappdata}\\Programs\\RiskModelAgent" in installer
+        ),
+        "windows_installer_is_x64": "ArchitecturesAllowed=x64compatible" in installer,
+        "windows_installer_keeps_user_data": not any(
+            line.strip().lower() == "[uninstalldelete]" for line in installer.splitlines()
+        ),
+        "windows_installer_has_uninstall_entry": "{uninstallexe}" in installer,
     }
     contract["valid"] = not missing and all(
         bool(contract[key])
@@ -60,6 +77,10 @@ def main() -> int:
             "spec_has_launcher",
             "spec_uses_repository_root",
             "pyinstaller_optional_dependency",
+            "windows_installer_is_per_user",
+            "windows_installer_is_x64",
+            "windows_installer_keeps_user_data",
+            "windows_installer_has_uninstall_entry",
         )
     )
     print(json.dumps(contract, ensure_ascii=False, indent=2, sort_keys=True))

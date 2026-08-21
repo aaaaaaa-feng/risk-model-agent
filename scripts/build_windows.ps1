@@ -19,4 +19,6 @@ if ($LASTEXITCODE -ne 0) {
     exit 2
 }
 & $Python -m PyInstaller (Join-Path $Root "packaging\risk_model_agent.spec") --noconfirm --clean
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& (Join-Path $Root "scripts\compile_windows_installer.ps1")
 exit $LASTEXITCODE
