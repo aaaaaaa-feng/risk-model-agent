@@ -37,7 +37,7 @@ UninstallDisplayName={#MyAppName}
 LicenseFile={#SourcePath}\..\LICENSE
 
 [Languages]
-Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "chinesesimp"; MessagesFile: "{#SourcePath}\languages\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]

@@ -19,6 +19,8 @@ def main() -> int:
         "run_local.py",
         "packaging/risk_model_agent.spec",
         "packaging/windows_installer.iss",
+        "packaging/languages/ChineseSimplified.isl",
+        "packaging/languages/ChineseSimplified.LICENSE.txt",
         "scripts/build_mac.sh",
         "scripts/build_windows.ps1",
         "scripts/compile_windows_installer.ps1",
@@ -65,6 +67,9 @@ def main() -> int:
             line.strip().lower() == "[uninstalldelete]" for line in installer.splitlines()
         ),
         "windows_installer_has_uninstall_entry": "{uninstallexe}" in installer,
+        "windows_installer_has_localized_messages": (
+            "languages\\ChineseSimplified.isl" in installer
+        ),
     }
     contract["valid"] = not missing and all(
         bool(contract[key])
@@ -81,6 +86,7 @@ def main() -> int:
             "windows_installer_is_x64",
             "windows_installer_keeps_user_data",
             "windows_installer_has_uninstall_entry",
+            "windows_installer_has_localized_messages",
         )
     )
     print(json.dumps(contract, ensure_ascii=False, indent=2, sort_keys=True))
