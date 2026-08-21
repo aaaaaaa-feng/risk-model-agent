@@ -6,6 +6,32 @@ from typing import Any
 from app.providers.gateway import ProviderGateway
 
 from .codegen import review_generated_code
+from .prompts import REVIEWER_PROMPT
+
+
+APPROVED_REVIEW_STATUSES = {
+    "deterministic_pass",
+    "llm_reviewer_pass",
+    "fallback_pass",
+    "conditional_pass",
+}
+
+
+def review_is_approved(value: dict[str, Any] | str | None) -> bool:
+    status = value.get("status") if isinstance(value, dict) else value
+    return status in APPROVED_REVIEW_STATUSES
+
+
+def review_blocks_progress(value: dict[str, Any] | None) -> bool:
+    if not value:
+        return False
+    if value.get("status") in {"block", "blocked"}:
+        return True
+    return any(item.get("severity") == "blocking" for item in (value.get("issues") or []))
+
+
+def review_requires_revision(value: dict[str, Any] | None) -> bool:
+    return bool(value and value.get("status") == "revise")
 
 
 class IndependentReviewer:
@@ -160,13 +186,8 @@ class IndependentReviewer:
                 "issues": [],
                 "evidence": {"provider": "disabled", "deterministic_review_retained": True},
             }
-        prompt = (
-            "You are an independent consumer-credit risk model reviewer. You have no prior conversation. "
-            "Review only the aggregate SafeEvidence. Return JSON with status pass|revise|block and issues; "
-            "each issue must have code, severity, message, and suggested_fix. Never request raw rows or PII."
-        )
         payload, result = self.gateway.complete_json(
-            prompt,
+            REVIEWER_PROMPT.content,
             {"scope": scope, "review_material": safe_evidence, "response_schema": "risk-review/v1"},
             model=self.gateway.settings.reviewer_model or self.gateway.settings.model,
             purpose=f"reviewer_{scope}",
@@ -182,11 +203,12 @@ class IndependentReviewer:
                 },
             }
         issues = payload.get("issues") if isinstance(payload.get("issues"), list) else []
-        status = (
-            payload.get("status")
-            if payload.get("status") in {"pass", "revise", "block"}
-            else "revise"
-        )
+        source_status = payload.get("status")
+        status = {
+            "pass": "llm_reviewer_pass",
+            "revise": "revise",
+            "block": "blocked",
+        }.get(source_status, "revise")
         return {
             "scope": scope,
             "status": status,
@@ -203,13 +225,18 @@ class IndependentReviewer:
         issues = [*(deterministic.get("issues") or []), *(llm.get("issues") or [])]
         if (
             any(item.get("severity") == "blocking" for item in issues)
-            or llm.get("status") == "block"
+            or deterministic.get("status") in {"block", "blocked"}
+            or llm.get("status") in {"block", "blocked"}
         ):
-            status = "block"
+            status = "blocked"
         elif issues or llm.get("status") == "revise":
-            status = "revise"
+            status = "revise" if llm.get("status") == "revise" else "conditional_pass"
+        elif llm.get("status") == "fallback_pass":
+            status = "fallback_pass"
+        elif llm.get("status") == "llm_reviewer_pass":
+            status = "llm_reviewer_pass"
         else:
-            status = "pass"
+            status = "deterministic_pass"
         return {
             "scope": scope,
             "status": status,
@@ -218,6 +245,8 @@ class IndependentReviewer:
                 "deterministic": deterministic.get("evidence", {}),
                 "llm": llm.get("evidence", {}),
                 "independent_context": True,
+                "deterministic_status": deterministic.get("status"),
+                "llm_status": llm.get("status"),
             },
         }
 
@@ -228,7 +257,9 @@ class IndependentReviewer:
         blocking = any(item.get("severity") == "blocking" for item in issues)
         return {
             "scope": scope,
-            "status": "block" if blocking else ("revise" if issues else "pass"),
+            "status": (
+                "blocked" if blocking else ("conditional_pass" if issues else "deterministic_pass")
+            ),
             "issues": issues,
             "evidence": evidence,
         }

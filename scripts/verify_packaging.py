@@ -32,6 +32,7 @@ def main() -> int:
         "frontend/package-lock.json",
         "frontend/src/App.tsx",
         "app/workers/package_runtime.py",
+        "app/evaluation/adapter.py",
     ]
     missing = [path for path in required_files if not (ROOT / path).is_file()]
     spec = (
@@ -62,6 +63,7 @@ def main() -> int:
         "launcher_supports_frozen_workers": "multiprocessing.freeze_support()"
         in (ROOT / "run_local.py").read_text(encoding="utf-8"),
         "spec_has_launcher": "run_local.py" in spec,
+        "spec_has_evaluation_adapter": "app.evaluation.adapter" in spec,
         "spec_uses_repository_root": "ROOT = Path(SPECPATH).resolve().parent\n" in spec,
         "pyinstaller_optional_dependency": "pyinstaller" in pyproject.lower(),
         "windows_installer_is_per_user": (
@@ -87,6 +89,7 @@ def main() -> int:
             "launcher_dispatches_kernel",
             "launcher_supports_frozen_workers",
             "spec_has_launcher",
+            "spec_has_evaluation_adapter",
             "spec_uses_repository_root",
             "pyinstaller_optional_dependency",
             "windows_installer_is_per_user",

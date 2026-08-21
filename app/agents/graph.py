@@ -7,11 +7,16 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, TypedDict
 
+from app.core.config import SettingsStore
 from app.core.database import Database, new_id, now_iso
 from app.core.paths import AppPaths, get_paths
+from app.evaluation.manifest import MANIFEST_SCHEMA, build_run_manifest
+from app.evaluation.tracing import TraceService
 from app.services.catalog import CatalogService
 from app.services.pipeline import RunPipeline
 from app.workers.process_runner import WorkerProcessRunner
+
+from .reviewer import review_blocks_progress, review_requires_revision
 
 
 class RunState(TypedDict, total=False):
@@ -62,6 +67,8 @@ class RunState(TypedDict, total=False):
     package_manifest: dict[str, Any]
     worker_bundle_manifest_sha256: str
     artifact_ids: list[str]
+    trace_id: str
+    root_span_id: str
 
 
 TOOL_NODES = [
@@ -129,12 +136,14 @@ class RunEngine:
         paths: AppPaths | None = None,
         catalog: CatalogService | None = None,
         pipeline: RunPipeline | None = None,
+        worker: Any | None = None,
     ):
         self.paths = paths or get_paths()
         self.database = database or Database(paths=self.paths)
         self.catalog = catalog or CatalogService(self.database, self.paths)
         self.pipeline = pipeline or RunPipeline(self.database, self.paths, self.catalog)
-        self.worker = WorkerProcessRunner(self.paths)
+        self.worker = worker or WorkerProcessRunner(self.paths)
+        self.traces = TraceService(self.database)
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="risk-model-worker")
         self._submit_lock = threading.RLock()
         self._checkpointer, self.persistence_mode = self._create_checkpointer()
@@ -205,6 +214,7 @@ class RunEngine:
         project_id: str,
         target_task_id: str,
         mode: str | None = None,
+        evaluation_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         project = self.catalog.get_project(project_id)
         if project["status"] == "archived":
@@ -217,29 +227,64 @@ class RunEngine:
             raise ValueError("RUN_MODE_INVALID")
         identifier = new_id("run")
         timestamp = now_iso()
+        manifest = build_run_manifest(
+            run_id=identifier,
+            target_task=task,
+            dataset=self.catalog.require("dataset_versions", task["dataset_version_id"]),
+            registry=self.pipeline.registry,
+            settings=SettingsStore(self.paths).load(),
+            started_at=timestamp,
+            evaluation_context=evaluation_context,
+        )
+        trace, root_span = self.traces.new_run_rows(
+            identifier,
+            started_at=timestamp,
+            case_id=(evaluation_context or {}).get("case_id"),
+            trial_id=(evaluation_context or {}).get("trial_id"),
+            manifest_hash=manifest["manifest_sha256"],
+        )
         state: RunState = {
             "run_id": identifier,
             "project_id": project_id,
             "target_task_id": target_task_id,
             "mode": selected_mode,
             "halted": False,
+            "trace_id": trace["id"],
+            "root_span_id": root_span["id"],
         }
-        self.database.insert(
-            "runs",
-            {
-                "id": identifier,
-                "project_id": project_id,
-                "target_task_id": target_task_id,
-                "status": "queued",
-                "stage": "project_setup",
-                "node": "start",
-                "mode": selected_mode,
-                "seq": 0,
-                "progress": 0,
-                "state_json": state,
-                "created_at": timestamp,
-                "updated_at": timestamp,
-            },
+        self.database.insert_many_atomic(
+            [
+                (
+                    "runs",
+                    {
+                        "id": identifier,
+                        "project_id": project_id,
+                        "target_task_id": target_task_id,
+                        "status": "queued",
+                        "stage": "project_setup",
+                        "node": "start",
+                        "mode": selected_mode,
+                        "seq": 0,
+                        "progress": 0,
+                        "state_json": state,
+                        "created_at": timestamp,
+                        "updated_at": timestamp,
+                    },
+                ),
+                (
+                    "run_manifests",
+                    {
+                        "id": new_id("manifest"),
+                        "run_id": identifier,
+                        "schema_version": MANIFEST_SCHEMA,
+                        "manifest_hash": manifest["manifest_sha256"],
+                        "payload_json": manifest,
+                        "created_at": timestamp,
+                    },
+                ),
+                ("traces", trace),
+                ("trace_spans", root_span),
+            ]
         )
         self.database.update(
             "target_tasks", target_task_id, {"status": "queued", "updated_at": timestamp}
@@ -253,7 +298,14 @@ class RunEngine:
                 "tool": None,
                 "status": "queued",
                 "summary": "Run 已进入本地顺序队列",
-                "evidence": {"target_task_id": target_task_id, "mode": selected_mode},
+                "evidence": {
+                    "target_task_id": target_task_id,
+                    "mode": selected_mode,
+                    "trace_id": trace["id"],
+                    "span_id": root_span["id"],
+                    "parent_span_id": None,
+                    "manifest_hash": manifest["manifest_sha256"],
+                },
             },
         )
         self._submit(identifier, state)
@@ -279,7 +331,18 @@ class RunEngine:
     def recover_incomplete(self) -> list[str]:
         recovered: list[str] = []
         for run in self.database.list("runs", limit=5000):
-            if run["status"] not in {"queued", "running"}:
+            if run["status"] not in {"queued", "running", "awaiting_decision"}:
+                continue
+            has_trace = bool(
+                self.database.list(
+                    "traces", {"run_id": run["id"]}, order_by="started_at DESC", limit=1
+                )
+            )
+            has_manifest = bool(self.database.list("run_manifests", {"run_id": run["id"]}, limit=1))
+            if not has_trace or not has_manifest:
+                self._block_pre_trace_run(run)
+                continue
+            if run["status"] == "awaiting_decision":
                 continue
             state = run.get("state") or {
                 "run_id": run["id"],
@@ -293,6 +356,39 @@ class RunEngine:
             recovered.append(run["id"])
         return recovered
 
+    def _block_pre_trace_run(self, run: dict[str, Any]) -> None:
+        """Preserve an interrupted pre-v2 run instead of inventing evidence for it."""
+        timestamp = now_iso()
+        code = "RUN_RESTART_REQUIRED_AFTER_TRACE_SCHEMA_UPGRADE"
+        self.database.update(
+            "runs",
+            run["id"],
+            {
+                "status": "blocked",
+                "error": code,
+                "finished_at": timestamp,
+                "updated_at": timestamp,
+            },
+        )
+        if run.get("target_task_id"):
+            self.database.update(
+                "target_tasks",
+                run["target_task_id"],
+                {"status": "blocked", "updated_at": timestamp},
+            )
+        self.database.append_event(
+            run["id"],
+            {
+                "stage": run["stage"],
+                "node": run["node"],
+                "agent": "orchestrator",
+                "tool": None,
+                "status": "blocked",
+                "summary": "升级前未完成 Run 已保留；因缺少可验证 Manifest/Trace，请新建 Run",
+                "evidence": {"error_code": code, "legacy_state_preserved": True},
+            },
+        )
+
     def _submit(self, run_id: str, value: Any) -> None:
         with self._submit_lock:
             self._executor.submit(self._invoke, run_id, value)
@@ -300,6 +396,7 @@ class RunEngine:
     def _invoke(self, run_id: str, value: Any) -> None:
         config = {"configurable": {"thread_id": run_id}}
         try:
+            self.traces.mark_running(run_id)
             result = self.graph.invoke(value, config=config)
             if isinstance(result, dict) and result.get("__interrupt__"):
                 return
@@ -321,6 +418,24 @@ class RunEngine:
     ) -> Any:
         def execute(state: RunState) -> dict[str, Any]:
             run_id = state["run_id"]
+            span = self.traces.start_span(
+                run_id,
+                kind="tool",
+                stage=stage,
+                node=node,
+                agent=agent,
+                tool=tool,
+                parent_span_id=state.get("root_span_id"),
+                summary=summary,
+                input_payload={"state_keys": sorted(state)},
+                evidence={"tool_contract": tool, "tool_version": "1.0.0"},
+            )
+            trace = self.traces.for_run(run_id)
+            trace_evidence = {
+                "trace_id": trace["id"],
+                "span_id": span["id"],
+                "parent_span_id": span.get("parent_span_id"),
+            }
             self.database.update(
                 "runs",
                 run_id,
@@ -342,12 +457,32 @@ class RunEngine:
                     "tool": tool,
                     "status": "running",
                     "summary": f"正在执行：{summary}",
-                    "evidence": {"tool_contract": tool},
+                    "evidence": {"tool_contract": tool, **trace_evidence},
                 },
             )
-            update = self.worker.invoke(tool, run_id, dict(state))
+            try:
+                update = self.worker.invoke(
+                    tool,
+                    run_id,
+                    {**dict(state), "_trace_parent_span_id": span["id"]},
+                )
+            except Exception as exc:
+                self.traces.finish_span(
+                    span["id"],
+                    "failed",
+                    error_code=str(exc).split(":", 1)[0][:160] or type(exc).__name__,
+                    error_type=type(exc).__name__,
+                    evidence={"tool_result": "failed"},
+                )
+                raise
             merged = _jsonable({**state, **update})
             progress = (_node_position(node) + 1) / len(TOOL_NODES)
+            completed_span = self.traces.finish_span(
+                span["id"],
+                "succeeded",
+                output_payload={"result_keys": sorted(update)},
+                evidence={"checkpoint": True},
+            )
             event = self.database.append_event(
                 run_id,
                 {
@@ -357,7 +492,12 @@ class RunEngine:
                     "tool": tool,
                     "status": "completed",
                     "summary": summary,
-                    "evidence": {"result_keys": sorted(update), "checkpoint": True},
+                    "evidence": {
+                        "result_keys": sorted(update),
+                        "checkpoint": True,
+                        "duration_ms": completed_span.get("duration_ms"),
+                        **trace_evidence,
+                    },
                 },
             )
             self.database.insert(
@@ -409,7 +549,40 @@ class RunEngine:
                         "created_at": now_iso(),
                     },
                 )
-            if decision["status"] == "submitted":
+            span = self.traces.start_span(
+                run_id,
+                kind="gate",
+                stage=stage,
+                node=node,
+                agent=("human_gate" if state["mode"] == "semi_trusted" else "reviewer_agent"),
+                parent_span_id=state.get("root_span_id"),
+                summary=str(details.get("title") or "阶段确认"),
+                input_payload={"decision_id": decision["id"], "mode": state["mode"]},
+                attempt=len(existing) + 1,
+                evidence={"decision_id": decision["id"]},
+            )
+            trace = self.traces.for_run(run_id)
+            trace_evidence = {
+                "trace_id": trace["id"],
+                "span_id": span["id"],
+                "parent_span_id": span.get("parent_span_id"),
+            }
+            decision_review = decision.get("review") or {}
+            if review_blocks_progress(decision_review):
+                response = {
+                    "decision_id": decision["id"],
+                    "approved": False,
+                    "edits": {},
+                    "source": "reviewer_blocked",
+                }
+            elif state["mode"] == "fully_trusted" and review_requires_revision(decision_review):
+                response = {
+                    "decision_id": decision["id"],
+                    "approved": False,
+                    "edits": {},
+                    "source": "reviewer_revision_unresolved",
+                }
+            elif decision["status"] == "submitted":
                 response = (decision.get("payload") or {}).get("response")
             elif state["mode"] == "fully_trusted":
                 response = {
@@ -419,6 +592,12 @@ class RunEngine:
                     "source": "fully_trusted_auto_approval",
                 }
             else:
+                waiting_span = self.traces.finish_span(
+                    span["id"],
+                    "blocked",
+                    degradation_path="awaiting_human_decision",
+                    evidence={"decision_id": decision["id"]},
+                )
                 if not existing:
                     self.database.append_event(
                         run_id,
@@ -429,7 +608,12 @@ class RunEngine:
                             "tool": None,
                             "status": "awaiting_decision",
                             "summary": details["title"],
-                            "evidence": {"decision_id": decision["id"], "review_completed": True},
+                            "evidence": {
+                                "decision_id": decision["id"],
+                                "review_completed": True,
+                                "duration_ms": waiting_span.get("duration_ms"),
+                                **trace_evidence,
+                            },
                         },
                     )
                 self.database.update(
@@ -452,6 +636,12 @@ class RunEngine:
                     }
                 )
             if not isinstance(response, dict) or response.get("decision_id") != decision["id"]:
+                self.traces.finish_span(
+                    span["id"],
+                    "failed",
+                    error_code="DECISION_RESPONSE_INVALID",
+                    error_type="ValueError",
+                )
                 raise ValueError("DECISION_RESPONSE_INVALID")
             approved = bool(response.get("approved"))
             status = "approved" if approved else "rejected"
@@ -465,16 +655,42 @@ class RunEngine:
                 },
             )
             if not approved:
+                response_source = str(response.get("source") or "human_decision")
+                reviewer_rejection = response_source.startswith("reviewer_")
+                blocked_code = {
+                    "reviewer_blocked": "REVIEWER_BLOCKED",
+                    "reviewer_revision_unresolved": "REVIEWER_REVISION_UNRESOLVED",
+                }.get(response_source)
+                blocked_summary = (
+                    "Reviewer 发现不可绕过的阻断，Run 已安全停止"
+                    if response_source == "reviewer_blocked"
+                    else (
+                        "Reviewer 要求修改但当前节点无安全自动修复，Run 已停止"
+                        if response_source == "reviewer_revision_unresolved"
+                        else "用户未批准当前阶段，Run 已安全停止"
+                    )
+                )
+                blocked_span = self.traces.finish_span(
+                    span["id"],
+                    "blocked",
+                    output_payload={"approved": False},
+                    error_code=blocked_code,
+                    error_type="ReviewerPolicyError" if blocked_code else None,
+                    evidence={"decision_id": decision["id"]},
+                )
+                run_update = {
+                    "status": "blocked",
+                    "stage": stage,
+                    "node": node,
+                    "updated_at": now_iso(),
+                    "finished_at": now_iso(),
+                }
+                if blocked_code:
+                    run_update["error"] = blocked_code
                 self.database.update(
                     "runs",
                     run_id,
-                    {
-                        "status": "blocked",
-                        "stage": stage,
-                        "node": node,
-                        "updated_at": now_iso(),
-                        "finished_at": now_iso(),
-                    },
+                    run_update,
                 )
                 self.database.update(
                     "target_tasks",
@@ -486,14 +702,33 @@ class RunEngine:
                     {
                         "stage": stage,
                         "node": node,
-                        "agent": "human",
+                        "agent": "reviewer_agent" if reviewer_rejection else "human",
                         "tool": None,
                         "status": "blocked",
-                        "summary": "用户未批准当前阶段，Run 已安全停止",
-                        "evidence": {"decision_id": decision["id"]},
+                        "summary": blocked_summary,
+                        "evidence": {
+                            "decision_id": decision["id"],
+                            "source": response_source,
+                            "error_code": blocked_code,
+                            "duration_ms": blocked_span.get("duration_ms"),
+                            **trace_evidence,
+                        },
                     },
                 )
+                self.traces.finish_run(
+                    run_id,
+                    "blocked",
+                    output_payload={"decision_id": decision["id"], "approved": False},
+                    error_code=blocked_code,
+                    error_type="ReviewerPolicyError" if blocked_code else None,
+                )
                 return {output_key: response, "halted": True}
+            approved_span = self.traces.finish_span(
+                span["id"],
+                "succeeded",
+                output_payload={"approved": True, "edits_present": bool(response.get("edits"))},
+                evidence={"decision_id": decision["id"]},
+            )
             self.database.append_event(
                 run_id,
                 {
@@ -503,7 +738,12 @@ class RunEngine:
                     "tool": None,
                     "status": "approved",
                     "summary": "阶段方案已确认",
-                    "evidence": {"decision_id": decision["id"], "mode": state["mode"]},
+                    "evidence": {
+                        "decision_id": decision["id"],
+                        "mode": state["mode"],
+                        "duration_ms": approved_span.get("duration_ms"),
+                        **trace_evidence,
+                    },
                 },
             )
             self.database.update("runs", run_id, {"status": "running", "updated_at": now_iso()})
@@ -538,6 +778,15 @@ class RunEngine:
                 run["target_task_id"],
                 {"status": "succeeded", "updated_at": timestamp},
             )
+        self.traces.finish_run(
+            run_id,
+            "succeeded",
+            output_payload={
+                "model_version_id": merged.get("model_version_id"),
+                "artifact_count": len(merged.get("artifact_ids") or []),
+            },
+        )
+        trace = self.traces.for_run(run_id)
         self.database.append_event(
             run_id,
             {
@@ -547,7 +796,12 @@ class RunEngine:
                 "tool": None,
                 "status": "succeeded",
                 "summary": "本 Y 任务已完成，可查看报告或批量评分",
-                "evidence": {"model_version_id": merged.get("model_version_id")},
+                "evidence": {
+                    "model_version_id": merged.get("model_version_id"),
+                    "trace_id": trace["id"],
+                    "span_id": trace["root_span_id"],
+                    "parent_span_id": None,
+                },
             },
         )
 
@@ -567,6 +821,21 @@ class RunEngine:
             self.database.update(
                 "target_tasks", run["target_task_id"], {"status": "failed", "updated_at": timestamp}
             )
+        try:
+            self.traces.finish_run(
+                run_id,
+                "failed",
+                error_code=code,
+                error_type=type(error).__name__,
+            )
+            trace = self.traces.for_run(run_id)
+            trace_evidence = {
+                "trace_id": trace["id"],
+                "span_id": trace["root_span_id"],
+                "parent_span_id": None,
+            }
+        except KeyError:
+            trace_evidence = {}
         self.database.append_event(
             run_id,
             {
@@ -576,7 +845,11 @@ class RunEngine:
                 "tool": None,
                 "status": "failed",
                 "summary": "当前节点执行失败，其他 Y 任务不受影响",
-                "evidence": {"error_code": code, "error_type": type(error).__name__},
+                "evidence": {
+                    "error_code": code,
+                    "error_type": type(error).__name__,
+                    **trace_evidence,
+                },
             },
         )
 
@@ -610,7 +883,7 @@ def _gate_review(state: RunState, stage: str) -> dict[str, Any]:
     value = state.get(key) if key else None  # type: ignore[literal-required]
     if isinstance(value, dict):
         return value
-    return {"status": "pass", "evidence": {"deterministic_checks": True}}
+    return {"status": "deterministic_pass", "evidence": {"deterministic_checks": True}}
 
 
 def _jsonable(value: Any) -> Any:

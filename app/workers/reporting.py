@@ -10,6 +10,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from app.agents.reviewer import review_is_approved
 from app.core.security import sha256_file
 
 
@@ -49,7 +50,8 @@ def build_report(
     }
     selected = [item for item in screening.get("features", []) if item.get("status") == "included"]
     absolute_ordering = bool((champion.get("test_monotonicity") or {}).get("absolute"))
-    review_passed = bool(reviews and reviews[-1].get("status") == "pass")
+    review_passed = bool(reviews and review_is_approved(reviews[-1]))
+    review_coverage = _review_coverage(reviews)
     quality_verdict = "pass" if review_passed and absolute_ordering else "conditional"
     quality_notes: list[str] = []
     if not absolute_ordering:
@@ -57,7 +59,7 @@ def build_report(
             "Test 等频分箱未达到绝对排序；模型可用于分析和后续调整，但不能标记为无条件通过。"
         )
     if not review_passed:
-        quality_notes.append("最近一轮 Reviewer 记录不是 pass，请复核质检证据。")
+        quality_notes.append("最近一轮 Reviewer 未达到可接受终态，请复核质检证据。")
     report = {
         "schema_version": REPORT_SCHEMA,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -118,6 +120,7 @@ def build_report(
         "score": model_result["score"],
         "review": {
             "records": reviews,
+            "coverage": review_coverage,
             "max_repair_rounds": 3,
             "independent_context": True,
         },
@@ -190,6 +193,40 @@ def _excel_value(value: Any) -> Any:
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False)
     return value
+
+
+def _review_coverage(reviews: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(reviews)
+    status_counts: dict[str, int] = {}
+    deterministic_reviewed = 0
+    llm_reviewed = 0
+    fallback = 0
+    for item in reviews:
+        status = str(item.get("status") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        evidence = item.get("evidence") or {}
+        deterministic_status = evidence.get("deterministic_status")
+        llm_status = evidence.get("llm_status")
+        if deterministic_status or status in {"deterministic_pass", "fallback_pass"}:
+            deterministic_reviewed += 1
+        if llm_status in {"llm_reviewer_pass", "revise", "blocked"}:
+            llm_reviewed += 1
+        if llm_status == "fallback_pass" or status == "fallback_pass":
+            fallback += 1
+
+    def ratio(value: int) -> float:
+        return round(value / total, 6) if total else 0.0
+
+    return {
+        "total_records": total,
+        "deterministic_reviewed": deterministic_reviewed,
+        "deterministic_coverage": ratio(deterministic_reviewed),
+        "llm_reviewed": llm_reviewed,
+        "llm_coverage": ratio(llm_reviewed),
+        "fallback_records": fallback,
+        "fallback_rate": ratio(fallback),
+        "status_counts": status_counts,
+    }
 
 
 def _finish_sheet(sheet: Any) -> None:
@@ -368,6 +405,21 @@ def write_report_excel(report: dict[str, Any], path: Path) -> Path:
     _finish_sheet(comparison)
 
     review = workbook.create_sheet("质检记录")
+    coverage = report["review"]["coverage"]
+    _append_table(
+        review,
+        "Reviewer 覆盖与降级概览",
+        ["质检记录", "确定性覆盖率", "LLM 实际覆盖率", "降级比例", "状态分布"],
+        [
+            [
+                coverage["total_records"],
+                coverage["deterministic_coverage"],
+                coverage["llm_coverage"],
+                coverage["fallback_rate"],
+                coverage["status_counts"],
+            ]
+        ],
+    )
     _append_table(
         review,
         "独立 Reviewer 质检",
@@ -435,6 +487,12 @@ def write_report_html(report: dict[str, Any], path: Path) -> Path:
             )
     serialized = html.escape(json.dumps(report, ensure_ascii=False), quote=False)
     quality_note = "；".join(summary.get("quality_notes", [])) or "Reviewer 与确定性检查均已通过。"
+    review_coverage = report["review"]["coverage"]
+    coverage_note = (
+        f"确定性审核 {review_coverage['deterministic_coverage']:.1%}；"
+        f"LLM Reviewer 实际覆盖 {review_coverage['llm_coverage']:.1%}；"
+        f"本地降级 {review_coverage['fallback_rate']:.1%}。"
+    )
     document = f"""<!doctype html>
 <html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
 <title>{html.escape(report["project"]["name"])} · 风控模型报告</title><style>
@@ -455,7 +513,7 @@ main{{padding:28px 42px 50px}}h2{{margin:34px 0 14px;font-size:19px;border-left:
 <h2>Train / Test / OOT</h2>{_html_rows(["数据集", "样本量", "坏样本", "好样本", "坏占比", "AUC", "KS", "PR-AUC", "PSI"], _flatten_metrics(report))}
 <h2>模型分箱</h2>{_html_rows(["数据集", "箱", "样本量", "坏样本", "坏占比", "Lift", "累计捕获"], lift_rows)}
 <h2>最终入模变量</h2>{_html_rows(["变量", "类型", "缺失率", "IV", "人工恢复"], [[item.get("column"), item.get("type"), _metric(item.get("missing_rate")), _metric(item.get("iv")), item.get("restored", False)] for item in report["feature_selection"]["selected"]])}
-<h2>质检结论</h2>{_html_rows(["轮次", "范围", "状态", "问题"], [[item.get("round"), item.get("scope"), item.get("status"), item.get("issues")] for item in report["review"]["records"]])}
+<h2>质检结论</h2><p class=note>{html.escape(coverage_note)}</p>{_html_rows(["轮次", "范围", "状态", "问题"], [[item.get("round"), item.get("scope"), item.get("status"), item.get("issues")] for item in report["review"]["records"]])}
 <script type=\"application/json\" id=\"risk-model-report-data\">{serialized}</script></main><footer>Risk Model Agent · 单文件离线报告 · {html.escape(report["generated_at"])}</footer></article></body></html>"""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(document, encoding="utf-8")

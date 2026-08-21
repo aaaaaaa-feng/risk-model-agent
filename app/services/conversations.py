@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from app.agents.evidence import build_safe_evidence
+from app.agents.prompts import CONVERSATION_PROMPT
 from app.core.config import SettingsStore
 from app.core.database import Database, new_id, now_iso
 from app.core.paths import AppPaths, get_paths
@@ -85,7 +86,7 @@ class ConversationService:
         if gateway.enabled and not provider_block:
             history = self._safe_history(conversation_id, aliases)
             result = gateway.complete(
-                "You are the main Agent in a local consumer-credit binary modeling workbench. Answer in concise Chinese. Use only the supplied aggregate project state. Explain recommendations and the current node, but never reveal hidden chain-of-thought and never request raw rows, credentials, or PII.",
+                CONVERSATION_PROMPT.content,
                 {
                     "project_state": safe,
                     "current_run": {

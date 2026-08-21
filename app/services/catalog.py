@@ -527,6 +527,9 @@ def serialize_project_resources(database: Database, project_id: str) -> dict[str
     run_ids = [row["id"] for row in payload["runs"]]
     conversation_ids = [row["id"] for row in payload["conversations"]]
     for table in (
+        "run_manifests",
+        "traces",
+        "trace_spans",
         "checkpoints",
         "review_records",
         "model_versions",
@@ -538,7 +541,13 @@ def serialize_project_resources(database: Database, project_id: str) -> dict[str
         payload[table] = [
             item
             for run_id in run_ids
-            for item in database.list_all(table, {"run_id": run_id}, order_by="created_at ASC")
+            for item in database.list_all(
+                table,
+                {"run_id": run_id},
+                order_by=(
+                    "started_at ASC" if table in {"traces", "trace_spans"} else "created_at ASC"
+                ),
+            )
         ]
     payload["conversation_messages"] = [
         item

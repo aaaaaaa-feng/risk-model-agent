@@ -9,6 +9,7 @@
 - 独立 Reviewer、三轮修复/安全降级、SSE 和项目对话。
 - 统一报告、模型包、批量评分、归档、备份、迁移和旧版只读保留。
 - DeepSeek、Kimi、Kimi Code、OpenAI、Anthropic/custom Provider 设置与连通性测试。
+- Run Manifest、层级 Trace Span、Reviewer 来源状态、脱敏 Trace Bundle、隔离 Target Adapter 与基础故障注入。
 
 ## 2. V1 发布门禁
 
@@ -32,6 +33,7 @@
 ## 4. V2 候选
 
 - 独立评测 Harness 平台，读取脱敏 Trace Bundle。
+- Core/Edge/Safety/Recovery/Bad Case 数据集、Holdout、真实 Provider 多 Trial、Evaluator 与 Baseline/Candidate 发布门禁。
 - 内网服务器多人部署、SSO、RBAC、项目权限和资源队列。
 - 审批流、模型注册、上线接口、监控和回溯治理。
 - 机构自定义 Prompt/规则版本、Provider 路由和成本策略。

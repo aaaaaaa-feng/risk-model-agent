@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .paths import AppPaths, get_paths
+from .security import sha256_file
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def now_iso() -> str:
@@ -44,6 +45,7 @@ JSON_COLUMNS = {
     "payload_json",
     "review_json",
     "usage_json",
+    "security_json",
 }
 
 TABLES = {
@@ -66,6 +68,9 @@ TABLES = {
     "notebooks",
     "score_jobs",
     "provider_requests",
+    "run_manifests",
+    "traces",
+    "trace_spans",
     "legacy_records",
     "archives",
     "backups",
@@ -186,6 +191,39 @@ CREATE TABLE IF NOT EXISTS provider_requests (
   status TEXT NOT NULL, safe_payload_hash TEXT NOT NULL, usage_json TEXT NOT NULL DEFAULT '{}',
   response_summary TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS run_manifests (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL UNIQUE REFERENCES runs(id),
+  schema_version TEXT NOT NULL, manifest_hash TEXT NOT NULL,
+  payload_json TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS trg_run_manifests_immutable_update
+BEFORE UPDATE ON run_manifests
+BEGIN
+  SELECT RAISE(ABORT, 'RUN_MANIFEST_IMMUTABLE');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_run_manifests_immutable_delete
+BEFORE DELETE ON run_manifests
+BEGIN
+  SELECT RAISE(ABORT, 'RUN_MANIFEST_IMMUTABLE');
+END;
+CREATE TABLE IF NOT EXISTS traces (
+  id TEXT PRIMARY KEY, run_id TEXT UNIQUE REFERENCES runs(id), conversation_id TEXT,
+  case_id TEXT, trial_id TEXT, status TEXT NOT NULL,
+  root_span_id TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL, finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS trace_spans (
+  id TEXT PRIMARY KEY, trace_id TEXT NOT NULL REFERENCES traces(id),
+  run_id TEXT REFERENCES runs(id), parent_span_id TEXT,
+  kind TEXT NOT NULL, stage TEXT NOT NULL, node TEXT NOT NULL,
+  agent TEXT NOT NULL, tool TEXT, status TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '', input_hash TEXT NOT NULL DEFAULT '',
+  output_hash TEXT NOT NULL DEFAULT '', error_code TEXT, error_type TEXT,
+  attempt INTEGER NOT NULL DEFAULT 1, retry_reason TEXT,
+  degradation_path TEXT, usage_json TEXT NOT NULL DEFAULT '{}',
+  security_json TEXT NOT NULL DEFAULT '{}', evidence_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL, finished_at TEXT, duration_ms INTEGER
+);
 CREATE TABLE IF NOT EXISTS legacy_records (
   id TEXT PRIMARY KEY, record_type TEXT NOT NULL, source_id TEXT NOT NULL,
   source_path TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL,
@@ -210,6 +248,8 @@ CREATE INDEX IF NOT EXISTS idx_events_run_seq ON events(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_artifacts_run ON artifacts(run_id, kind);
 CREATE INDEX IF NOT EXISTS idx_archives_project ON archives(project_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_conversation_events ON conversation_events(conversation_id, seq);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_trace ON trace_spans(trace_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_run ON trace_spans(run_id, started_at);
 """
 
 
@@ -219,7 +259,10 @@ class Database:
         self.path = (path or self.paths.database).resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        schema_snapshot = self._snapshot_before_schema_upgrade()
         self.initialize()
+        if schema_snapshot:
+            self._register_schema_snapshot(*schema_snapshot)
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
@@ -235,6 +278,74 @@ class Database:
             connection.execute(
                 "INSERT OR REPLACE INTO schema_meta(key, value) VALUES('version', ?)",
                 (str(SCHEMA_VERSION),),
+            )
+
+    def _snapshot_before_schema_upgrade(self) -> tuple[Path, str] | None:
+        if not self.path.is_file() or self.path.stat().st_size == 0:
+            return None
+        old_version = "unknown"
+        try:
+            with sqlite3.connect(self.path) as connection:
+                exists = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_meta'"
+                ).fetchone()
+                if exists:
+                    row = connection.execute(
+                        "SELECT value FROM schema_meta WHERE key='version'"
+                    ).fetchone()
+                    if row:
+                        old_version = str(row[0])
+        except sqlite3.Error as exc:
+            raise ValueError("DATABASE_SCHEMA_READ_FAILED") from exc
+        try:
+            if old_version != "unknown" and int(old_version) >= SCHEMA_VERSION:
+                return None
+        except ValueError:
+            pass
+        destination = self.paths.backups / f"pre-schema-v{old_version}-to-v{SCHEMA_VERSION}.sqlite3"
+        if not destination.exists():
+            temporary = destination.with_suffix(".tmp")
+            try:
+                with sqlite3.connect(self.path) as source, sqlite3.connect(temporary) as target:
+                    source.backup(target)
+                    integrity = target.execute("PRAGMA integrity_check").fetchone()[0]
+                    if integrity != "ok":
+                        raise ValueError("SCHEMA_BACKUP_INTEGRITY_CHECK_FAILED")
+                temporary.replace(destination)
+            finally:
+                temporary.unlink(missing_ok=True)
+        else:
+            with sqlite3.connect(destination) as backup:
+                if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise ValueError("SCHEMA_BACKUP_INTEGRITY_CHECK_FAILED")
+        return destination, old_version
+
+    def _register_schema_snapshot(self, path: Path, old_version: str) -> None:
+        source = f"schema_v{old_version}_to_v{SCHEMA_VERSION}"
+        with self.transaction() as connection:
+            existing = connection.execute(
+                "SELECT id FROM backups WHERE kind='schema_upgrade' AND source=?",
+                (source,),
+            ).fetchone()
+            if existing:
+                return
+            self._insert_on_connection(
+                connection,
+                "backups",
+                {
+                    "id": new_id("bak"),
+                    "kind": "schema_upgrade",
+                    "source": source,
+                    "path": str(path),
+                    "checksum": sha256_file(path),
+                    "size_bytes": path.stat().st_size,
+                    "metadata_json": {
+                        "from_schema": old_version,
+                        "to_schema": SCHEMA_VERSION,
+                        "automatic": True,
+                    },
+                    "created_at": now_iso(),
+                },
             )
 
     @contextmanager
@@ -491,6 +602,8 @@ def re_safe_order(value: str) -> bool:
         "created_at DESC",
         "created_at ASC",
         "updated_at DESC",
+        "started_at DESC",
+        "started_at ASC",
         "queue_position ASC",
         "seq ASC",
         "round ASC",

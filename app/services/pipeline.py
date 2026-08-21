@@ -15,11 +15,17 @@ from app.agents.codegen import (
     write_reproducible_notebook,
 )
 from app.agents.evidence import build_safe_evidence
-from app.agents.reviewer import IndependentReviewer
+from app.agents.prompts import CODE_REPAIR_PROMPT, MODEL_PLAN_PROMPT
+from app.agents.reviewer import (
+    IndependentReviewer,
+    review_blocks_progress,
+    review_is_approved,
+)
 from app.core.config import SettingsStore
 from app.core.database import Database, new_id, now_iso
 from app.core.paths import AppPaths, get_paths
 from app.core.security import sha256_bytes, sha256_file
+from app.evaluation.tracing import TraceService
 from app.providers.gateway import ProviderGateway
 from app.tooling.registry import ToolRegistry
 from app.workers.binning import apply_manual_binning, fit_binning
@@ -57,11 +63,19 @@ class RunPipeline:
         paths: AppPaths | None = None,
         catalog: CatalogService | None = None,
         artifacts: ArtifactService | None = None,
+        provider_client_factory: Any = None,
+        provider_api_key: str | None = None,
+        reviewer_factory: Callable[[ProviderGateway], IndependentReviewer] | None = None,
     ):
         self.paths = paths or get_paths()
         self.database = database or Database(paths=self.paths)
         self.catalog = catalog or CatalogService(self.database, self.paths)
         self.artifacts = artifacts or ArtifactService(self.database, self.paths, self.catalog)
+        self.provider_client_factory = provider_client_factory
+        self.provider_api_key = provider_api_key
+        self.reviewer_factory = reviewer_factory or IndependentReviewer
+        self.traces = TraceService(self.database)
+        self._active_parent_span_id: str | None = None
         self._bundles: dict[str, dict[str, ModelBundle]] = {}
         self.registry = ToolRegistry()
         self._register_tools()
@@ -134,7 +148,12 @@ class RunPipeline:
             )
 
     def invoke(self, name: str, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
-        return self.registry.invoke(name, {"run_id": run_id, "state": state})
+        previous = self._active_parent_span_id
+        self._active_parent_span_id = state.get("_trace_parent_span_id")
+        try:
+            return self.registry.invoke(name, {"run_id": run_id, "state": state})
+        finally:
+            self._active_parent_span_id = previous
 
     def prepare_target(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
         task, dataset, frame = self._context(run_id)
@@ -359,7 +378,7 @@ class RunPipeline:
         reviewer = self._reviewer(run_id)
         deterministic = {
             "scope": "binning",
-            "status": "revise" if non_monotonic else "pass",
+            "status": "conditional_pass" if non_monotonic else "deterministic_pass",
             "issues": [
                 {
                     "code": "NON_MONOTONIC_BINNING",
@@ -440,7 +459,7 @@ class RunPipeline:
         gateway = self._gateway(run_id)
         if gateway.enabled:
             payload, result = gateway.complete_json(
-                "You are the main risk-model planning Agent. Return JSON with a models array chosen from dummy, scorecard, regularized_logistic, random_forest, extra_trees, xgboost, lightgbm, catboost. Respect resource constraints; do not recommend all models by default.",
+                MODEL_PLAN_PROMPT.content,
                 {"planning_material": safe, "deterministic_recommendation": models},
                 purpose="main_agent_model_plan",
             )
@@ -528,7 +547,7 @@ class RunPipeline:
             )
             combined = reviewer.combine("code", deterministic, llm)
             combined["repair_round"] = repair_round
-            if combined["status"] == "pass":
+            if review_is_approved(combined):
                 self._record_review(run_id, combined)
                 break
             repair_evidence: dict[str, Any] = {
@@ -541,7 +560,7 @@ class RunPipeline:
             if main_gateway.enabled:
                 repair_evidence["attempted"] = True
                 payload, result = main_gateway.complete_json(
-                    "You are the main Agent repairing a generated modeling notebook after an independent Reviewer response. Return JSON with one code string. Keep the immutable SPEC exactly unchanged, keep <LOCAL_DATASET> as the only data path, use only pathlib/json/pandas/numpy/app imports, and do not add network, shell, dynamic execution, file mutation, PII, credentials, or raw data.",
+                    CODE_REPAIR_PROMPT.content,
                     {
                         **safe,
                         "sanitized_code": safe_source,
@@ -569,7 +588,7 @@ class RunPipeline:
                             candidate, dataset["stored_path"], aliases
                         )
                         local_review = reviewer.review_code(restored)
-                        if local_review["status"] == "pass" and _generated_spec_matches(
+                        if review_is_approved(local_review) and _generated_spec_matches(
                             restored, expected_spec
                         ):
                             source = restored
@@ -579,8 +598,8 @@ class RunPipeline:
                             )
             combined.setdefault("evidence", {})["main_agent_repair"] = repair_evidence
             self._record_review(run_id, combined)
-        if combined.get("status") != "pass":
-            if deterministic["status"] != "pass":
+        if not review_is_approved(combined):
+            if review_blocks_progress(combined) or not review_is_approved(deterministic):
                 raise ValueError("GENERATED_CODE_REVIEW_BLOCKED")
             combined = {
                 "scope": "code",
@@ -638,7 +657,7 @@ class RunPipeline:
             final_review = reviewer.combine("execution", deterministic, llm)
             final_review["repair_round"] = repair_round
             self._record_review(run_id, final_review)
-            if final_review["status"] == "pass":
+            if review_is_approved(final_review):
                 break
             trained = [
                 item["candidate"] for item in result["candidates"] if item["status"] == "trained"
@@ -649,9 +668,9 @@ class RunPipeline:
                 if name in trained or available_models().get(name)
             ]
             models = list(dict.fromkeys(safe_core))
-        if final_review.get("status") != "pass":
+        if not review_is_approved(final_review):
             deterministic = reviewer.review_execution(result)
-            if deterministic["status"] != "pass":
+            if review_blocks_progress(final_review) or not review_is_approved(deterministic):
                 raise ValueError("EXECUTION_REVIEW_BLOCKED")
             final_review = {
                 "scope": "execution",
@@ -695,10 +714,10 @@ class RunPipeline:
             final_review = reviewer.combine("report", deterministic, llm)
             final_review["repair_round"] = repair_round
             self._record_review(run_id, final_review)
-            if final_review["status"] == "pass":
+            if review_is_approved(final_review):
                 break
-        if final_review.get("status") != "pass":
-            if deterministic["status"] != "pass":
+        if not review_is_approved(final_review):
+            if review_blocks_progress(final_review) or not review_is_approved(deterministic):
                 raise ValueError("REPORT_REVIEW_BLOCKED")
             final_review = {
                 "scope": "report",
@@ -762,7 +781,7 @@ class RunPipeline:
         )
 
     def _reviewer(self, run_id: str) -> IndependentReviewer:
-        return IndependentReviewer(self._gateway(run_id))
+        return self.reviewer_factory(self._gateway(run_id))
 
     def _bundle_dir(self, run_id: str) -> Path:
         run = self.catalog.require("runs", run_id)
@@ -862,6 +881,23 @@ class RunPipeline:
                     "utf-8"
                 )
             )
+            span = self.traces.start_span(
+                run_id,
+                kind="llm",
+                stage=self.catalog.require("runs", run_id)["stage"],
+                node=purpose,
+                agent="reviewer_agent" if purpose.startswith("reviewer_") else "main_agent",
+                tool="provider_gateway",
+                parent_span_id=self._active_parent_span_id,
+                summary=f"Provider request: {purpose}",
+                input_payload=evidence,
+                evidence={
+                    "purpose": purpose,
+                    "provider": settings.provider,
+                    "model": model,
+                    "safe_payload_hash": digest,
+                },
+            )
             self.database.insert(
                 "provider_requests",
                 {
@@ -871,7 +907,11 @@ class RunPipeline:
                     "model": model,
                     "status": "requested",
                     "safe_payload_hash": digest,
-                    "usage_json": {"purpose": purpose},
+                    "usage_json": {
+                        "purpose": purpose,
+                        "span_id": span["id"],
+                        "attempt": 1,
+                    },
                     "response_summary": "",
                     "created_at": now_iso(),
                 },
@@ -885,13 +925,26 @@ class RunPipeline:
             usage = dict(record.get("usage") or {})
             usage.update(result.usage or {})
             usage["model"] = result.model
+            usage["error_code"] = result.error_code
+            usage["error_type"] = result.error_type
+            usage["http_status"] = result.http_status
+            usage["duration_ms"] = result.duration_ms
+            usage["response_hash"] = result.response_hash
             if result.upstream_request_id:
                 usage["upstream_request_id"] = result.upstream_request_id
+            if result.ok:
+                terminal_status = "succeeded"
+            elif result.error_code in {"DLP_BLOCK", "PROVIDER_BUDGET_EXCEEDED"}:
+                terminal_status = "blocked"
+            elif result.error_code in {"PROVIDER_CANCELLED", "PROVIDER_DISABLED"}:
+                terminal_status = "cancelled"
+            else:
+                terminal_status = "failed"
             self.database.update(
                 "provider_requests",
                 identifier,
                 {
-                    "status": "succeeded" if result.ok else "failed",
+                    "status": terminal_status,
                     "usage_json": usage,
                     "response_summary": (
                         "ok"
@@ -900,6 +953,25 @@ class RunPipeline:
                     ),
                 },
             )
+            span_id = str(usage.get("span_id") or "")
+            if span_id:
+                self.traces.finish_span(
+                    span_id,
+                    terminal_status,
+                    output_payload={"response_hash": result.response_hash},
+                    error_code=result.error_code,
+                    error_type=result.error_type,
+                    usage={
+                        key: value
+                        for key, value in usage.items()
+                        if key not in {"span_id", "response_hash"}
+                    },
+                    security={
+                        "safe_evidence_only": True,
+                        "payload_hash": result.payload_hash,
+                    },
+                    evidence={"provider_request_id": identifier},
+                )
 
         def budget_guard(requested: int) -> str | None:
             records = self.database.list_all("provider_requests", {"run_id": run_id})
@@ -920,6 +992,8 @@ class RunPipeline:
 
         return ProviderGateway(
             settings=settings,
+            api_key=self.provider_api_key,
+            client_factory=self.provider_client_factory,
             budget_guard=budget_guard,
             request_callback=request_callback,
             result_callback=result_callback,
@@ -930,7 +1004,7 @@ class RunPipeline:
         existing = self.database.list(
             "review_records", {"run_id": run_id}, order_by="round ASC", limit=500
         )
-        return self.database.insert(
+        record = self.database.insert(
             "review_records",
             {
                 "id": new_id("rev"),
@@ -943,6 +1017,40 @@ class RunPipeline:
                 "created_at": now_iso(),
             },
         )
+        span = self.traces.start_span(
+            run_id,
+            kind="reviewer",
+            stage=self.catalog.require("runs", run_id)["stage"],
+            node=f"review_{review['scope']}",
+            agent="reviewer_agent",
+            tool="independent_reviewer",
+            parent_span_id=self._active_parent_span_id,
+            summary=f"Reviewer: {review['scope']}",
+            input_payload={
+                "scope": review["scope"],
+                "issue_codes": [item.get("code") for item in review.get("issues", [])],
+            },
+            attempt=int(review.get("repair_round") or 1),
+            evidence={"review_record_id": record["id"]},
+        )
+        status = str(review.get("status") or "revise")
+        terminal = (
+            "succeeded"
+            if review_is_approved(status)
+            else ("blocked" if status in {"block", "blocked"} else "failed")
+        )
+        self.traces.finish_span(
+            span["id"],
+            terminal,
+            output_payload={"status": status, "issue_count": len(review.get("issues") or [])},
+            degradation_path=(
+                "deterministic_fallback"
+                if status == "fallback_pass"
+                else ("revision_required" if status == "revise" else None)
+            ),
+            evidence={"review_record_id": record["id"], "review_status": status},
+        )
+        return record
 
 
 def _first_candidate(profile: dict[str, Any], key: str) -> str | None:

@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.evaluation.manifest import verify_manifest
+from app.evaluation.tracing import TraceService
 from app.runtime import AppContext
 
 from .dependencies import context
@@ -164,7 +166,32 @@ def provider_requests(run_id: str, ctx: AppContext = Depends(context)) -> dict[s
     }
 
 
+@router.get("/runs/{run_id}/manifest")
+def run_manifest(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
+    ctx.catalog.require("runs", run_id)
+    records = ctx.database.list("run_manifests", {"run_id": run_id}, limit=1)
+    if not records:
+        raise HTTPException(404, "Run manifest 不存在。")
+    record = records[0]
+    manifest = verify_manifest(record.get("payload") or {}, str(record["manifest_hash"]))
+    return {
+        "id": record["id"],
+        "run_id": run_id,
+        "schema_version": record["schema_version"],
+        "manifest_hash": record["manifest_hash"],
+        "manifest": manifest,
+        "created_at": record["created_at"],
+    }
+
+
+@router.get("/runs/{run_id}/trace-bundle")
+def trace_bundle(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
+    ctx.catalog.require("runs", run_id)
+    return TraceService(ctx.database).bundle(run_id)
+
+
 def _event(item: dict[str, Any]) -> dict[str, Any]:
+    evidence = item.get("evidence", {})
     return {
         "id": item["id"],
         "run_id": item["run_id"],
@@ -176,6 +203,10 @@ def _event(item: dict[str, Any]) -> dict[str, Any]:
         "status": item["status"],
         "summary": item["summary"],
         "time": item["created_at"],
-        "evidence": item.get("evidence", {}),
+        "trace_id": evidence.get("trace_id"),
+        "span_id": evidence.get("span_id"),
+        "parent_span_id": evidence.get("parent_span_id"),
+        "duration_ms": evidence.get("duration_ms"),
+        "evidence": evidence,
         "hidden_chain_of_thought_included": False,
     }

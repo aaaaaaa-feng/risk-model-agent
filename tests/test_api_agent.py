@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 import time
 
 import pytest
@@ -97,7 +98,7 @@ def test_semi_trusted_interrupt_resume_and_reject(app_paths):
         pending = client.get(f"/api/v1/runs/{run_id}").json()["pending_decisions"]
         assert len(pending) == 1
         assert pending[0]["stage"] == "target_confirmation"
-        assert pending[0]["review"]["status"] == "pass"
+        assert pending[0]["review"]["status"] == "fallback_pass"
         approved = client.post(
             f"/api/v1/runs/{run_id}/decisions/{pending[0]['id']}",
             json={"approved": True, "edits": {}},
@@ -139,10 +140,27 @@ def test_semi_trusted_interrupt_resume_and_reject(app_paths):
                 "summary",
                 "time",
                 "evidence",
+                "trace_id",
+                "span_id",
+                "parent_span_id",
+                "duration_ms",
             }.issubset(event)
             for event in events
         )
         assert all(event["hidden_chain_of_thought_included"] is False for event in events)
+        manifest = client.get(f"/api/v1/runs/{run_id}/manifest").json()
+        assert manifest["schema_version"] == "risk-agent-eval-manifest/v1"
+        assert manifest["manifest_hash"] == manifest["manifest"]["manifest_sha256"]
+        with pytest.raises(sqlite3.IntegrityError, match="RUN_MANIFEST_IMMUTABLE"):
+            context.database.update(
+                "run_manifests", manifest["id"], {"manifest_hash": "must-not-change"}
+            )
+        trace = client.get(f"/api/v1/runs/{run_id}/trace-bundle").json()
+        assert trace["raw_records_included"] is False
+        assert trace["hidden_chain_of_thought_included"] is False
+        assert trace["trace"]["status"] == "blocked"
+        assert any(span["kind"] == "tool" for span in trace["spans"])
+        assert any(span["kind"] == "gate" for span in trace["spans"])
 
 
 def test_provider_settings_clear_priority_and_presets(app_paths, monkeypatch):

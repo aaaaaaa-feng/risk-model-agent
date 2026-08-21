@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
 import httpx
 
+from app.agents.prompts import CONNECTIVITY_PROMPT
 from app.core.config import Settings, SettingsStore
 from app.core.paths import AppPaths
 from app.core.security import sanitize_safe_evidence, sha256_bytes, validate_safe_evidence
@@ -25,6 +27,10 @@ class ProviderResult:
     payload_hash: str = ""
     provider_request_id: str = ""
     upstream_request_id: str = ""
+    error_type: str | None = None
+    http_status: int | None = None
+    duration_ms: int = 0
+    response_hash: str = ""
 
 
 def _parse_json_content(content: str) -> dict[str, Any]:
@@ -170,17 +176,42 @@ class ProviderGateway:
         max_tokens: int = 2048,
         purpose: str = "agent",
         allow_disabled_for_test: bool = False,
+        _defer_result_callback: bool = False,
     ) -> ProviderResult:
+        started = time.monotonic()
         if not self.configured or (not self.settings.llm_enabled and not allow_disabled_for_test):
             return ProviderResult(
-                False, error_code="PROVIDER_DISABLED", error_message="Provider 未启用或配置不完整"
+                False,
+                error_code="PROVIDER_DISABLED",
+                error_message="Provider 未启用或配置不完整",
+                error_type="ConfigurationError",
+                duration_ms=max(0, int((time.monotonic() - started) * 1000)),
             )
+        selected_model = model or self.settings.model
         try:
             safe_evidence = sanitize_safe_evidence(evidence)
             validate_safe_evidence({"prompt": system_prompt})
         except ValueError as exc:
-            return ProviderResult(False, error_code="DLP_BLOCK", error_message=str(exc))
-        selected_model = model or self.settings.model
+            provider_request_id = ""
+            blocked_evidence = {
+                "schema_version": "provider-blocked-request/v1",
+                "blocked": True,
+                "block_code": "DLP_BLOCK",
+            }
+            if self._request_callback:
+                provider_request_id = str(
+                    self._request_callback(purpose, blocked_evidence, selected_model) or ""
+                )
+            result = ProviderResult(
+                False,
+                error_code="DLP_BLOCK",
+                error_message=str(exc),
+                error_type=type(exc).__name__,
+                model=selected_model,
+                payload_hash=sha256_bytes(b"provider-blocked-request/v1"),
+                provider_request_id=provider_request_id,
+            )
+            return self._finalize_result(result, started, not _defer_result_callback)
         safe_serialized = json.dumps(safe_evidence, ensure_ascii=False, sort_keys=True).encode(
             "utf-8"
         )
@@ -188,13 +219,21 @@ class ProviderGateway:
         if self._budget_guard:
             reason = self._budget_guard(max_tokens)
             if reason:
-                return ProviderResult(
+                provider_request_id = ""
+                if self._request_callback:
+                    provider_request_id = str(
+                        self._request_callback(purpose, safe_evidence, selected_model) or ""
+                    )
+                result = ProviderResult(
                     False,
                     error_code="PROVIDER_BUDGET_EXCEEDED",
                     error_message=reason,
+                    error_type="BudgetError",
                     model=selected_model,
                     payload_hash=payload_hash,
+                    provider_request_id=provider_request_id,
                 )
+                return self._finalize_result(result, started, not _defer_result_callback)
         provider_request_id = ""
         if self._request_callback:
             provider_request_id = str(
@@ -206,6 +245,7 @@ class ProviderGateway:
         if self.settings.ca_cert:
             client_kwargs["verify"] = self.settings.ca_cert
         result: ProviderResult | None = None
+        response: httpx.Response | None = None
         try:
             with self._client_factory(**client_kwargs) as client:
                 response = client.post(
@@ -232,6 +272,7 @@ class ProviderGateway:
                 payload_hash=payload_hash,
                 provider_request_id=provider_request_id,
                 upstream_request_id=upstream_request_id,
+                response_hash=sha256_bytes(content.encode("utf-8")),
             )
         except httpx.HTTPStatusError as exc:
             code = "PROVIDER_HTTP_ERROR"
@@ -247,6 +288,9 @@ class ProviderGateway:
                 payload_hash=payload_hash,
                 provider_request_id=provider_request_id,
                 upstream_request_id=str(exc.response.headers.get("x-request-id") or ""),
+                error_type=type(exc).__name__,
+                http_status=exc.response.status_code,
+                response_hash=_http_response_hash(exc.response),
             )
         except (httpx.HTTPError, OSError, ValueError, TypeError) as exc:
             result = ProviderResult(
@@ -256,6 +300,9 @@ class ProviderGateway:
                 model=selected_model,
                 payload_hash=payload_hash,
                 provider_request_id=provider_request_id,
+                error_type=type(exc).__name__,
+                http_status=getattr(response, "status_code", None),
+                response_hash=_http_response_hash(response),
             )
         except Exception as exc:  # provider adapters must still close their trace
             result = ProviderResult(
@@ -265,20 +312,24 @@ class ProviderGateway:
                 model=selected_model,
                 payload_hash=payload_hash,
                 provider_request_id=provider_request_id,
+                error_type=type(exc).__name__,
+                http_status=getattr(response, "status_code", None),
+                response_hash=_http_response_hash(response),
             )
         finally:
-            if provider_request_id and self._result_callback:
-                final_result = result or ProviderResult(
+            if result is None:
+                result = ProviderResult(
                     False,
                     error_code="PROVIDER_REQUEST_INTERRUPTED",
+                    error_type="InterruptedError",
                     model=selected_model,
                     payload_hash=payload_hash,
                     provider_request_id=provider_request_id,
+                    http_status=getattr(response, "status_code", None),
+                    response_hash=_http_response_hash(response),
                 )
-                self._result_callback(provider_request_id, final_result)
-        if result is None:  # pragma: no cover - BaseException is re-raised after finally
-            raise RuntimeError("PROVIDER_RESULT_MISSING")
-        return result
+            self._finalize_result(result, started, not _defer_result_callback)
+        return self._finalize_result(result, started, False)
 
     def complete_json(
         self,
@@ -287,24 +338,55 @@ class ProviderGateway:
         model: str | None = None,
         purpose: str = "agent",
     ) -> tuple[dict[str, Any] | None, ProviderResult]:
-        result = self.complete(system_prompt, evidence, model=model, purpose=purpose)
+        started = time.monotonic()
+        result = self.complete(
+            system_prompt,
+            evidence,
+            model=model,
+            purpose=purpose,
+            _defer_result_callback=True,
+        )
         if not result.ok:
+            self._finalize_result(result, started, True)
             return None, result
         try:
-            return _parse_json_content(result.content), result
+            payload = _parse_json_content(result.content)
+            self._finalize_result(result, started, True)
+            return payload, result
         except (ValueError, json.JSONDecodeError) as exc:
             result.ok = False
             result.error_code = "PROVIDER_SCHEMA_INVALID"
             result.error_message = str(exc)[:300]
-            if result.provider_request_id and self._result_callback:
-                self._result_callback(result.provider_request_id, result)
+            result.error_type = type(exc).__name__
+            self._finalize_result(result, started, True)
             return None, result
+
+    def _finalize_result(
+        self, result: ProviderResult, started: float, notify: bool
+    ) -> ProviderResult:
+        result.duration_ms = max(result.duration_ms, int((time.monotonic() - started) * 1000))
+        if result.content and not result.response_hash:
+            result.response_hash = sha256_bytes(result.content.encode("utf-8"))
+        if notify and result.provider_request_id and self._result_callback:
+            self._result_callback(result.provider_request_id, result)
+        return result
 
     def connectivity_check(self) -> ProviderResult:
         return self.complete(
-            'Return exactly a JSON object: {"status":"ok"}.',
+            CONNECTIVITY_PROMPT.content,
             {"health_check": True, "schema_version": "provider-health/v1"},
             max_tokens=32,
             purpose="connectivity_check",
             allow_disabled_for_test=True,
         )
+
+
+def _http_response_hash(response: Any) -> str:
+    if response is None:
+        return ""
+    content = getattr(response, "content", b"")
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    if isinstance(content, bytes) and content:
+        return sha256_bytes(content)
+    return ""

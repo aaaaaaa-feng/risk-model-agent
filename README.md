@@ -18,6 +18,7 @@
 - 由同一份结构化事实数据生成 Web、Excel、单文件 HTML 和模型包；评分结果列以模型版本名称命名。
 - 提供半信任与完全信任两种模式。Reviewer 在独立上下文审核计划、生成代码、执行证据和报告，最多三轮修复后进入受控降级；安全阻断不能被自动批准。
 - SSE 持续输出阶段、节点、Agent、工具、状态、摘要、时间和证据引用；不输出隐藏思维链。
+- 每个 Run 冻结 Git/源码、Prompt、Tool、策略、Provider、数据和环境版本，并生成父子 Span 与脱敏 Trace Bundle；提供隔离 `run_eval_case()` 接口供后续独立评测 Harness 调用。
 
 ## 数据安全边界
 
@@ -63,6 +64,8 @@ Windows PowerShell 使用 `.venv\Scripts\python.exe`，其余步骤一致。
 .venv/bin/python scripts/run_golden_cases.py
 cd frontend && npm test && npm run typecheck && npm run build
 ```
+
+评测预埋的隔离合成案例由 `tests/test_evaluation_contract.py` 验证。它覆盖 Manifest 可比性、半信任自动确认、安全 Trace 导出、Fake Provider 和 Worker 故障注入；它不是独立评测平台，也不是实际业务效果评测。
 
 打包前检查与本机 macOS 构建：
 

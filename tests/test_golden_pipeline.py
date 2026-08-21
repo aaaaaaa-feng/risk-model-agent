@@ -54,7 +54,7 @@ def test_full_agent_reviewer_worker_pipeline(golden):
     assert excluded["MOB30"] == "OTHER_TARGET"
     reviews = context.database.list("review_records", {"run_id": run["id"]}, limit=200)
     assert {"code", "execution", "report"}.issubset({item["scope"] for item in reviews})
-    assert all(item["status"] == "pass" for item in reviews)
+    assert all(item["status"] == "fallback_pass" for item in reviews)
     assert context.engine.persistence_mode == "sqlite"
 
 
@@ -76,6 +76,11 @@ def test_report_excel_html_json_share_one_structured_source(golden):
     report = json.loads(Path(by_kind["report_json"]["path"]).read_text(encoding="utf-8"))
     html = Path(by_kind["report_html"]["path"]).read_text(encoding="utf-8")
     assert report["schema_version"] == "risk-model-report/v1"
+    coverage = report["review"]["coverage"]
+    assert coverage["total_records"] == len(report["review"]["records"])
+    assert coverage["deterministic_coverage"] == 1.0
+    assert coverage["llm_coverage"] == 0.0
+    assert coverage["fallback_rate"] > 0
     assert report["executive_summary"]["champion"] == report["champion"]["candidate"]
     expected_verdict = "pass" if report["executive_summary"]["absolute_ordering"] else "conditional"
     assert report["executive_summary"]["quality_verdict"] == expected_verdict

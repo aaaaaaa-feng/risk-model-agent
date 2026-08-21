@@ -13,7 +13,7 @@ export function StageRail({ run, decision, events }: { run: Run | null; decision
   return <aside className="stage-rail" aria-label="当前运行阶段">
     <div className="rail-head"><span>RUN STATUS</span><b className={`rail-status ${run.status}`}>{statusLabel(run.status)}</b></div>
     <div className="stage-box"><span className="eyebrow">当前阶段 · {String(currentIndex+1).padStart(2,"0")} / {stages.length}</span><h2>{stageLabel(run.stage)}</h2><p>{latest?.summary || "等待节点事件"}</p></div>
-    <ul className="audit-list"><li><span>主 Agent</span><b>{latest?.agent === "main_agent" ? "执行中" : "方案协调"}</b></li><li><span>Reviewer</span><b className={review?.status === "block" ? "danger" : "ok"}>{review ? reviewLabel(review.status) : run.stage === "training" ? "质检中" : "随节点执行"}</b></li><li><span>本地工具</span><b>{latest?.tool || "—"}</b></li><li><span>Checkpoint</span><b>{run.node}</b></li><li><span>事件序号</span><b>#{latest?.sequence || run.seq}</b></li></ul>
+    <ul className="audit-list"><li><span>主 Agent</span><b>{latest?.agent === "main_agent" ? "执行中" : "方案协调"}</b></li><li><span>Reviewer</span><b className={["block","blocked"].includes(review?.status || "") ? "danger" : "ok"}>{review ? reviewLabel(review.status) : run.stage === "training" ? "质检中" : "随节点执行"}</b></li><li><span>本地工具</span><b>{latest?.tool || "—"}</b></li><li><span>Checkpoint</span><b>{run.node}</b></li><li><span>事件序号</span><b>#{latest?.sequence || run.seq}</b></li></ul>
     <div className="next-action"><span>NEXT ACTION</span><strong>{nextAction(run, decision)}</strong></div>
     <ol className="stage-mini-map">{stages.map((stage,index)=><li key={stage} className={index<currentIndex?"done":index===currentIndex?"active":""}><i>{index<currentIndex?"✓":index+1}</i><span>{stageLabel(stage)}</span></li>)}</ol>
     <button className="history-toggle" type="button" aria-expanded={history} onClick={()=>setHistory(v=>!v)}>{history?"收起完整事件记录":"查看完整事件记录"}</button>
@@ -22,5 +22,5 @@ export function StageRail({ run, decision, events }: { run: Run | null; decision
 }
 
 function statusLabel(value:string){return ({queued:"排队中",running:"运行中",awaiting_decision:"等待确认",succeeded:"已完成",failed:"失败",blocked:"已停止"} as Record<string,string>)[value]||value}
-function reviewLabel(value:string){return ({pass:"预审通过",fallback_pass:"本地通过",revise:"建议调整",block:"发现阻断"} as Record<string,string>)[value]||value}
+function reviewLabel(value:string){return ({pass:"预审通过",deterministic_pass:"确定性通过",llm_reviewer_pass:"LLM 复核通过",fallback_pass:"本地降级通过",conditional_pass:"有条件通过",revise:"建议调整",block:"发现阻断",blocked:"发现阻断"} as Record<string,string>)[value]||value}
 function nextAction(run:Run,decision:Decision|null){if(run.status==="awaiting_decision")return decision?.payload?.title||"确认当前方案";if(run.status==="succeeded")return "查看报告或批量评分";if(run.status==="failed")return "查看错误证据并重试";return `等待 ${stageLabel(run.stage)} 完成`;}

@@ -28,6 +28,9 @@ hiddenimports = [
     "xlrd",
     "ipykernel_launcher",
     "skops.io",
+    "app.evaluation.adapter",
+    "app.evaluation.contracts",
+    "app.evaluation.fakes",
     *collect_submodules("langgraph"),
     *collect_submodules("langgraph.checkpoint.sqlite"),
 ]

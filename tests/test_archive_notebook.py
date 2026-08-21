@@ -15,6 +15,9 @@ from app.api.notebooks import (
 )
 from app.services.archives import _remap_row
 from app.notebooks.manager import NotebookManager
+from app.workers.demo import install_demo_project
+
+from conftest import wait_for_run
 
 
 def test_encrypted_project_archive_password_and_recovery(context):
@@ -90,6 +93,46 @@ def test_archive_creation_blocks_active_runs(context):
     )
     with pytest.raises(ValueError, match="ARCHIVE_CREATE_BLOCKED_BY_ACTIVE_RUN"):
         context.archives.create(project["id"], "active-run-password")
+
+
+def test_archive_restores_manifest_and_trace_with_rebound_hashes(context):
+    demo = install_demo_project(context.catalog, mode="semi_trusted", rows=500)
+    created = context.engine.create_run(
+        demo["project"]["id"], demo["target_tasks"][0]["id"], "semi_trusted"
+    )
+    run = wait_for_run(context, created["id"], {"awaiting_decision", "failed"}, 30)
+    assert run["status"] == "awaiting_decision"
+    decision = next(
+        item
+        for item in context.database.list_all("decisions", {"run_id": run["id"]})
+        if item["status"] == "pending"
+    )
+    context.engine.resume(run["id"], decision["id"], False, {})
+    assert wait_for_run(context, run["id"], {"blocked", "failed"}, 30)["status"] == "blocked"
+    original_manifest = context.database.list("run_manifests", {"run_id": run["id"]}, limit=1)[0]
+    archive, _ = context.archives.create(demo["project"]["id"], "trace-archive-password")
+    restored = context.archives.restore(Path(archive["path"]), "trace-archive-password")
+    restored_run = context.database.list("runs", {"project_id": restored["id"]}, limit=1)[0]
+    restored_manifest = context.database.list(
+        "run_manifests", {"run_id": restored_run["id"]}, limit=1
+    )[0]
+    restored_trace = context.database.list(
+        "traces", {"run_id": restored_run["id"]}, order_by="started_at ASC", limit=1
+    )[0]
+    spans = context.database.list_all(
+        "trace_spans", {"trace_id": restored_trace["id"]}, order_by="started_at ASC"
+    )
+    assert restored_manifest["manifest_hash"] == restored_manifest["payload"]["manifest_sha256"]
+    assert restored_manifest["manifest_hash"] != original_manifest["manifest_hash"]
+    assert (
+        restored_manifest["payload"]["restored_from_manifest_sha256"]
+        == original_manifest["manifest_hash"]
+    )
+    assert restored_manifest["payload"]["run_id"] == restored_run["id"]
+    assert restored_trace["root_span_id"] in {item["id"] for item in spans}
+    assert (restored_trace.get("metadata") or {})["manifest_hash"] == restored_manifest[
+        "manifest_hash"
+    ]
 
 
 def test_archive_creation_rejects_project_symlinks(context):

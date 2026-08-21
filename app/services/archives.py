@@ -11,10 +11,11 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from app.core.database import JSON_COLUMNS, Database, new_id, now_iso
+from app.core.database import JSON_COLUMNS, SCHEMA_VERSION, Database, new_id, now_iso
 from app.core.config import MAX_ARCHIVE_BYTES
 from app.core.paths import AppPaths, get_paths
 from app.core.security import decrypt_file_payload, encrypt_file_payload, sha256_file
+from app.evaluation.manifest import canonical_hash
 
 from .catalog import CatalogService, serialize_project_resources
 
@@ -25,6 +26,9 @@ RESOURCE_ORDER = (
     "join_plans",
     "target_tasks",
     "runs",
+    "run_manifests",
+    "traces",
+    "trace_spans",
     "checkpoints",
     "review_records",
     "model_versions",
@@ -66,6 +70,10 @@ REQUIRED_REFERENCE_FIELDS = {
     "decision_id",
     "artifact_id",
     "provider_request_id",
+    "trace_id",
+    "span_id",
+    "parent_span_id",
+    "root_span_id",
 }
 REQUIRED_REFERENCE_LIST_FIELDS = {"parent_ids", "artifact_ids"}
 PREFIXES = {
@@ -74,6 +82,9 @@ PREFIXES = {
     "join_plans": "join",
     "target_tasks": "target",
     "runs": "run",
+    "run_manifests": "manifest",
+    "traces": "trace",
+    "trace_spans": "span",
     "checkpoints": "chk",
     "review_records": "rev",
     "model_versions": "model",
@@ -263,6 +274,7 @@ class ArchiveService:
             "legacy_readonly": False,
         }
         rows: list[tuple[str, dict[str, Any]]] = [("projects", project_row)]
+        manifest_hash_map: dict[str, str] = {}
         try:
             for table in RESOURCE_ORDER:
                 for raw in payload.get(table, []):
@@ -273,6 +285,25 @@ class ArchiveService:
                     if table == "notebooks":
                         row["kernel_id"] = None
                         row["status"] = "idle"
+                    row = _replace_exact_values(row, manifest_hash_map)
+                    if table == "run_manifests":
+                        manifest_payload = dict(row.get("payload") or {})
+                        old_hash = str(row.get("manifest_hash") or "")
+                        if manifest_payload.get("run_id") in id_map:
+                            manifest_payload["run_id"] = id_map[manifest_payload["run_id"]]
+                        for section in ("dataset", "target_task"):
+                            section_value = dict(manifest_payload.get(section) or {})
+                            if section_value.get("id") in id_map:
+                                section_value["id"] = id_map[section_value["id"]]
+                            manifest_payload[section] = section_value
+                        manifest_payload.pop("manifest_sha256", None)
+                        manifest_payload["restored_from_manifest_sha256"] = old_hash
+                        new_hash = canonical_hash(manifest_payload)
+                        manifest_payload["manifest_sha256"] = new_hash
+                        row["payload"] = manifest_payload
+                        row["manifest_hash"] = new_hash
+                        if old_hash:
+                            manifest_hash_map[old_hash] = new_hash
                     rows.append((table, _encode_json_fields(row)))
             _verify_restored_files(rows, destination, staged_project)
             with self.database.transaction() as connection:
@@ -331,7 +362,7 @@ class BackupService:
                 "path": str(destination),
                 "checksum": sha256_file(destination),
                 "size_bytes": destination.stat().st_size,
-                "metadata_json": {"schema_version": 1},
+                "metadata_json": {"schema_version": SCHEMA_VERSION},
                 "created_at": now_iso(),
             },
         )
@@ -654,3 +685,13 @@ def _encode_json_fields(row: dict[str, Any]) -> dict[str, Any]:
         if json_key in JSON_COLUMNS and key not in {"id"}:
             result[json_key] = result.pop(key)
     return result
+
+
+def _replace_exact_values(value: Any, mapping: dict[str, str]) -> Any:
+    if isinstance(value, dict):
+        return {key: _replace_exact_values(child, mapping) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_replace_exact_values(child, mapping) for child in value]
+    if isinstance(value, str) and value in mapping:
+        return mapping[value]
+    return value
