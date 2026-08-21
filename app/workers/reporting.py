@@ -131,6 +131,14 @@ def build_report(
             "small_cell_suppression_threshold": 30,
             "hidden_chain_of_thought_included": False,
         },
+        "presentation": {
+            "accessibility": {
+                "schema_version": "risk-model-report-accessibility/v1",
+                "tables_have_captions": True,
+                "charts_have_text_alternatives": True,
+                "print_layout": "single-column-safe",
+            }
+        },
     }
     return json.loads(json.dumps(report, ensure_ascii=False, default=_json_default))
 
@@ -456,7 +464,8 @@ def _html_rows(headers: list[str], rows: Iterable[Iterable[Any]]) -> str:
         + "</tr>"
         for row in rows
     )
-    return f"<div class=table-wrap><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>"
+    label = html.escape("、".join(str(value) for value in headers))
+    return f'<div class=table-wrap role=region aria-label="{label}"><table><caption class=sr-only>{label}</caption><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>'
 
 
 def write_report_html(report: dict[str, Any], path: Path) -> Path:
@@ -503,6 +512,7 @@ header{{padding:34px 42px;background:linear-gradient(135deg,#102f46,#176b87);col
 main{{padding:28px 42px 50px}}h2{{margin:34px 0 14px;font-size:19px;border-left:4px solid var(--teal);padding-left:10px}}
 .cards{{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}}.card{{border:1px solid var(--line);border-radius:10px;padding:14px;background:var(--soft)}}.card span{{display:block;color:var(--muted);font-size:12px}}.card b{{font-size:22px}}
 .table-wrap{{overflow:auto;border:1px solid var(--line);border-radius:10px}}table{{width:100%;border-collapse:collapse;white-space:nowrap}}th,td{{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left}}th{{background:#eaf2f6;color:#26465a}}tr:last-child td{{border:0}}
+.sr-only{{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}}
 .note{{padding:13px 15px;background:#fff8e9;border:1px solid #f0d7a4;border-radius:8px;color:#765118}}footer{{padding:18px 42px;border-top:1px solid var(--line);color:var(--muted)}}
 @media(max-width:800px){{.page{{margin:0;border:0}}header,main,footer{{padding-left:20px;padding-right:20px}}.cards{{grid-template-columns:repeat(2,1fr)}}}}
 @media print{{body{{background:white}}.page{{margin:0;box-shadow:none;border:0}}}}

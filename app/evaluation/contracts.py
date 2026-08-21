@@ -24,6 +24,8 @@ class EvalCase(BaseModel):
     provider_profile: Literal["deterministic", "fake_provider", "configured_provider"] = (
         "deterministic"
     )
+    category: Literal["core", "edge", "safety", "recovery", "badcase"] = "core"
+    severity: Literal["low", "medium", "high", "critical"] = "medium"
     faults: list[str] = Field(default_factory=list)
     expected_terminal_state: Literal["succeeded", "failed", "blocked"] = "succeeded"
     rows: int = Field(default=600, ge=500, le=10_000)
@@ -74,4 +76,57 @@ class EvalResult(BaseModel):
     artifact_manifest_path: str | None = None
     security_events: list[dict[str, Any]] = Field(default_factory=list)
     usage: dict[str, Any] = Field(default_factory=dict)
+    error: dict[str, Any] | None = None
+
+
+class EvalGate(BaseModel):
+    """Deterministic release thresholds for a Harness run.
+
+    These are deliberately conservative defaults, not claims about production
+    performance.  A suite may override them and the full gate configuration is
+    persisted with the run so that later comparisons remain reproducible.
+    """
+
+    min_expectation_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+    max_error_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_security_event_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_average_tokens: int | None = Field(default=None, ge=0)
+    require_trace_for_each_case: bool = True
+
+
+class EvalSuite(BaseModel):
+    """Versioned, local-only evaluation suite definition."""
+
+    suite_id: str = Field(min_length=3, max_length=120, pattern=r"^[A-Za-z0-9_.-]+$")
+    name: str = Field(min_length=1, max_length=200)
+    version: str = "risk-agent-eval-suite/v1"
+    description: str = ""
+    cases: list[EvalCase] = Field(min_length=1, max_length=100)
+    trials: int = Field(default=1, ge=1, le=10)
+    gate: EvalGate = Field(default_factory=EvalGate)
+    holdout: bool = False
+
+    @model_validator(mode="after")
+    def validate_unique_cases(self) -> Self:
+        identifiers = [item.case_id for item in self.cases]
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("EVAL_SUITE_DUPLICATE_CASE_ID")
+        if self.holdout and any(item.category == "badcase" for item in self.cases):
+            raise ValueError("EVAL_HOLDOUT_BADCASE_MIX_FORBIDDEN")
+        return self
+
+
+class EvalRun(BaseModel):
+    schema_version: str = "risk-agent-eval-run/v1"
+    run_id: str
+    suite_id: str
+    suite_version: str
+    status: Literal["queued", "running", "completed", "failed"]
+    started_at: str | None = None
+    finished_at: str | None = None
+    result_paths: list[str] = Field(default_factory=list)
+    summary: dict[str, Any] = Field(default_factory=dict)
+    gate: dict[str, Any] = Field(default_factory=dict)
+    baseline_run_id: str | None = None
+    comparison: dict[str, Any] | None = None
     error: dict[str, Any] | None = None

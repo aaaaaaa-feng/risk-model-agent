@@ -47,6 +47,36 @@ def _is_monotonic(values: Sequence[float]) -> bool:
     return bool(np.all(differences >= -1e-12) or np.all(differences <= 1e-12))
 
 
+def monotonic_merge_suggestions(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return explainable adjacent merge candidates without mutating the spec."""
+
+    rows = [row for row in spec.get("table", []) if row.get("bin") != "<MISSING>"]
+    if len(rows) < 3:
+        return []
+    rates = [row.get("bad_rate") for row in rows]
+    if _is_monotonic([value for value in rates if value is not None]):
+        return []
+    candidates: list[dict[str, Any]] = []
+    for index in range(len(rows) - 1):
+        left, right = rows[index], rows[index + 1]
+        left_rate, right_rate = left.get("bad_rate"), right.get("bad_rate")
+        if left_rate is None or right_rate is None:
+            continue
+        count = int(left.get("count") or 0) + int(right.get("count") or 0)
+        bad = int(left.get("bad") or 0) + int(right.get("bad") or 0)
+        candidates.append(
+            {
+                "left_bin": left.get("bin"),
+                "right_bin": right.get("bin"),
+                "distance": round(abs(float(left_rate) - float(right_rate)), 8),
+                "merged_count": count,
+                "merged_bad_rate": round(bad / count, 8) if count else None,
+                "action": "合并相邻箱后重新计算 WOE/IV，并再次验证单调性。",
+            }
+        )
+    return sorted(candidates, key=lambda item: item["distance"])
+
+
 def fit_numeric_bins(
     series: pd.Series,
     target: pd.Series,
@@ -89,6 +119,7 @@ def fit_numeric_bins(
         "iv": iv,
         "monotonic": _is_monotonic([row["bad_rate"] for row in ordered]),
         "source": "auto_monotonic",
+        "merge_suggestions": monotonic_merge_suggestions({"table": table}),
     }
 
 
@@ -98,8 +129,14 @@ def fit_categorical_bins(
     values = series.astype("object").where(series.notna(), "<MISSING>").astype(str)
     counts = values.value_counts()
     rare = set(counts[counts < max(20, int(len(values) * rare_fraction))].index)
-    normalized = values.map(lambda value: "<RARE>" if value in rare and value != "<MISSING>" else value)
-    rates = pd.DataFrame({"value": normalized, "target": target.astype(int)}).groupby("value")["target"].agg(["mean", "count"])
+    normalized = values.map(
+        lambda value: "<RARE>" if value in rare and value != "<MISSING>" else value
+    )
+    rates = (
+        pd.DataFrame({"value": normalized, "target": target.astype(int)})
+        .groupby("value")["target"]
+        .agg(["mean", "count"])
+    )
     rates = rates.sort_values("mean")
     groups: list[list[str]] = []
     if len(rates) <= max_bins:
@@ -118,6 +155,7 @@ def fit_categorical_bins(
         "iv": iv,
         "monotonic": _is_monotonic([row["bad_rate"] for row in table]),
         "source": "auto_bad_rate_order",
+        "merge_suggestions": monotonic_merge_suggestions({"table": table}),
     }
 
 
@@ -159,7 +197,8 @@ def apply_manual_binning(
     labels = apply_bin(frame[column], spec)
     table, iv = _woe_table(labels, frame[target])
     monotonic = _is_monotonic([row["bad_rate"] for row in table if row["bin"] != "<MISSING>"])
-    if not monotonic:
+    business_exception = str(spec.get("business_exception") or "").strip()
+    if not monotonic and len(business_exception) < 8:
         raise ValueError("MANUAL_BIN_NOT_MONOTONIC")
     updated = {
         **spec,
@@ -168,6 +207,11 @@ def apply_manual_binning(
         "monotonic": True,
         "source": "manual",
     }
+    if not monotonic:
+        updated["monotonic"] = False
+        updated["business_exception"] = business_exception
+        updated["exception_status"] = "accepted_with_business_exception"
+    updated["merge_suggestions"] = monotonic_merge_suggestions(updated)
     binning["specs"][column] = updated
     payload = json.dumps(binning["specs"], ensure_ascii=False, sort_keys=True, default=str)
     binning["version"] = "bin_" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
@@ -178,7 +222,9 @@ def apply_manual_binning(
 def apply_bin(series: pd.Series, spec: dict[str, Any]) -> pd.Series:
     if spec["kind"] == "numeric":
         numeric = pd.to_numeric(series, errors="coerce")
-        labels = pd.cut(numeric, [-np.inf, *spec.get("edges", []), np.inf], include_lowest=True).astype(str)
+        labels = pd.cut(
+            numeric, [-np.inf, *spec.get("edges", []), np.inf], include_lowest=True
+        ).astype(str)
         return labels.where(numeric.notna(), "<MISSING>")
     values = series.astype("object").where(series.notna(), "<MISSING>").astype(str)
     rare = set(spec.get("rare_values", []))

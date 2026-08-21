@@ -11,6 +11,7 @@ from app.core.security import sha256_file
 
 from .modeling import ModelBundle
 from .package_runtime import (
+    PACKAGE_COMPATIBILITY_SCHEMA,
     PACKAGE_SCHEMA,
     SKOPS_POLICY_VERSION,
     inspect_skops_types,
@@ -152,6 +153,12 @@ def build_model_package(
         "hashes": hashes,
         "skops_policy": SKOPS_POLICY_VERSION,
         "skops_trusted_types": trusted_types,
+        "compatibility": {
+            "schema_version": PACKAGE_COMPATIBILITY_SCHEMA,
+            "python": ">=3.11,<3.14",
+            "dependencies": sorted(dependency_lock),
+            "validation": "runtime_compatibility_report_before_load",
+        },
         "raw_data_included": False,
     }
     (directory / "manifest.json").write_text(

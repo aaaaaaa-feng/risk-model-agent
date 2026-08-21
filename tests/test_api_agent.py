@@ -31,6 +31,29 @@ def test_api_v1_health_and_demo_project(app_paths):
         assert len(detail["dataset_versions"]) == 1
 
 
+def test_evaluation_harness_suite_api_is_local_and_versioned(app_paths):
+    app = create_app(app_paths, auto_migrate=False)
+    with TestClient(app) as client:
+        payload = {
+            "suite_id": "api_suite_001",
+            "name": "API suite",
+            "version": "suite/v1",
+            "cases": [
+                {
+                    "case_id": "api_case_001",
+                    "provider_profile": "deterministic",
+                    "expected_terminal_state": "succeeded",
+                    "rows": 500,
+                }
+            ],
+        }
+        created = client.post("/api/v1/evaluations/suites", json=payload)
+        assert created.status_code == 201
+        listed = client.get("/api/v1/evaluations/suites")
+        assert listed.status_code == 200
+        assert listed.json()["suites"][0]["suite_id"] == "api_suite_001"
+
+
 def test_local_http_boundary_rejects_dns_rebinding_cross_origin_and_remote_bind(app_paths):
     app = create_app(app_paths, auto_migrate=False)
     with TestClient(app) as client:

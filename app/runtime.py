@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from app.agents.graph import RunEngine
 from app.core.database import Database
 from app.core.paths import AppPaths, get_paths
+from app.evaluation.harness import EvaluationHarness
 from app.notebooks.manager import NotebookManager
 from app.services.archives import ArchiveService, BackupService
 from app.services.artifacts import ArtifactService
@@ -27,6 +28,7 @@ class AppContext:
     backups: BackupService
     conversations: ConversationService
     migration: LegacyMigrator
+    evaluations: EvaluationHarness
 
     @classmethod
     def create(cls, paths: AppPaths | None = None) -> "AppContext":
@@ -41,12 +43,24 @@ class AppContext:
         backups = BackupService(database, resolved)
         conversations = ConversationService(database, resolved, catalog)
         migration = LegacyMigrator(database, resolved)
+        evaluations = EvaluationHarness(resolved)
         return cls(
-            resolved, database, catalog, artifacts, notebooks, pipeline, engine,
-            archives, backups, conversations, migration,
+            resolved,
+            database,
+            catalog,
+            artifacts,
+            notebooks,
+            pipeline,
+            engine,
+            archives,
+            backups,
+            conversations,
+            migration,
+            evaluations,
         )
 
     def shutdown(self) -> None:
         self.notebooks.shutdown_all()
         self.conversations.shutdown()
         self.engine.shutdown()
+        self.evaluations.shutdown()

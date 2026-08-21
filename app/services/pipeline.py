@@ -438,6 +438,8 @@ class RunPipeline:
         models = list(dict.fromkeys(configured or recommend_models(resource)))
         plan = {
             "models": models,
+            "search_budget": 0,
+            "search_budget_max": 12,
             "resource_plan": resource.as_dict(),
             "score": {
                 "minimum": 300,
@@ -490,7 +492,7 @@ class RunPipeline:
             "model_gate": {
                 "title": "确认候选模型与评分参数",
                 "summary": {"plan": plan, "review": review},
-                "editable": ["models", "score"],
+                "editable": ["models", "score", "search_budget"],
             },
         }
 
@@ -505,6 +507,8 @@ class RunPipeline:
             plan["models"] = list(dict.fromkeys(models))
         if "score" in edits:
             plan["score"] = {**plan["score"], **edits["score"]}
+        if "search_budget" in edits:
+            plan["search_budget"] = max(0, min(int(edits["search_budget"]), 12))
         _validate_score_config(plan["score"])
         run = self.catalog.require("runs", run_id)
         self.database.update(
@@ -641,6 +645,7 @@ class RunPipeline:
                 models=models,
                 resource=resource,
                 score_config=state["model_plan"]["score"],
+                search_budget=int(state["model_plan"].get("search_budget", 0)),
             )
             deterministic = reviewer.review_execution(result)
             safe, _ = build_safe_evidence(

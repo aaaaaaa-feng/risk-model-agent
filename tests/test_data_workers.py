@@ -152,6 +152,19 @@ def test_manual_binning_versions_and_rejects_non_monotonic():
         apply_manual_binning(
             copy.deepcopy(fitted), frame, "Y", "x", {"kind": "numeric", "edges": [39.5, 79.5]}
         )
+    exception = apply_manual_binning(
+        copy.deepcopy(fitted),
+        frame,
+        "Y",
+        "x",
+        {
+            "kind": "numeric",
+            "edges": [39.5, 79.5],
+            "business_exception": "业务确认该变量保留原始分箱",
+        },
+    )
+    assert exception["specs"]["x"]["exception_status"] == "accepted_with_business_exception"
+    assert exception["specs"]["x"]["monotonic"] is False
 
 
 def test_metrics_have_expected_semantics():

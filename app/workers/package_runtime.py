@@ -8,9 +8,11 @@ dependencies.
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import math
 import stat
+import sys
 import zipfile
 from pathlib import Path
 from typing import Any, Sequence
@@ -22,6 +24,7 @@ import pandas as pd
 PACKAGE_SCHEMA = "risk-model-package/v2"
 LEGACY_PACKAGE_SCHEMA = "risk-model-package/v1"
 SKOPS_POLICY_VERSION = "risk-skops-types/v1"
+PACKAGE_COMPATIBILITY_SCHEMA = "risk-model-package-compatibility/v1"
 MAX_PACKAGE_FILES = 64
 MAX_PACKAGE_UNPACKED_BYTES = 4 * 1024**3
 MAX_PACKAGE_COMPRESSION_RATIO = 250
@@ -132,6 +135,14 @@ def verify_package_directory(root: Path, *, allow_legacy: bool = False) -> dict[
     formats = manifest.get("formats")
     if not isinstance(formats, list):
         raise ValueError("MODEL_PACKAGE_FORMATS_INVALID")
+    compatibility = manifest.get("compatibility")
+    if schema == PACKAGE_SCHEMA and (
+        not isinstance(compatibility, dict)
+        or compatibility.get("schema_version") != PACKAGE_COMPATIBILITY_SCHEMA
+        or not isinstance(compatibility.get("python"), str)
+        or not isinstance(compatibility.get("dependencies"), list)
+    ):
+        raise ValueError("MODEL_PACKAGE_COMPATIBILITY_INVALID")
     for item in formats:
         if (
             not isinstance(item, dict)
@@ -159,6 +170,39 @@ def verify_package_directory(root: Path, *, allow_legacy: bool = False) -> dict[
                 manifest.get("skops_trusted_types") or [],
             )
     return manifest
+
+
+def runtime_compatibility(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Report compatibility without silently changing or loading a model."""
+
+    compatibility = manifest.get("compatibility") or {}
+    expected = [str(value) for value in compatibility.get("dependencies") or []]
+    missing: list[str] = []
+    mismatched: list[dict[str, str]] = []
+    for requirement in expected:
+        name, separator, version = requirement.partition("==")
+        if not separator or name == "python":
+            continue
+        try:
+            installed = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            missing.append(name)
+            continue
+        if installed != version:
+            mismatched.append({"package": name, "expected": version, "installed": installed})
+    major, minor = sys.version_info[:2]
+    python_supported = (major, minor) >= (3, 11) and (major, minor) < (3, 14)
+    status = "compatible" if python_supported and not missing else "incompatible"
+    if status == "compatible" and mismatched:
+        status = "warning"
+    return {
+        "schema_version": PACKAGE_COMPATIBILITY_SCHEMA,
+        "status": status,
+        "python": f"{major}.{minor}",
+        "python_supported": python_supported,
+        "missing_dependencies": missing,
+        "version_mismatches": mismatched,
+    }
 
 
 def _validated_manifest_file(value: Any, expected_files: set[str], field: str) -> str:
@@ -339,7 +383,17 @@ def cli(root: Path | None = None, argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     verify_package_directory(package_root)
     if args.verify_only:
-        print(json.dumps({"status": "ok", "verified": True}, ensure_ascii=False))
+        manifest = verify_package_directory(package_root)
+        print(
+            json.dumps(
+                {
+                    "status": "ok",
+                    "verified": True,
+                    "compatibility": runtime_compatibility(manifest),
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0
     if not args.input or not args.output:
         parser.error("--input 与 --output 必填，或使用 --verify-only")

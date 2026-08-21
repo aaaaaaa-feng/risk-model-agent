@@ -18,7 +18,8 @@
 - 由同一份结构化事实数据生成 Web、Excel、单文件 HTML 和模型包；评分结果列以模型版本名称命名。
 - 提供半信任与完全信任两种模式。Reviewer 在独立上下文审核计划、生成代码、执行证据和报告，最多三轮修复后进入受控降级；安全阻断不能被自动批准。
 - SSE 持续输出阶段、节点、Agent、工具、状态、摘要、时间和证据引用；不输出隐藏思维链。
-- 每个 Run 冻结 Git/源码、Prompt、Tool、策略、Provider、数据和环境版本，并生成父子 Span 与脱敏 Trace Bundle；提供隔离 `run_eval_case()` 接口供后续独立评测 Harness 调用。
+- 每个 Run 冻结 Git/源码、Prompt、Tool、策略、Provider、数据和环境版本，并生成父子 Span 与脱敏 Trace Bundle；提供隔离 `run_eval_case()` 和单机评测 Harness（Suite/Case/Trial、Outcome/Trajectory/Risk/Efficiency、门禁与 Baseline/Candidate 可比性）。
+- 模型方案支持 0—12 次受控 Train/CV 小网格调参；报告记录每次试验，不使用 OOT 选参。
 
 ## 数据安全边界
 
@@ -65,7 +66,7 @@ Windows PowerShell 使用 `.venv\Scripts\python.exe`，其余步骤一致。
 cd frontend && npm test && npm run typecheck && npm run build
 ```
 
-评测预埋的隔离合成案例由 `tests/test_evaluation_contract.py` 验证。它覆盖 Manifest 可比性、半信任自动确认、安全 Trace 导出、Fake Provider 和 Worker 故障注入；它不是独立评测平台，也不是实际业务效果评测。
+评测预埋的隔离合成案例由 `tests/test_evaluation_contract.py` 和 `tests/test_evaluation_harness.py` 验证。可运行 `python scripts/run_harness.py` 执行本地合成 Smoke Suite；它证明的是框架和确定性门禁，不是实际业务效果、真实 Provider 稳定性或企业级多人评测平台。
 
 打包前检查与本机 macOS 构建：
 
@@ -79,6 +80,12 @@ Windows 使用 `scripts/build_windows.ps1`，它会依次构建前端、PyInstal
 
 ```powershell
 .\scripts\build_windows.ps1
+```
+
+离线依赖包只接受预先准备好的 wheel 缓存，不会由脚本联网下载；缺少锁定依赖时会直接失败：
+
+```bash
+.venv/bin/python scripts/build_offline_bundle.py --wheel-dir ./wheelhouse --lock requirements.lock --output ./dist/offline
 ```
 
 安装程序输出到 `dist\installer\RiskModelAgent-<version>-windows-x64-setup.exe`，同时生成 SHA-256 校验文件。它采用当前用户安装，不要求管理员权限，包含开始菜单、可选桌面快捷方式和标准卸载入口。卸载只移除应用程序，默认保留 `%LOCALAPPDATA%\RiskModelAgent` 中的项目、配置、密钥和模型数据。
@@ -96,7 +103,7 @@ GitHub Actions 会在 Windows Runner 上真实执行“构建安装器 → 静�
 
 ## 正式规格
 
-`docs/01`—`docs/10` 是 V1 的正式产品与研发规格；原始访谈基线保存在 `docs/archive/13-需求访谈决策基线.md`，仅用于追溯。独立评测 Harness、多用户权限、内网多人部署、代码签名和生产部署验收均属于后续项目，不伪装成 V1 已交付能力。
+`docs/01`—`docs/10` 是产品与研发规格；`docs/09` 同时记录本地 Harness 的边界。原始访谈基线保存在 `docs/archive/13-需求访谈决策基线.md`，仅用于追溯。多人权限、内网多人部署、Holdout 权限治理、代码签名和生产部署验收仍属于后续项目，不伪装成已交付能力。
 
 ## License
 

@@ -29,6 +29,8 @@ hiddenimports = [
     "ipykernel_launcher",
     "skops.io",
     "app.evaluation.adapter",
+    "app.evaluation.harness",
+    "app.evaluation.defaults",
     "app.evaluation.contracts",
     "app.evaluation.fakes",
     *collect_submodules("langgraph"),

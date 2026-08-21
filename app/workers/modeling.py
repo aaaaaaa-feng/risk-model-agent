@@ -14,7 +14,12 @@ from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold, cross_val_predict
+from sklearn.model_selection import (
+    ParameterGrid,
+    StratifiedKFold,
+    cross_val_predict,
+    cross_val_score,
+)
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -336,6 +341,76 @@ def _selection_score(metrics: dict[str, Any], monotonic: dict[str, Any]) -> floa
     return float(auc + 0.55 * ks - 0.12 * brier - penalty)
 
 
+def _search_space(name: str) -> list[dict[str, Any]]:
+    """Small, deterministic search spaces kept intentionally bounded."""
+
+    spaces: dict[str, dict[str, list[Any]]] = {
+        "regularized_logistic": {"model__C": [0.1, 0.3, 1.0]},
+        "random_forest": {"model__max_depth": [5, 8, 12], "model__min_samples_leaf": [10, 20]},
+        "extra_trees": {"model__max_depth": [6, 9, 12], "model__min_samples_leaf": [10, 15]},
+        "xgboost": {"model__max_depth": [3, 4], "model__learning_rate": [0.025, 0.05]},
+        "lightgbm": {"model__num_leaves": [15, 20, 31], "model__learning_rate": [0.025, 0.05]},
+        "catboost": {"model__depth": [4, 6], "model__learning_rate": [0.025, 0.05]},
+    }
+    return list(ParameterGrid(spaces.get(name, {})))
+
+
+def _tune_candidate(
+    name: str,
+    base: Any,
+    train: pd.DataFrame,
+    target: str,
+    features: Sequence[str],
+    cv: StratifiedKFold,
+    budget: int,
+) -> tuple[Any, list[dict[str, Any]]]:
+    if budget <= 0 or name in {"dummy", "scorecard"}:
+        return base, []
+    candidates = _search_space(name)[: max(1, min(int(budget), 12))]
+    trials: list[dict[str, Any]] = []
+    best = base
+    best_score = float("-inf")
+    for index, parameters in enumerate(candidates, start=1):
+        estimator = clone(base).set_params(**parameters)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            scores = cross_val_score(
+                estimator,
+                train[list(features)],
+                train[target].astype(int),
+                cv=cv,
+                scoring="roc_auc",
+                n_jobs=1,
+            )
+        mean_score = float(np.nanmean(scores))
+        trials.append(
+            {
+                "trial": index,
+                "parameters": parameters,
+                "roc_auc": mean_score,
+                "fold_scores": [float(value) for value in scores],
+            }
+        )
+        if mean_score > best_score:
+            best_score = mean_score
+            best = estimator
+    return best, trials
+
+
+def _selected_parameters(estimator: Any) -> dict[str, Any]:
+    try:
+        values = estimator.get_params(deep=True)
+    except (AttributeError, TypeError):
+        return {}
+    selected: dict[str, Any] = {}
+    for key, value in values.items():
+        if not key.startswith("model__") or isinstance(value, (dict, list, tuple, set)):
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            selected[key] = value
+    return selected
+
+
 def _fit_one_candidate(
     name: str,
     base: Any,
@@ -347,11 +422,15 @@ def _fit_one_candidate(
     negative: int,
     cv: StratifiedKFold,
     score_config: dict[str, float] | None,
+    search_budget: int = 0,
 ) -> tuple[dict[str, Any], ModelBundle]:
+    tuned_base, search_trials = _tune_candidate(
+        name, base, train, target, features, cv, search_budget
+    )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         oof_probability = cross_val_predict(
-            clone(base),
+            clone(tuned_base),
             train[list(features)],
             train[target].astype(int),
             cv=cv,
@@ -361,7 +440,7 @@ def _fit_one_candidate(
     oof_metrics = binary_metrics(train[target].to_numpy(dtype=int), oof_probability)
     calibration_candidates: list[dict[str, Any]] = []
     fitted: dict[str, Any] = {}
-    for calibration_name, estimator in _calibrators(base, len(train), positive, name):
+    for calibration_name, estimator in _calibrators(tuned_base, len(train), positive, name):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             estimator.fit(train[list(features)], train[target].astype(int))
@@ -412,6 +491,12 @@ def _fit_one_candidate(
             "strategy": "class_weight_or_scale_pos_weight",
         },
         "feature_importance": _feature_importance(estimator, features),
+        "search": {
+            "enabled": bool(search_budget > 0 and search_trials),
+            "budget": max(0, int(search_budget)),
+            "trials": search_trials,
+            "selected_parameters": _selected_parameters(tuned_base),
+        },
     }
     bundle = ModelBundle(
         name,
@@ -433,6 +518,7 @@ def train_candidates(
     models: Sequence[str] | None = None,
     resource: ResourcePlan | None = None,
     score_config: dict[str, float] | None = None,
+    search_budget: int = 0,
 ) -> tuple[dict[str, Any], dict[str, ModelBundle]]:
     selected_models = list(models or recommend_models(resource))
     availability = available_models()
@@ -457,7 +543,17 @@ def train_candidates(
         try:
             base = _candidate(name, train, features, positive, negative)
             candidate, bundle = _fit_one_candidate(
-                name, base, train, test, target, features, positive, negative, cv, score_config
+                name,
+                base,
+                train,
+                test,
+                target,
+                features,
+                positive,
+                negative,
+                cv,
+                score_config,
+                search_budget=max(0, min(int(search_budget), 12)),
             )
             candidates.append(candidate)
             bundles[name] = bundle
@@ -508,5 +604,6 @@ def train_candidates(
         },
         "oot_used_for_selection": False,
         "resource_plan": resource.as_dict() if resource else None,
+        "search_budget": max(0, min(int(search_budget), 12)),
     }
     return report, bundles

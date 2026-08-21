@@ -2,7 +2,7 @@
 
 ## 1. 当前范围与事实边界
 
-V1 只内置“可评测接口”，不内置独立评测管理平台。当前实现包括：
+V1.1 在 V1 的可评测接口之上，交付了一个单机、文件存储的独立评测 Harness 基础；它不是多人评测后台，也不接收原始数据。当前实现包括：
 
 - 不可变 Run Manifest；
 - Run/Tool/Reviewer/Provider/Human Gate 层级 Span；
@@ -10,8 +10,11 @@ V1 只内置“可评测接口”，不内置独立评测管理平台。当前�
 - 可由 Python 直接调用的隔离 Target Adapter；
 - Fake Provider、Worker 错误/超时和 Human Gate 决策注入；
 - Baseline/Candidate Manifest 可比性检查。
+- 版本化 Suite/Case/Trial 注册、Core/Edge/Safety/Recovery/Bad Case 分类；
+- Outcome、Trajectory、Risk、Efficiency 四类确定性摘要和可配置门禁；
+- 本地异步 API、同步 CLI、运行结果和 Trace Bundle 的原子落盘。
 
-当前没有交付评测后台、排行榜、Holdout 管理、Nightly 真实 API 实验、LLM Judge 校准或线上 Bad Case 管理平台。合成案例通过只证明机制和固定流程，不证明真实 Provider 能力、业务模型效果或生产稳定性。
+当前没有交付多人评测后台、排行榜、真正隔离的 Holdout 权限、Nightly 真实 API 调度、LLM Judge 校准或线上 Bad Case 管理平台。合成案例通过只证明机制和固定流程，不证明真实 Provider 能力、业务模型效果或生产稳定性。
 
 当前 Trace Contract 以“一次建模 Run”为边界。项目对话仍使用可重连的 Conversation Event，尚未纳入同一 Target Adapter 和 Trace Bundle；不将这部分写成已交付。
 
@@ -119,7 +122,7 @@ result = run_eval_case(
 )
 ```
 
-`provider_profile` 支持三种明确语义：`deterministic` 不调用 LLM，`fake_provider` 调用无网络的固定测试替身，`configured_provider` 通过独立的 `provider` 参数调用真实端点。真实端点的 `api_key` 只在本次 Python 调用内存中传递，不写入评测工作区配置、Manifest 或 Trace；真实 Provider 多 Trial Baseline 仍属于后续独立 Harness。
+`provider_profile` 支持三种明确语义：`deterministic` 不调用 LLM，`fake_provider` 调用无网络的固定测试替身，`configured_provider` 通过独立的 `provider` 参数调用真实端点。真实端点的 `api_key` 只在本次 Python 调用内存中传递，不写入评测工作区配置、Manifest 或 Trace；默认 CLI 和 API 不会主动调用真实 Provider，真实 Provider 多 Trial 仍需使用方明确配置并承担网络/密钥治理。
 
 Adapter 会：
 
@@ -180,6 +183,25 @@ Bundle 只包含：
 
 这些仍属于本地合成和框架验证。真实 API 的多 Trial 成功率、方差、成本、Reviewer 召回/误报和人工 Judge 一致性必须由后续独立 Harness 建立 Baseline。
 
-## 10. 后续独立 Harness
+## 10. 本地 Harness 使用方式
 
-后续项目再建设 Core/Edge/Safety/Recovery/Bad Case 数据集、Outcome/Trajectory/Risk/Response Evaluator、Holdout、Baseline/Candidate Diff、PR/Nightly/Release Gate、人工 Rubric 与 LLM Judge 校准、线上反馈和权限治理。该平台不得成为绕过 SafeEvidence 的新数据出口。
+Suite 通过以下接口保存在当前工作文件夹的 `evaluations/` 下：
+
+```text
+POST /api/v1/evaluations/suites
+GET  /api/v1/evaluations/suites
+POST /api/v1/evaluations/runs
+GET  /api/v1/evaluations/runs/{run_id}
+```
+
+本地命令默认执行内置合成 Smoke Suite：
+
+```text
+python scripts/run_harness.py
+```
+
+每个 Run 会原子写入 `run.json`、每个 Case/Trial 的结果和脱敏 Trace Bundle。门禁至少检查预期终态、错误率、安全事件率和 Trace 完整性；Baseline/Candidate 比较前先检查 Manifest 可比性，条件不同会阻断直接归因。
+
+## 11. 后续独立 Harness 平台
+
+后续再建设真正的 Core/Edge/Safety/Recovery/Bad Case 数据集治理、受限 Holdout、PR/Nightly/Release Gate、人工 Rubric 与 LLM Judge 校准、线上反馈和权限治理。当前本地 Harness 是可替换的基础，不把它宣传成企业评测平台，也不得成为绕过 SafeEvidence 的新数据出口。

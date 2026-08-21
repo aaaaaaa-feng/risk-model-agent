@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from .artifacts import router as artifacts_router
 from .conversations import router as conversations_router
+from .evaluations import router as evaluations_router
 from .notebooks import router as notebooks_router
 from .projects import router as projects_router
 from .providers import router as providers_router
@@ -17,3 +18,4 @@ router.include_router(artifacts_router)
 router.include_router(providers_router)
 router.include_router(conversations_router)
 router.include_router(workspace_router)
+router.include_router(evaluations_router)

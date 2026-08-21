@@ -76,6 +76,11 @@ class AppPaths:
         return self.root / "archives"
 
     @property
+    def evaluations(self) -> Path:
+        """Local Harness output; never sent to a provider by the app."""
+        return self.root / "evaluations"
+
+    @property
     def legacy(self) -> Path:
         return self.root / "legacy-v0"
 
@@ -96,6 +101,7 @@ class AppPaths:
             self.secrets,
             self.backups,
             self.archives,
+            self.evaluations,
             self.legacy,
         ):
             path.mkdir(parents=True, exist_ok=True)
