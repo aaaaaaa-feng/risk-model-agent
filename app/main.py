@@ -41,14 +41,15 @@ def create_app(
     )
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        active_context = application.state.context
         if should_migrate:
             source = Path(os.getenv("RISK_AGENT_LEGACY_RUNTIME", str(Path.cwd() / "runtime")))
-            if source.resolve() != context.paths.root.resolve():
-                context.migration.migrate(source)
-        context.engine.recover_incomplete()
+            if source.resolve() != active_context.paths.root.resolve():
+                active_context.migration.migrate(source)
+        active_context.engine.recover_incomplete()
         yield
-        context.shutdown()
+        application.state.context.shutdown()
 
     application = FastAPI(
         title="Risk Model Agent",
@@ -81,6 +82,7 @@ def create_app(
             "CHECKSUM",
             "NOT_RECOVERABLE",
             "LOCKED",
+            "WORKSPACE",
         )
         status = 409 if any(marker in code for marker in conflict_markers) else 400
         return JSONResponse(
@@ -157,16 +159,17 @@ def create_app(
 
     @application.get("/api/v1/health", tags=["system"])
     def health() -> dict[str, Any]:
-        settings = context.pipeline._gateway("").settings
+        active_context = application.state.context
+        settings = active_context.pipeline._gateway("").settings
         return {
             "status": "ok",
             "version": APP_VERSION,
             "runtime": "local",
             "python": platform.python_version(),
             "platform": platform.system(),
-            "data_directory": str(context.paths.root),
-            "synced_path_warning": is_synced_path(context.paths.root),
-            "langgraph_checkpoint": context.engine.persistence_mode,
+            "data_directory": str(active_context.paths.root),
+            "synced_path_warning": is_synced_path(active_context.paths.root),
+            "langgraph_checkpoint": active_context.engine.persistence_mode,
             "provider": {
                 "enabled": settings.llm_enabled,
                 "name": settings.provider,

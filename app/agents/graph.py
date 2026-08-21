@@ -678,6 +678,10 @@ class RunEngine:
                     error_type="ReviewerPolicyError" if blocked_code else None,
                     evidence={"decision_id": decision["id"]},
                 )
+                # Publish the terminal Run status only after its terminal evidence
+                # is durable.  Consumers treat runs.status as the completion
+                # boundary, so exposing it before the event/trace creates a short
+                # but observable split-brain state in SSE and evaluation exports.
                 run_update = {
                     "status": "blocked",
                     "stage": stage,
@@ -687,11 +691,6 @@ class RunEngine:
                 }
                 if blocked_code:
                     run_update["error"] = blocked_code
-                self.database.update(
-                    "runs",
-                    run_id,
-                    run_update,
-                )
                 self.database.update(
                     "target_tasks",
                     state["target_task_id"],
@@ -722,6 +721,7 @@ class RunEngine:
                     error_code=blocked_code,
                     error_type="ReviewerPolicyError" if blocked_code else None,
                 )
+                self.database.update("runs", run_id, run_update)
                 return {output_key: response, "halted": True}
             approved_span = self.traces.finish_span(
                 span["id"],
@@ -759,19 +759,6 @@ class RunEngine:
         timestamp = now_iso()
         run = self.catalog.require("runs", run_id)
         merged = _jsonable({**(run.get("state") or {}), **state})
-        self.database.update(
-            "runs",
-            run_id,
-            {
-                "status": "succeeded",
-                "stage": "completed",
-                "node": "complete",
-                "progress": 1,
-                "state_json": merged,
-                "finished_at": timestamp,
-                "updated_at": timestamp,
-            },
-        )
         if run.get("target_task_id"):
             self.database.update(
                 "target_tasks",
@@ -804,6 +791,19 @@ class RunEngine:
                 },
             },
         )
+        self.database.update(
+            "runs",
+            run_id,
+            {
+                "status": "succeeded",
+                "stage": "completed",
+                "node": "complete",
+                "progress": 1,
+                "state_json": merged,
+                "finished_at": timestamp,
+                "updated_at": timestamp,
+            },
+        )
 
     def _mark_failure(self, run_id: str, error: Exception) -> None:
         timestamp = now_iso()
@@ -812,11 +812,6 @@ class RunEngine:
         except KeyError:
             return
         code = str(error).split(":", 1)[0][:160] or type(error).__name__
-        self.database.update(
-            "runs",
-            run_id,
-            {"status": "failed", "error": code, "finished_at": timestamp, "updated_at": timestamp},
-        )
         if run.get("target_task_id"):
             self.database.update(
                 "target_tasks", run["target_task_id"], {"status": "failed", "updated_at": timestamp}
@@ -852,10 +847,18 @@ class RunEngine:
                 },
             },
         )
+        self.database.update(
+            "runs",
+            run_id,
+            {"status": "failed", "error": code, "finished_at": timestamp, "updated_at": timestamp},
+        )
 
     def shutdown(self) -> None:
         self.worker.shutdown()
-        self._executor.shutdown(wait=False, cancel_futures=False)
+        # The graph owns SQLite/checkpoint writes until its future returns.  A
+        # non-waiting shutdown allowed evaluation workspace cleanup to race WAL
+        # removal and could leave the exported terminal evidence incomplete.
+        self._executor.shutdown(wait=True, cancel_futures=False)
         connection = getattr(self, "_checkpoint_connection", None)
         if connection is not None:
             try:

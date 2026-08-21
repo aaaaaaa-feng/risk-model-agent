@@ -10,6 +10,7 @@
 - 统一报告、模型包、批量评分、归档、备份、迁移和旧版只读保留。
 - DeepSeek、Kimi、Kimi Code、OpenAI、Anthropic/custom Provider 设置与连通性测试。
 - Run Manifest、层级 Trace Span、Reviewer 来源状态、脱敏 Trace Bundle、隔离 Target Adapter 与基础故障注入。
+- 首次启动工作文件夹选择、原子指针、运行时上下文切换和项目级目录清单；有活动 Run 或已有项目时禁止切换。
 
 ## 2. V1 发布门禁
 

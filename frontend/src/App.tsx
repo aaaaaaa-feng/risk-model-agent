@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { useRunEvents } from "./hooks";
 import { isCurrentSelection, mergeEventsForRun } from "./runState";
-import type { Decision, Project, ProjectDetail, Run, RunEvent, Settings } from "./types";
+import type { Decision, Project, ProjectDetail, Run, RunEvent, Settings, WorkspaceStatus } from "./types";
 import { AgentChat } from "./components/AgentChat";
 import { DataWorkbench } from "./components/DataWorkbench";
 import { DecisionWorkbench } from "./components/DecisionWorkbench";
@@ -13,17 +13,19 @@ import { ReportView } from "./components/ReportView";
 import { RunWorkbench } from "./components/RunWorkbench";
 import { SettingsDrawer } from "./components/SettingsDrawer";
 import { StageRail } from "./components/StageRail";
+import { WorkspaceSetup } from "./components/WorkspaceSetup";
 
 type View = "workbench" | "report" | "history";
 
 export function App() {
-  const [projects,setProjects]=useState<Project[]>([]);const [selectedId,setSelectedId]=useState<string|null>(localStorage.getItem("risk-agent-project"));const [detail,setDetail]=useState<ProjectDetail|null>(null);const [runId,setRunId]=useState<string|null>(null);const [run,setRun]=useState<Run|null>(null);const [decision,setDecision]=useState<Decision|null>(null);const [events,setEvents]=useState<RunEvent[]>([]);const [settings,setSettings]=useState<Settings|null>(null);const [view,setView]=useState<View>("workbench");const [dataMode,setDataMode]=useState(false);const [createOpen,setCreateOpen]=useState(false);const [settingsOpen,setSettingsOpen]=useState(false);const [busy,setBusy]=useState(false);const [toast,setToast]=useState<{message:string;error:boolean}|null>(null);const tabs=useRef<Array<HTMLButtonElement|null>>([]);const selectedRef=useRef<string|null>(selectedId);const runRef=useRef<string|null>(runId);const detailAbort=useRef<AbortController|null>(null);const runAbort=useRef<AbortController|null>(null);const detailRequest=useRef(0);const runRequest=useRef(0);
+  const [projects,setProjects]=useState<Project[]>([]);const [selectedId,setSelectedId]=useState<string|null>(localStorage.getItem("risk-agent-project"));const [detail,setDetail]=useState<ProjectDetail|null>(null);const [runId,setRunId]=useState<string|null>(null);const [run,setRun]=useState<Run|null>(null);const [decision,setDecision]=useState<Decision|null>(null);const [events,setEvents]=useState<RunEvent[]>([]);const [settings,setSettings]=useState<Settings|null>(null);const [workspace,setWorkspace]=useState<WorkspaceStatus|null>(null);const [view,setView]=useState<View>("workbench");const [dataMode,setDataMode]=useState(false);const [createOpen,setCreateOpen]=useState(false);const [settingsOpen,setSettingsOpen]=useState(false);const [workspaceOpen,setWorkspaceOpen]=useState(false);const [busy,setBusy]=useState(false);const [toast,setToast]=useState<{message:string;error:boolean}|null>(null);const tabs=useRef<Array<HTMLButtonElement|null>>([]);const selectedRef=useRef<string|null>(selectedId);const runRef=useRef<string|null>(runId);const detailAbort=useRef<AbortController|null>(null);const runAbort=useRef<AbortController|null>(null);const detailRequest=useRef(0);const runRequest=useRef(0);
   const notify=useCallback((message:string,error=false)=>{setToast({message,error});window.setTimeout(()=>setToast(null),3200);},[]);
   const loadSettings=useCallback(async()=>{try{const value=await api.get<any>("/providers/settings");setSettings(value.settings);}catch(error){notify(msg(error),true);}},[notify]);
+  const loadWorkspace=useCallback(async()=>{try{const value=await api.get<{workspace:WorkspaceStatus}>("/workspace");setWorkspace(value.workspace);if(value.workspace.needs_setup)setWorkspaceOpen(true);}catch(error){notify(msg(error),true);}},[notify]);
   const loadProjects=useCallback(async()=>{try{const value=await api.get<{projects:Project[]}>("/projects");setProjects(value.projects);setSelectedId(current=>{if(current&&value.projects.some(p=>p.id===current))return current;return value.projects[0]?.id||null;});}catch(error){notify(msg(error),true);}},[notify]);
   const loadDetail=useCallback(async()=>{const projectId=selectedId;const requestId=++detailRequest.current;detailAbort.current?.abort();if(!projectId){setDetail(null);return;}const controller=new AbortController();detailAbort.current=controller;try{const value=await api.get<ProjectDetail>(`/projects/${projectId}`,{signal:controller.signal});if(requestId!==detailRequest.current||selectedRef.current!==projectId)return;setDetail(value);setRunId(current=>{if(current&&value.runs.some(item=>item.id===current))return current;const active=value.runs.find(item=>["awaiting_decision","running","queued"].includes(item.status));return active?.id||value.runs[0]?.id||null;});}catch(error){if(!isAbort(error))notify(msg(error),true);}},[selectedId,notify]);
   const loadRun=useCallback(async()=>{const projectId=selectedId;const expectedRunId=runId;const requestId=++runRequest.current;runAbort.current?.abort();if(!expectedRunId){setRun(null);setDecision(null);setEvents([]);return;}const controller=new AbortController();runAbort.current=controller;try{const [runValue,eventValue]=await Promise.all([api.get<any>(`/runs/${expectedRunId}`,{signal:controller.signal}),api.get<any>(`/runs/${expectedRunId}/events`,{signal:controller.signal})]);if(requestId!==runRequest.current||!isCurrentSelection(projectId,expectedRunId,selectedRef.current,runRef.current))return;setRun(runValue.run);setDecision(runValue.pending_decisions?.[0]||null);setEvents(mergeEventsForRun([],eventValue.events,expectedRunId));}catch(error){if(!isAbort(error))notify(msg(error),true);}},[selectedId,runId,notify]);
-  useEffect(()=>{loadProjects();loadSettings();},[]);
+  useEffect(()=>{loadWorkspace();loadProjects();loadSettings();},[]);
   useEffect(()=>{selectedRef.current=selectedId;if(selectedId){localStorage.setItem("risk-agent-project",selectedId);setDataMode(false);}loadDetail();return()=>detailAbort.current?.abort();},[selectedId,loadDetail]);
   useEffect(()=>{runRef.current=runId;setRun(null);setDecision(null);setEvents([]);loadRun();return()=>runAbort.current?.abort();},[runId,loadRun]);
   useEffect(()=>{const timer=window.setInterval(()=>{loadDetail();if(runId)loadRun();},5000);return()=>window.clearInterval(timer);},[loadDetail,loadRun,runId]);
@@ -33,6 +35,7 @@ export function App() {
   const retry=async()=>{if(!run||!detail)return;try{const value=await api.post<any>("/runs",{project_id:detail.project.id,target_task_id:run.target_task_id,mode:detail.project.mode});runRef.current=value.run.id;setRunId(value.run.id);setView("workbench");notify("新 Run 已进入队列");}catch(error){notify(msg(error),true);}};
   const selectProject=(id:string)=>{selectedRef.current=id;runRef.current=null;detailAbort.current?.abort();runAbort.current?.abort();setSelectedId(id);setRunId(null);setRun(null);setDecision(null);setEvents([]);setView("workbench");};
   const selectRun=(id:string)=>{runRef.current=id;setRun(null);setDecision(null);setEvents([]);setRunId(id);setDataMode(false);setView("workbench");};
+  const workspaceChanged=async(next:WorkspaceStatus)=>{setWorkspace(next);setWorkspaceOpen(false);setSelectedId(null);selectedRef.current=null;setDetail(null);setRunId(null);setRun(null);setDecision(null);setEvents([]);localStorage.removeItem("risk-agent-project");await Promise.all([loadProjects(),loadSettings()]);};
   const activateTab=(next:View,index?:number)=>{setView(next);if(index!=null)tabs.current[index]?.focus();};
   const keyTab=(event:React.KeyboardEvent,index:number)=>{let next=index;if(event.key==="ArrowRight")next=(index+1)%3;else if(event.key==="ArrowLeft")next=(index+2)%3;else if(event.key==="Home")next=0;else if(event.key==="End")next=2;else return;event.preventDefault();activateTab((["workbench","report","history"] as View[])[next],next);};
   const selectedProject=detail?.project||projects.find(item=>item.id===selectedId)||null;
@@ -54,7 +57,8 @@ export function App() {
     </main>
     <StageRail run={run} decision={decision} events={events}/>
     <NewProjectDialog open={createOpen} busy={busy} onClose={()=>setCreateOpen(false)} onCreate={createProject} onCreateDemo={createDemo}/>
-    <SettingsDrawer open={settingsOpen} settings={settings} onClose={()=>setSettingsOpen(false)} onChanged={loadSettings} notify={notify}/>
+    <SettingsDrawer open={settingsOpen} settings={settings} workspace={workspace} onClose={()=>setSettingsOpen(false)} onChanged={loadSettings} onChangeWorkspace={()=>setWorkspaceOpen(true)} notify={notify}/>
+    {workspace&&workspaceOpen&&<WorkspaceSetup workspace={workspace} onSelected={workspaceChanged} onClose={workspace.needs_setup&&workspace.project_count===0?undefined:()=>setWorkspaceOpen(false)} notify={notify}/>}
     {toast&&<div className={`toast ${toast.error?"error":""}`} role="status">{toast.message}</div>}
   </div>;
 }

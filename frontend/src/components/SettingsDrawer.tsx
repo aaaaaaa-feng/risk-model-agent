@@ -1,12 +1,14 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { Settings } from "../types";
+import type { Settings, WorkspaceStatus } from "../types";
 
 interface Props {
   open: boolean;
   settings: Settings | null;
+  workspace: WorkspaceStatus | null;
   onClose: () => void;
   onChanged: () => void;
+  onChangeWorkspace: () => void;
   notify: (message: string, error?: boolean) => void;
 }
 
@@ -19,7 +21,7 @@ const providerPresets: Record<string, { api_format: string; base_url: string; mo
   anthropic: { api_format: "anthropic", base_url: "https://api.anthropic.com", model: "claude-sonnet-4-5" },
 };
 
-export function SettingsDrawer({ open, settings, onClose, onChanged, notify }: Props) {
+export function SettingsDrawer({ open, settings, workspace, onClose, onChanged, onChangeWorkspace, notify }: Props) {
   const [form, setForm] = useState<Record<string, any>>({});
   const [apiKey, setApiKey] = useState("");
   const [clearKey, setClearKey] = useState(false);
@@ -121,6 +123,10 @@ export function SettingsDrawer({ open, settings, onClose, onChanged, notify }: P
         <div className="inline-actions"><button type="button" className="button secondary" onClick={createBackup} disabled={busy === "backup"}>创建数据库备份</button><button type="button" className="text-danger" onClick={reset}>恢复默认设置</button></div>
         <div className="backup-list">{backups.slice(0, 4).map(item => <div key={item.id}><span>{new Date(item.created_at).toLocaleString()}</span><a href={`/api/v1/backups/${item.id}/download`}>下载</a></div>)}</div>
       </SettingsSection>
+      {workspace&&<SettingsSection title="工作文件夹" description="首次启动选择后，后续项目级数据都保存在这里。">
+        <div className="workspace-setting"><code>{workspace.path}</code><button type="button" className="button secondary compact" onClick={onChangeWorkspace}>更换文件夹</button></div>
+        <p className="workspace-setting-note">项目文件夹：{workspace.project_storage}。已有项目运行时不能切换，避免把 Run 和 Trace 写入不同工作区。</p>
+      </SettingsSection>}
       <div className="drawer-save"><button className="button primary" disabled={busy === "save"}>{busy === "save" ? "保存中…" : "保存全部设置"}</button></div>
     </form>
   </aside></>;

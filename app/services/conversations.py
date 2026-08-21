@@ -210,7 +210,10 @@ class ConversationService:
         return self.database.get("conversation_events", event["id"]) or event
 
     def shutdown(self) -> None:
-        self._executor.shutdown(wait=False, cancel_futures=False)
+        # Workspace changes and app shutdown must not leave a response thread
+        # writing conversation events into the old root after the new context
+        # becomes active.
+        self._executor.shutdown(wait=True, cancel_futures=False)
 
 
 def _chunks(value: str, size: int) -> list[str]:

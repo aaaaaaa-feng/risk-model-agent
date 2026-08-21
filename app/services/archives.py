@@ -13,7 +13,7 @@ from typing import Any
 
 from app.core.database import JSON_COLUMNS, SCHEMA_VERSION, Database, new_id, now_iso
 from app.core.config import MAX_ARCHIVE_BYTES
-from app.core.paths import AppPaths, get_paths
+from app.core.paths import AppPaths, PROJECT_MARKER_FILE, get_paths
 from app.core.security import decrypt_file_payload, encrypt_file_payload, sha256_file
 from app.evaluation.manifest import canonical_hash
 
@@ -273,6 +273,24 @@ class ArchiveService:
             "metadata_json": metadata,
             "legacy_readonly": False,
         }
+        project_manifest = staged_project / PROJECT_MARKER_FILE
+        project_manifest.write_text(
+            json.dumps(
+                {
+                    "schema_version": "risk-agent-project/v1",
+                    "project_id": restored_id,
+                    "name": project_row["name"],
+                    "status": project_row["status"],
+                    "mode": project_row["mode"],
+                    "created_at": project_row["created_at"],
+                    "updated_at": project_row["updated_at"],
+                    "restored_from_project_id": original.get("id"),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         rows: list[tuple[str, dict[str, Any]]] = [("projects", project_row)]
         manifest_hash_map: dict[str, str] = {}
         try:

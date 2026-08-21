@@ -54,6 +54,7 @@ class CatalogService:
         directory = self.paths.project_dir(project["id"])
         for child in ("assets", "datasets", "runs", "notebooks", "scores", "trash"):
             (directory / child).mkdir(parents=True, exist_ok=True)
+        self._write_project_manifest(project)
         self.ensure_conversation(project["id"])
         return project
 
@@ -82,36 +83,81 @@ class CatalogService:
         if "mode" in allowed and allowed["mode"] not in {"semi_trusted", "fully_trusted"}:
             raise ValueError("PROJECT_MODE_INVALID")
         allowed["updated_at"] = now_iso()
-        return self.database.update("projects", project_id, allowed)
+        updated = self.database.update("projects", project_id, allowed)
+        self._write_project_manifest(updated)
+        return updated
 
     def archive_project(self, project_id: str) -> dict[str, Any]:
         self.get_project(project_id)
         timestamp = now_iso()
-        return self.database.update(
+        updated = self.database.update(
             "projects",
             project_id,
             {"status": "archived", "archived_at": timestamp, "updated_at": timestamp},
         )
+        self._write_project_manifest(updated)
+        return updated
 
     def restore_project(self, project_id: str) -> dict[str, Any]:
         project = self.database.get("projects", project_id)
         if not project:
             raise KeyError(project_id)
         timestamp = now_iso()
-        return self.database.update(
+        updated = self.database.update(
             "projects",
             project_id,
             {"status": "active", "archived_at": None, "trashed_at": None, "updated_at": timestamp},
         )
+        self._write_project_manifest(updated)
+        return updated
 
     def trash_project(self, project_id: str) -> dict[str, Any]:
         self.get_project(project_id)
         timestamp = now_iso()
-        return self.database.update(
+        updated = self.database.update(
             "projects",
             project_id,
             {"status": "trashed", "trashed_at": timestamp, "updated_at": timestamp},
         )
+        self._write_project_manifest(updated)
+        return updated
+
+    def _write_project_manifest(self, project: dict[str, Any]) -> None:
+        """Keep a small human-readable project boundary beside its files.
+
+        SQLite remains the source of truth.  This manifest is deliberately
+        limited to non-sensitive identity and storage metadata so a project
+        folder can be recognized during backup, migration, or manual inspection
+        without exposing rows, labels, or API credentials.
+        """
+        project_id = str(project["id"])
+        directory = self.paths.project_dir(project_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": "risk-agent-project/v1",
+            "project_id": project_id,
+            "name": str(project.get("name") or ""),
+            "status": str(project.get("status") or "active"),
+            "mode": str(project.get("mode") or "semi_trusted"),
+            "created_at": project.get("created_at"),
+            "updated_at": project.get("updated_at"),
+            "storage": {
+                "assets": "assets/",
+                "datasets": "datasets/",
+                "runs": "runs/",
+                "notebooks": "notebooks/",
+                "scores": "scores/",
+                "trash": "trash/",
+            },
+        }
+        target = self.paths.project_manifest(project_id)
+        temporary = target.with_name(f".{target.name}.tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def register_asset(
         self,

@@ -87,8 +87,9 @@ GitHub Actions 会在 Windows Runner 上真实执行“构建安装器 → 静�
 
 ## 本地数据与升级
 
-- macOS：`~/Library/Application Support/RiskModelAgent`
-- Windows：`%LOCALAPPDATA%\RiskModelAgent`
+- 首次启动会弹出工作文件夹设置。建议选择本机专属目录；后续所有活动数据都在该目录中，项目文件位于 `projects/<project_id>/`，每个项目独立保存资产、数据版本、Notebook、Run、报告、模型包和评分结果。应用目录只保留一个用于下次启动定位工作区的指针。
+- macOS 默认控制目录：`~/Library/Application Support/RiskModelAgent`
+- Windows 默认控制目录：`%LOCALAPPDATA%\RiskModelAgent`
 - Linux 开发环境：`$XDG_DATA_HOME/risk-model-agent` 或 `~/.local/share/risk-model-agent`
 
 首次从旧版启动时，系统先快照旧数据库，再复制完整旧运行目录；可兼容的项目/数据版本迁入 V1，不兼容 Run 作为只读记录保留。源数据不会由迁移器静默删除。
