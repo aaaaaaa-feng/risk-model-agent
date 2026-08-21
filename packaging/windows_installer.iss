@@ -55,4 +55,6 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 Filename: "{app}\{#MyAppExeName}"; Description: "启动 {#MyAppName}"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
 ; Deliberately no [UninstallDelete] entry for %LOCALAPPDATA%\RiskModelAgent.
-; Models, project data, settings and encrypted secrets survive application uninstall.
+; The first-run-selected workspace is outside the install directory and is never
+; touched by uninstall. Models, project data, settings and encrypted secrets
+; therefore survive application uninstall.

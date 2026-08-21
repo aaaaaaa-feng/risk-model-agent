@@ -6,6 +6,7 @@ from .notebooks import router as notebooks_router
 from .projects import router as projects_router
 from .providers import router as providers_router
 from .runs import router as runs_router
+from .workspace import router as workspace_router
 
 
 router = APIRouter()
@@ -15,3 +16,4 @@ router.include_router(notebooks_router)
 router.include_router(artifacts_router)
 router.include_router(providers_router)
 router.include_router(conversations_router)
+router.include_router(workspace_router)

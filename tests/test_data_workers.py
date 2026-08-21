@@ -62,14 +62,44 @@ def test_target_freeze_and_customer_isolated_oot_split():
         customer_key="customer_id",
     )
     groups = {
-        name: set(frozen.iloc[indices]["customer_id"])
-        for name, indices in split["indices"].items()
+        name: set(frozen.iloc[indices]["customer_id"]) for name, indices in split["indices"].items()
     }
     assert not (groups["train"] & groups["test"])
     assert not (groups["train"] & groups["oot"])
     assert not (groups["test"] & groups["oot"])
     assert split["oot_locked"] is True
     assert split["fit_scope"] == "train_only"
+    development = split["indices"]["train"] + split["indices"]["test"]
+    times = pd.to_datetime(frozen["application_date"])
+    assert times.iloc[development].max() < times.iloc[split["indices"]["oot"]].min()
+    assert len(development) + len(split["indices"]["oot"]) + len(split["excluded_indices"]) == len(
+        frozen
+    )
+    assert split["strict_time_boundary"] is True
+
+
+def test_time_oot_excludes_cross_boundary_customers_instead_of_backdating_oot():
+    frame = pd.DataFrame(
+        {
+            "customer_id": [f"C{index:03d}" for index in range(38)] + ["CROSS", "CROSS"],
+            "application_date": pd.date_range("2025-01-01", periods=38).tolist()
+            + [pd.Timestamp("2025-01-02"), pd.Timestamp("2025-03-01")],
+            "Y": [0, 1] * 20,
+        }
+    )
+    split = split_dataset(
+        frame,
+        "Y",
+        method="time_holdout",
+        time_column="application_date",
+        customer_key="customer_id",
+        oot_size=0.2,
+    )
+    excluded_customers = set(frame.iloc[split["excluded_indices"]]["customer_id"])
+    assert "CROSS" in excluded_customers
+    development = split["indices"]["train"] + split["indices"]["test"]
+    parsed = pd.to_datetime(frame["application_date"])
+    assert parsed.iloc[development].max() < parsed.iloc[split["indices"]["oot"]].min()
 
 
 def test_screening_blocks_other_y_pii_identifiers_and_leakage():
@@ -96,11 +126,15 @@ def test_screening_blocks_other_y_pii_identifiers_and_leakage():
 
 
 def test_recoverable_feature_requires_reason():
-    frame = pd.DataFrame({"Y": [0, 1] * 100, "weak": np.arange(200) % 2, "missing": [None] * 70 + list(range(130))})
+    frame = pd.DataFrame(
+        {"Y": [0, 1] * 100, "weak": np.arange(200) % 2, "missing": [None] * 70 + list(range(130))}
+    )
     result = screen_features(frame, "Y", iv_threshold=99, missing_threshold=0.3)
     with pytest.raises(ValueError, match="RESTORE_REASON_REQUIRED"):
         restore_features(result, [{"column": "weak", "reason": "短"}])
-    restored = restore_features(result, [{"column": "weak", "reason": "经业务和稳定性复核后确认保留"}])
+    restored = restore_features(
+        result, [{"column": "weak", "reason": "经业务和稳定性复核后确认保留"}]
+    )
     assert "weak" in restored["included"]
 
 
@@ -108,12 +142,16 @@ def test_manual_binning_versions_and_rejects_non_monotonic():
     frame = pd.DataFrame({"x": np.arange(120), "Y": [0] * 40 + [1] * 40 + [0] * 40})
     fitted = fit_binning(frame, "Y", ["x"])
     original = fitted["version"]
-    updated = apply_manual_binning(copy.deepcopy(fitted), frame, "Y", "x", {"kind": "numeric", "edges": [39.5]})
+    updated = apply_manual_binning(
+        copy.deepcopy(fitted), frame, "Y", "x", {"kind": "numeric", "edges": [39.5]}
+    )
     assert updated["version"] != original
     assert updated["specs"]["x"]["source"] == "manual"
     assert updated["invalidates"] == ["training", "review", "report"]
     with pytest.raises(ValueError, match="MANUAL_BIN_NOT_MONOTONIC"):
-        apply_manual_binning(copy.deepcopy(fitted), frame, "Y", "x", {"kind": "numeric", "edges": [39.5, 79.5]})
+        apply_manual_binning(
+            copy.deepcopy(fitted), frame, "Y", "x", {"kind": "numeric", "edges": [39.5, 79.5]}
+        )
 
 
 def test_metrics_have_expected_semantics():

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -63,10 +64,7 @@ class NotebookManager:
                 f"# {name}\n\n此 Notebook 在本机项目级 Kernel 中执行。执行后生成的数据仍需通过粒度、重复、样本膨胀、Y 与血缘检查。"
             ),
             nbformat.v4.new_code_cell(
-                "import pandas as pd\n"
-                "import numpy as np\n"
-                "import polars as pl\n"
-                "import duckdb"
+                "import pandas as pd\nimport numpy as np\nimport polars as pl\nimport duckdb"
             ),
         ]
         path = self.notebook_dir(project_id) / f"{notebook_id}.ipynb"
@@ -101,9 +99,15 @@ class NotebookManager:
                 raise ValueError("NOTEBOOK_CELL_NOT_CODE")
             session = self._session(project_id)
             message_id = session.client.execute(cell.source, store_history=True, allow_stdin=False)
-            outputs, execution_count, status = self._collect(
-                session.client, message_id, timeout_seconds
-            )
+            try:
+                outputs, execution_count, status = self._collect(
+                    session.client, message_id, timeout_seconds
+                )
+            except TimeoutError:
+                # A timed-out cell must not keep consuming resources or block all
+                # later cells in the persistent project kernel.
+                self.shutdown_project(project_id)
+                raise
             cell.outputs = outputs
             cell.execution_count = execution_count
             session.execution_count = max(session.execution_count, execution_count or 0)
@@ -147,14 +151,20 @@ class NotebookManager:
             return session
 
     @staticmethod
-    def _collect(client: Any, message_id: str, timeout_seconds: int) -> tuple[list[Any], int | None, str]:
+    def _collect(
+        client: Any, message_id: str, timeout_seconds: int
+    ) -> tuple[list[Any], int | None, str]:
         nbformat = _nbformat()
         outputs: list[Any] = []
         execution_count: int | None = None
         status = "succeeded"
+        deadline = time.monotonic() + timeout_seconds
         while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("NOTEBOOK_CELL_TIMEOUT")
             try:
-                message = client.get_iopub_msg(timeout=timeout_seconds)
+                message = client.get_iopub_msg(timeout=remaining)
             except queue.Empty as exc:
                 raise TimeoutError("NOTEBOOK_CELL_TIMEOUT") from exc
             if message.get("parent_header", {}).get("msg_id") != message_id:
@@ -166,7 +176,9 @@ class NotebookManager:
             if message_type == "execute_input":
                 execution_count = content.get("execution_count")
             elif message_type == "stream":
-                outputs.append(nbformat.v4.new_output("stream", name=content["name"], text=content["text"]))
+                outputs.append(
+                    nbformat.v4.new_output("stream", name=content["name"], text=content["text"])
+                )
             elif message_type in {"display_data", "execute_result"}:
                 outputs.append(
                     nbformat.v4.new_output(

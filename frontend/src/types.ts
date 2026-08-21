@@ -131,3 +131,19 @@ export interface Settings {
   data_dir: string;
   synced_path_warning: boolean;
 }
+
+export interface WorkspaceStatus {
+  schema_version: string;
+  configured: boolean;
+  needs_setup: boolean;
+  source: string;
+  path: string;
+  current_path: string;
+  projects_path: string;
+  marker_present: boolean;
+  synced_path_warning: boolean;
+  project_count: number;
+  active_run_count: number;
+  pointer_path: string;
+  project_storage: string;
+}

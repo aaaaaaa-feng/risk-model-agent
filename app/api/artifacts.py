@@ -78,7 +78,7 @@ def get_model(model_version_id: str, ctx: AppContext = Depends(context)) -> dict
 
 @router.post("/score-jobs", status_code=201)
 def create_score_job(payload: ScoreJobCreate, ctx: AppContext = Depends(context)) -> dict[str, Any]:
-    job, artifact = ctx.artifacts.score_file(payload.model_version_id, payload.input_asset_id)
+    job, artifact = ctx.engine.worker.score_file(payload.model_version_id, payload.input_asset_id)
     return {"score_job": job, "artifact": artifact}
 
 
@@ -98,7 +98,9 @@ def download_score_job(job_id: str, ctx: AppContext = Depends(context)) -> FileR
 
 
 @router.post("/projects/{project_id}/archives", status_code=201)
-def create_archive(project_id: str, payload: ArchiveCreate, ctx: AppContext = Depends(context)) -> dict[str, Any]:
+def create_archive(
+    project_id: str, payload: ArchiveCreate, ctx: AppContext = Depends(context)
+) -> dict[str, Any]:
     archive, recovery_key = ctx.archives.create(project_id, payload.password)
     return {
         "archive": archive,
@@ -167,7 +169,9 @@ def download_backup(backup_id: str, ctx: AppContext = Depends(context)) -> FileR
 
 
 @router.post("/backups/{backup_id}/restore")
-def restore_backup(backup_id: str, payload: BackupRestore, ctx: AppContext = Depends(context)) -> dict[str, Any]:
+def restore_backup(
+    backup_id: str, payload: BackupRestore, ctx: AppContext = Depends(context)
+) -> dict[str, Any]:
     return ctx.backups.restore(backup_id, payload.confirm)
 
 

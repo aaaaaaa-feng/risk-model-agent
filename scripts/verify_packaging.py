@@ -31,9 +31,15 @@ def main() -> int:
         "frontend/package.json",
         "frontend/package-lock.json",
         "frontend/src/App.tsx",
+        "app/workers/package_runtime.py",
+        "app/evaluation/adapter.py",
     ]
     missing = [path for path in required_files if not (ROOT / path).is_file()]
-    spec = (ROOT / "packaging/risk_model_agent.spec").read_text(encoding="utf-8") if not missing else ""
+    spec = (
+        (ROOT / "packaging/risk_model_agent.spec").read_text(encoding="utf-8")
+        if not missing
+        else ""
+    )
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     installer = (
         (ROOT / "packaging/windows_installer.iss").read_text(encoding="utf-8")
@@ -46,16 +52,18 @@ def main() -> int:
         "missing_files": missing,
         "spec_has_onedir_collect": "COLLECT(" in spec,
         "spec_has_local_assets": "frontend_dist" in spec and "frontend" in spec,
-        "spec_has_scoring_helper": (
-            '(str(ROOT / "app" / "workers" / "scoring.py"), "app/workers")' in spec
+        "spec_has_standalone_package_runtime": (
+            '(str(ROOT / "app" / "workers" / "package_runtime.py"), "app/workers")' in spec
         ),
         "spec_has_notebook_libraries": all(
             name in spec for name in ('"polars"', '"duckdb"', '"debugpy"')
         ),
-        "launcher_dispatches_kernel": "IPKernelApp.launch_instance()" in (
-            ROOT / "run_local.py"
-        ).read_text(encoding="utf-8"),
+        "launcher_dispatches_kernel": "IPKernelApp.launch_instance()"
+        in (ROOT / "run_local.py").read_text(encoding="utf-8"),
+        "launcher_supports_frozen_workers": "multiprocessing.freeze_support()"
+        in (ROOT / "run_local.py").read_text(encoding="utf-8"),
         "spec_has_launcher": "run_local.py" in spec,
+        "spec_has_evaluation_adapter": "app.evaluation.adapter" in spec,
         "spec_uses_repository_root": "ROOT = Path(SPECPATH).resolve().parent\n" in spec,
         "pyinstaller_optional_dependency": "pyinstaller" in pyproject.lower(),
         "windows_installer_is_per_user": (
@@ -76,10 +84,12 @@ def main() -> int:
         for key in (
             "spec_has_onedir_collect",
             "spec_has_local_assets",
-            "spec_has_scoring_helper",
+            "spec_has_standalone_package_runtime",
             "spec_has_notebook_libraries",
             "launcher_dispatches_kernel",
+            "launcher_supports_frozen_workers",
             "spec_has_launcher",
+            "spec_has_evaluation_adapter",
             "spec_uses_repository_root",
             "pyinstaller_optional_dependency",
             "windows_installer_is_per_user",

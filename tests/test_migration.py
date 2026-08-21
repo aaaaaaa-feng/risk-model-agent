@@ -5,6 +5,63 @@ import json
 import sqlite3
 from pathlib import Path
 
+from app.core.database import Database, new_id, now_iso
+from app.core.paths import AppPaths
+from app.core.security import sha256_file
+
+
+def test_schema_upgrade_creates_verified_backup_before_ddl(tmp_path: Path):
+    paths = AppPaths(tmp_path / "RiskModelAgent").ensure()
+    with sqlite3.connect(paths.database) as connection:
+        connection.execute("CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        connection.execute("INSERT INTO schema_meta VALUES ('version', '1')")
+    database = Database(paths=paths)
+    with database.connect() as connection:
+        version = connection.execute(
+            "SELECT value FROM schema_meta WHERE key='version'"
+        ).fetchone()[0]
+    assert version == "2"
+    backups = database.list("backups", {"kind": "schema_upgrade"}, limit=10)
+    assert len(backups) == 1
+    backup_path = Path(backups[0]["path"])
+    assert backup_path.is_file()
+    assert sha256_file(backup_path) == backups[0]["checksum"]
+    with sqlite3.connect(backup_path) as connection:
+        assert (
+            connection.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()[0]
+            == "1"
+        )
+
+
+def test_pre_trace_incomplete_run_is_preserved_and_requires_restart(context):
+    project = context.catalog.create_project("升级前运行")
+    identifier = new_id("run")
+    timestamp = now_iso()
+    context.database.insert(
+        "runs",
+        {
+            "id": identifier,
+            "project_id": project["id"],
+            "target_task_id": None,
+            "status": "running",
+            "stage": "training",
+            "node": "train_review",
+            "mode": "semi_trusted",
+            "seq": 0,
+            "progress": 0.5,
+            "state_json": {"legacy": True},
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        },
+    )
+    assert context.engine.recover_incomplete() == []
+    run = context.catalog.require("runs", identifier)
+    assert run["status"] == "blocked"
+    assert run["error"] == "RUN_RESTART_REQUIRED_AFTER_TRACE_SCHEMA_UPGRADE"
+    assert run["state"] == {"legacy": True}
+    event = context.database.list("events", {"run_id": identifier}, limit=1)[0]
+    assert event["evidence"]["legacy_state_preserved"] is True
+
 
 def test_legacy_upgrade_backs_up_copies_and_keeps_old_runs_readonly(
     context, tmp_path: Path, monkeypatch

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import sqlite3
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.main import create_app
+from app.main import create_app, validate_bind_host
 
 from conftest import wait_for_run
 
@@ -27,6 +29,50 @@ def test_api_v1_health_and_demo_project(app_paths):
         detail = client.get(f"/api/v1/projects/{payload['project']['id']}").json()
         assert len(detail["assets"]) == 5
         assert len(detail["dataset_versions"]) == 1
+
+
+def test_local_http_boundary_rejects_dns_rebinding_cross_origin_and_remote_bind(app_paths):
+    app = create_app(app_paths, auto_migrate=False)
+    with TestClient(app) as client:
+        assert client.get("/api/v1/health", headers={"host": "attacker.example"}).status_code == 400
+        blocked = client.post(
+            "/api/v1/projects",
+            headers={"origin": "https://attacker.example"},
+            json={"name": "不应创建"},
+        )
+        assert blocked.status_code == 403
+        same_origin_headers = {
+            "origin": "http://testserver",
+            "sec-fetch-site": "same-origin",
+        }
+        assert (
+            client.post(
+                "/api/v1/projects", headers=same_origin_headers, json={"name": "缺少会话"}
+            ).status_code
+            == 403
+        )
+        session = client.get("/api/v1/session")
+        assert session.status_code == 200
+        assert (
+            client.post(
+                "/api/v1/projects", headers=same_origin_headers, json={"name": "仅有 Cookie"}
+            ).status_code
+            == 403
+        )
+        authorized_headers = {
+            **same_origin_headers,
+            "x-risk-agent-session": session.json()["request_token"],
+        }
+        assert (
+            client.post(
+                "/api/v1/projects", headers=authorized_headers, json={"name": "本机会话"}
+            ).status_code
+            == 201
+        )
+    with pytest.raises(ValueError, match="REMOTE_BIND_DISABLED"):
+        validate_bind_host("0.0.0.0")
+    with pytest.raises(ValueError, match="REMOTE_BIND_DISABLED"):
+        validate_bind_host("testserver")
 
 
 def test_semi_trusted_interrupt_resume_and_reject(app_paths):
@@ -52,12 +98,17 @@ def test_semi_trusted_interrupt_resume_and_reject(app_paths):
         pending = client.get(f"/api/v1/runs/{run_id}").json()["pending_decisions"]
         assert len(pending) == 1
         assert pending[0]["stage"] == "target_confirmation"
-        assert pending[0]["review"]["status"] == "pass"
+        assert pending[0]["review"]["status"] == "fallback_pass"
         approved = client.post(
             f"/api/v1/runs/{run_id}/decisions/{pending[0]['id']}",
             json={"approved": True, "edits": {}},
         )
         assert approved.status_code == 202
+        duplicate = client.post(
+            f"/api/v1/runs/{run_id}/decisions/{pending[0]['id']}",
+            json={"approved": True, "edits": {}},
+        )
+        assert duplicate.status_code == 409
         second = wait_for_run(context, run_id, {"awaiting_decision", "failed"}, 30)
         assert second["status"] == "awaiting_decision"
         deadline = time.monotonic() + 5
@@ -75,12 +126,41 @@ def test_semi_trusted_interrupt_resume_and_reject(app_paths):
         final = wait_for_run(context, run_id, {"blocked", "failed"}, 30)
         assert final["status"] == "blocked"
         events = client.get(f"/api/v1/runs/{run_id}/events").json()["events"]
-        assert [event["sequence"] for event in events] == sorted(event["sequence"] for event in events)
+        assert [event["sequence"] for event in events] == sorted(
+            event["sequence"] for event in events
+        )
         assert all(
-            {"sequence", "stage", "node", "agent", "tool", "status", "summary", "time", "evidence"}.issubset(event)
+            {
+                "sequence",
+                "stage",
+                "node",
+                "agent",
+                "tool",
+                "status",
+                "summary",
+                "time",
+                "evidence",
+                "trace_id",
+                "span_id",
+                "parent_span_id",
+                "duration_ms",
+            }.issubset(event)
             for event in events
         )
         assert all(event["hidden_chain_of_thought_included"] is False for event in events)
+        manifest = client.get(f"/api/v1/runs/{run_id}/manifest").json()
+        assert manifest["schema_version"] == "risk-agent-eval-manifest/v1"
+        assert manifest["manifest_hash"] == manifest["manifest"]["manifest_sha256"]
+        with pytest.raises(sqlite3.IntegrityError, match="RUN_MANIFEST_IMMUTABLE"):
+            context.database.update(
+                "run_manifests", manifest["id"], {"manifest_hash": "must-not-change"}
+            )
+        trace = client.get(f"/api/v1/runs/{run_id}/trace-bundle").json()
+        assert trace["raw_records_included"] is False
+        assert trace["hidden_chain_of_thought_included"] is False
+        assert trace["trace"]["status"] == "blocked"
+        assert any(span["kind"] == "tool" for span in trace["spans"])
+        assert any(span["kind"] == "gate" for span in trace["spans"])
 
 
 def test_provider_settings_clear_priority_and_presets(app_paths, monkeypatch):

@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from app.agents.evidence import build_safe_evidence
+from app.agents.prompts import CONVERSATION_PROMPT
 from app.core.config import SettingsStore
 from app.core.database import Database, new_id, now_iso
 from app.core.paths import AppPaths, get_paths
@@ -85,7 +86,7 @@ class ConversationService:
         if gateway.enabled and not provider_block:
             history = self._safe_history(conversation_id, aliases)
             result = gateway.complete(
-                "You are the main Agent in a local consumer-credit binary modeling workbench. Answer in concise Chinese. Use only the supplied aggregate project state. Explain recommendations and the current node, but never reveal hidden chain-of-thought and never request raw rows, credentials, or PII.",
+                CONVERSATION_PROMPT.content,
                 {
                     "project_state": safe,
                     "current_run": {
@@ -209,7 +210,10 @@ class ConversationService:
         return self.database.get("conversation_events", event["id"]) or event
 
     def shutdown(self) -> None:
-        self._executor.shutdown(wait=False, cancel_futures=False)
+        # Workspace changes and app shutdown must not leave a response thread
+        # writing conversation events into the old root after the new context
+        # becomes active.
+        self._executor.shutdown(wait=True, cancel_futures=False)
 
 
 def _chunks(value: str, size: int) -> list[str]:

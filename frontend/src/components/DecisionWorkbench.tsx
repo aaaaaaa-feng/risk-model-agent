@@ -103,7 +103,7 @@ function ModelDecision({ plan, edits, setEdits }: any) {
 
 function Metric({label,value,note}:{label:string;value:string;note?:string}){return <div className="summary-cell"><span>{label}</span><strong>{value}</strong>{note&&<small>{note}</small>}</div>}
 function stageName(stage:string){return ({target_confirmation:"Y 确认",data_diagnosis:"数据诊断与清洗",split:"样本切分",screening:"变量筛选",binning:"变量分箱",model_plan:"建模方案"} as Record<string,string>)[stage]||stage}
-function reviewLabel(status?:string){return ({pass:"预审通过",fallback_pass:"本地质检通过",revise:"建议调整",block:"发现阻断"} as Record<string,string>)[status||""]||"已完成预审"}
+function reviewLabel(status?:string){return ({pass:"预审通过",deterministic_pass:"确定性规则通过",llm_reviewer_pass:"LLM Reviewer 通过",fallback_pass:"本地降级质检通过",conditional_pass:"有条件通过",revise:"建议调整",block:"发现阻断",blocked:"发现阻断"} as Record<string,string>)[status||""]||"已完成预审"}
 function confirmLabel(kind:string){return ({confirm_target:"确认 Y 并继续诊断",confirm_data:"确认清洗并继续",confirm_split:"确认切分并执行",confirm_screening:"冻结变量并继续",confirm_binning:"冻结分箱并继续",confirm_models:"确认方案并开始训练"} as Record<string,string>)[kind]||"确认并继续"}
 function format(value:any){return value==null?"—":Number(value).toLocaleString()}
 function percent(value:any){return value==null?"—":`${(Number(value)*100).toFixed(2)}%`}

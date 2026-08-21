@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 import numpy as np
@@ -71,22 +72,64 @@ def split_dataset(
 ) -> dict[str, Any]:
     if len(frame) < 30:
         raise ValueError("INSUFFICIENT_SAMPLES_FOR_SPLIT")
+    if not 0 < test_size < 0.5:
+        raise ValueError("TEST_SIZE_INVALID")
+    if method == "time_holdout" and not 0 < oot_size < 0.5:
+        raise ValueError("OOT_SIZE_INVALID")
     positions = np.arange(len(frame))
     if customer_key and customer_key not in frame:
         raise ValueError("CUSTOMER_KEY_NOT_FOUND")
     groups = frame[customer_key].fillna("<MISSING_CUSTOMER>").astype(str) if customer_key else None
+    excluded_idx = np.array([], dtype=int)
+    exclusion_reasons: dict[str, int] = {}
+    cutoff: pd.Timestamp | None = None
     if method == "time_holdout":
         if not time_column or time_column not in frame:
             raise ValueError("TIME_COLUMN_REQUIRED")
         parsed = pd.to_datetime(frame[time_column], errors="coerce")
         if parsed.notna().mean() < 0.8:
             raise ValueError("TIME_PARSE_RATE_TOO_LOW")
+        valid_time_positions = positions[parsed.notna().to_numpy()]
+        if len(valid_time_positions) < 3:
+            raise ValueError("TIME_VALID_SAMPLE_TOO_SMALL")
+        ordered_valid = valid_time_positions[
+            np.argsort(parsed.iloc[valid_time_positions].to_numpy())
+        ]
+        requested_oot_rows = max(1, int(np.ceil(len(ordered_valid) * oot_size)))
+        boundary_position = max(0, len(ordered_valid) - requested_oot_rows)
+        cutoff = pd.Timestamp(parsed.iloc[ordered_valid[boundary_position]])
+        before_cutoff = parsed < cutoff
+        on_or_after_cutoff = parsed >= cutoff
+        missing_time_idx = np.flatnonzero(parsed.isna().to_numpy())
         if groups is not None:
-            group_time = pd.DataFrame({"group": groups, "time": parsed}).groupby("group")["time"].max().sort_values()
-            cut = max(1, int(np.ceil(len(group_time) * oot_size)))
-            oot_groups = set(group_time.tail(cut).index)
-            oot_idx = np.flatnonzero(groups.isin(oot_groups).to_numpy())
-            development_idx = np.flatnonzero(~groups.isin(oot_groups).to_numpy())
+            group_boundaries = (
+                pd.DataFrame(
+                    {"group": groups, "before": before_cutoff, "after": on_or_after_cutoff}
+                )
+                .groupby("group", as_index=True)
+                .agg(before=("before", "any"), after=("after", "any"))
+            )
+            cross_groups = set(
+                group_boundaries.index[group_boundaries["before"] & group_boundaries["after"]]
+            )
+            development_groups = set(
+                group_boundaries.index[group_boundaries["before"] & ~group_boundaries["after"]]
+            )
+            oot_groups = set(
+                group_boundaries.index[~group_boundaries["before"] & group_boundaries["after"]]
+            )
+            development_idx = np.flatnonzero(
+                (groups.isin(development_groups) & before_cutoff).to_numpy()
+            )
+            oot_idx = np.flatnonzero((groups.isin(oot_groups) & on_or_after_cutoff).to_numpy())
+            cross_idx = np.flatnonzero(groups.isin(cross_groups).to_numpy())
+            excluded_idx = np.unique(np.concatenate([missing_time_idx, cross_idx])).astype(int)
+            exclusion_reasons = {
+                "missing_or_invalid_time": int(len(missing_time_idx)),
+                "cross_boundary_customer": int(len(cross_idx)),
+            }
+            if len(development_idx) < 20 or len(oot_idx) < 2:
+                raise ValueError("STRICT_OOT_INSUFFICIENT_AFTER_CUSTOMER_ISOLATION")
             development = frame.iloc[development_idx]
             dev_groups = groups.iloc[development_idx]
             relative_train, relative_test = _stratified_group_split(
@@ -95,10 +138,12 @@ def split_dataset(
             train_idx = development_idx[relative_train]
             test_idx = development_idx[relative_test]
         else:
-            ordered = positions[np.argsort(parsed.fillna(pd.Timestamp.min).to_numpy())]
-            cut = max(1, int(np.ceil(len(frame) * oot_size)))
-            oot_idx = ordered[-cut:]
-            development_idx = ordered[:-cut]
+            oot_idx = np.flatnonzero(on_or_after_cutoff.to_numpy())
+            development_idx = np.flatnonzero(before_cutoff.to_numpy())
+            excluded_idx = missing_time_idx.astype(int)
+            exclusion_reasons = {"missing_or_invalid_time": int(len(missing_time_idx))}
+            if len(development_idx) < 20 or len(oot_idx) < 2:
+                raise ValueError("STRICT_OOT_INSUFFICIENT_SAMPLES")
             train_idx, test_idx = train_test_split(
                 development_idx,
                 test_size=test_size,
@@ -125,24 +170,45 @@ def split_dataset(
         "test": np.sort(np.asarray(test_idx, dtype=int)),
         "oot": np.sort(np.asarray(oot_idx, dtype=int)),
     }
-    assert_split_integrity(frame, partitions, customer_key)
+    assert_split_integrity(
+        frame,
+        partitions,
+        customer_key,
+        excluded=np.sort(np.asarray(excluded_idx, dtype=int)),
+        time_column=time_column if method == "time_holdout" else None,
+    )
     return {
         "method": method,
         "time_column": time_column,
         "customer_key": customer_key,
         "random_state": random_state,
         "indices": {key: value.tolist() for key, value in partitions.items()},
+        "excluded_indices": np.sort(np.asarray(excluded_idx, dtype=int)).tolist(),
+        "exclusions": exclusion_reasons,
+        "excluded_index_sha256": hashlib.sha256(
+            ",".join(
+                str(value) for value in np.sort(np.asarray(excluded_idx, dtype=int)).tolist()
+            ).encode("ascii")
+        ).hexdigest(),
         "summary": {
             key: _partition_summary(frame, value, target) for key, value in partitions.items()
         },
         "fit_scope": "train_only",
         "oot_locked": bool(len(oot_idx)),
+        "strict_time_boundary": bool(method == "time_holdout"),
+        "time_cutoff": cutoff.isoformat() if cutoff is not None else None,
     }
 
 
 def assert_split_integrity(
-    frame: pd.DataFrame, partitions: dict[str, np.ndarray], customer_key: str | None
+    frame: pd.DataFrame,
+    partitions: dict[str, np.ndarray],
+    customer_key: str | None,
+    *,
+    excluded: np.ndarray | None = None,
+    time_column: str | None = None,
 ) -> None:
+    excluded = np.asarray(excluded if excluded is not None else [], dtype=int)
     names = list(partitions)
     for index, left_name in enumerate(names):
         for right_name in names[index + 1 :]:
@@ -153,6 +219,27 @@ def assert_split_integrity(
         for index, left_name in enumerate(names):
             left_groups = set(frame.iloc[partitions[left_name]][customer_key].dropna().astype(str))
             for right_name in names[index + 1 :]:
-                right_groups = set(frame.iloc[partitions[right_name]][customer_key].dropna().astype(str))
+                right_groups = set(
+                    frame.iloc[partitions[right_name]][customer_key].dropna().astype(str)
+                )
                 if left_groups & right_groups:
                     raise ValueError(f"SPLIT_CUSTOMER_OVERLAP: {left_name}/{right_name}")
+    assigned = set(excluded.tolist())
+    for values in partitions.values():
+        if assigned & set(values.tolist()):
+            raise ValueError("SPLIT_EXCLUDED_ROW_ASSIGNED")
+        assigned.update(values.tolist())
+    if assigned != set(range(len(frame))):
+        raise ValueError("SPLIT_ROWS_NOT_ACCOUNTED_FOR")
+    if time_column and len(partitions.get("oot", [])):
+        development = np.concatenate(
+            [
+                partitions.get("train", np.array([], dtype=int)),
+                partitions.get("test", np.array([], dtype=int)),
+            ]
+        )
+        parsed = pd.to_datetime(frame[time_column], errors="coerce")
+        development_max = parsed.iloc[development].max()
+        oot_min = parsed.iloc[partitions["oot"]].min()
+        if pd.isna(development_max) or pd.isna(oot_min) or not development_max < oot_min:
+            raise ValueError("STRICT_OOT_TIME_BOUNDARY_VIOLATION")

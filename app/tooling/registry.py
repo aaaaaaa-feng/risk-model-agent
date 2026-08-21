@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel
+
+from app.core.security import sha256_bytes
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -16,15 +19,21 @@ class ToolSpec:
     description: str
     input_model: type[BaseModel]
     handler: Callable[[BaseModel], Any]
+    version: str = "1.0.0"
     deterministic: bool = True
     local_only: bool = True
 
     def manifest(self) -> dict[str, Any]:
+        schema = self.input_model.model_json_schema()
         return {
             "name": self.name,
+            "version": self.version,
             "stage": self.stage,
             "description": self.description,
-            "input_schema": self.input_model.model_json_schema(),
+            "input_schema": schema,
+            "input_schema_hash": sha256_bytes(
+                json.dumps(schema, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ),
             "deterministic": self.deterministic,
             "local_only": self.local_only,
         }
@@ -41,10 +50,13 @@ class ToolRegistry:
         description: str,
         input_model: type[T],
         handler: Callable[[T], Any],
+        version: str = "1.0.0",
     ) -> None:
         if name in self._tools:
             raise ValueError(f"DUPLICATE_TOOL: {name}")
-        self._tools[name] = ToolSpec(name, stage, description, input_model, handler)  # type: ignore[arg-type]
+        self._tools[name] = ToolSpec(  # type: ignore[arg-type]
+            name, stage, description, input_model, handler, version
+        )
 
     def invoke(self, name: str, payload: dict[str, Any]) -> Any:
         try:

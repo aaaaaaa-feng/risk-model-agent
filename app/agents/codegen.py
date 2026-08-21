@@ -2,20 +2,22 @@ from __future__ import annotations
 
 import ast
 import json
+import math
 from pathlib import Path
 from typing import Any, Sequence
 
 
-FORBIDDEN_IMPORTS = {
-    "requests", "httpx", "urllib", "socket", "aiohttp", "ftplib", "paramiko",
-    "subprocess", "pickle", "cloudpickle", "dill",
+GENERATED_CODE_POLICY = "risk-generated-code-template/v1"
+ALLOWED_MODELS = {
+    "dummy",
+    "scorecard",
+    "regularized_logistic",
+    "random_forest",
+    "extra_trees",
+    "xgboost",
+    "lightgbm",
+    "catboost",
 }
-FORBIDDEN_CALLS = {
-    "eval", "exec", "compile", "__import__", "system", "popen", "open",
-    "unlink", "remove", "rmdir", "rmtree", "rename", "replace",
-    "read_bytes", "read_text", "write_bytes", "write_text",
-}
-ALLOWED_IMPORTS = {"app", "json", "numpy", "pandas", "pathlib"}
 
 
 def generate_reproducible_notebook_code(
@@ -81,52 +83,128 @@ print(json.dumps({{"champion": report["champion"], "metrics": report["champion_m
 
 
 def review_generated_code(source: str) -> dict[str, Any]:
-    findings: list[dict[str, Any]] = []
+    """Authorize only the closed, deterministic modeling template.
+
+    A denylist can always be bypassed through aliases, reflection, descriptors,
+    or newly introduced APIs.  The product does not need arbitrary generated
+    Python here: the Agent selects a typed specification and this function proves
+    that the executable source is exactly the locally owned template for that
+    specification.
+    """
     try:
-        tree = ast.parse(source)
-    except SyntaxError as exc:
+        specification = extract_generated_spec(source)
+        _validate_generated_spec(specification)
+        expected = generate_reproducible_notebook_code(
+            dataset_file=specification["dataset_file"],
+            target=specification["target"],
+            features=specification["features"],
+            split=specification["split"],
+            models=specification["models"],
+            score_config=specification["score"],
+        )
+    except (SyntaxError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         return {
             "verdict": "block",
-            "findings": [{"code": "CODE_SYNTAX_INVALID", "message": str(exc), "severity": "blocking"}],
+            "findings": [
+                {
+                    "code": str(exc).split(":", 1)[0] or "GENERATED_CODE_SPEC_INVALID",
+                    "message": "生成代码没有通过封闭模板规范校验。",
+                    "severity": "blocking",
+                }
+            ],
+            "checks": {
+                "policy": GENERATED_CODE_POLICY,
+                "typed_spec": False,
+                "canonical_template": False,
+            },
         }
-    for node in ast.walk(tree):
-        imported: list[str] = []
-        if isinstance(node, ast.Import):
-            imported = [alias.name.split(".")[0] for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported = [node.module.split(".")[0]]
-        for name in imported:
-            if name in FORBIDDEN_IMPORTS:
-                findings.append(
-                    {"code": "DANGEROUS_IMPORT", "message": f"禁止生成代码导入 {name}", "severity": "blocking"}
-                )
-            elif name not in ALLOWED_IMPORTS:
-                findings.append(
-                    {"code": "UNAPPROVED_IMPORT", "message": f"生成代码导入了未批准模块 {name}", "severity": "blocking"}
-                )
-        if isinstance(node, ast.Call):
-            name = ""
-            if isinstance(node.func, ast.Name):
-                name = node.func.id
-            elif isinstance(node.func, ast.Attribute):
-                name = node.func.attr
-            if name in FORBIDDEN_CALLS:
-                findings.append(
-                    {"code": "DANGEROUS_CALL", "message": f"禁止生成代码调用 {name}", "severity": "blocking"}
-                )
-    required = {
-        "TRAIN_ONLY_SCREENING": "screen_features(train" in source,
-        "OOT_NOT_SELECTION": "OOT 不参与选择" in source,
-        "FIXED_RANDOM_STATE": "random_state" in source,
-    }
-    for code, passed in required.items():
-        if not passed:
-            findings.append({"code": code, "message": "可复现代码缺少必要治理约束", "severity": "blocking"})
+    canonical = _normalize_source(source) == _normalize_source(expected)
+    findings = (
+        []
+        if canonical
+        else [
+            {
+                "code": "NON_CANONICAL_GENERATED_CODE",
+                "message": "代码含有封闭模板之外的语句、注释或改写，必须从已验证规范重新生成。",
+                "severity": "blocking",
+            }
+        ]
+    )
     return {
-        "verdict": "block" if any(item["severity"] == "blocking" for item in findings) else "pass",
+        "verdict": "pass" if canonical else "block",
         "findings": findings,
-        "checks": required,
+        "checks": {
+            "policy": GENERATED_CODE_POLICY,
+            "typed_spec": True,
+            "canonical_template": canonical,
+        },
     }
+
+
+def _validate_generated_spec(specification: dict[str, Any]) -> None:
+    expected_keys = {"dataset_file", "target", "features", "split", "models", "score"}
+    if set(specification) != expected_keys:
+        raise ValueError("GENERATED_CODE_SPEC_KEYS_INVALID")
+    dataset_file = specification["dataset_file"]
+    target = specification["target"]
+    features = specification["features"]
+    models = specification["models"]
+    split = specification["split"]
+    score = specification["score"]
+    if not isinstance(dataset_file, str) or not dataset_file or len(dataset_file) > 4096:
+        raise ValueError("GENERATED_CODE_DATASET_PATH_INVALID")
+    if not isinstance(target, str) or not target or len(target) > 512:
+        raise ValueError("GENERATED_CODE_TARGET_INVALID")
+    if (
+        not isinstance(features, list)
+        or not features
+        or any(not isinstance(value, str) or not value or len(value) > 512 for value in features)
+    ):
+        raise ValueError("GENERATED_CODE_FEATURES_INVALID")
+    if len(features) != len(set(features)) or target in features:
+        raise ValueError("GENERATED_CODE_FEATURES_INVALID")
+    if (
+        not isinstance(models, list)
+        or not models
+        or any(not isinstance(value, str) or value not in ALLOWED_MODELS for value in models)
+    ):
+        raise ValueError("GENERATED_CODE_MODELS_INVALID")
+    if len(models) != len(set(models)):
+        raise ValueError("GENERATED_CODE_MODELS_INVALID")
+    if not isinstance(split, dict) or set(split) != {
+        "method",
+        "time_column",
+        "customer_key",
+        "random_state",
+    }:
+        raise ValueError("GENERATED_CODE_SPLIT_INVALID")
+    if split["method"] not in {"time_holdout", "random_stratified"}:
+        raise ValueError("GENERATED_CODE_SPLIT_INVALID")
+    for key in ("time_column", "customer_key"):
+        if split[key] is not None and not isinstance(split[key], str):
+            raise ValueError("GENERATED_CODE_SPLIT_INVALID")
+    if not isinstance(split["random_state"], int) or isinstance(split["random_state"], bool):
+        raise ValueError("GENERATED_CODE_SPLIT_INVALID")
+    if split["method"] == "time_holdout" and not split["time_column"]:
+        raise ValueError("GENERATED_CODE_SPLIT_INVALID")
+    if not isinstance(score, dict):
+        raise ValueError("GENERATED_CODE_SCORE_INVALID")
+    allowed_score = {"minimum", "maximum", "base_score", "base_odds", "pdo"}
+    if not set(score).issubset(allowed_score):
+        raise ValueError("GENERATED_CODE_SCORE_INVALID")
+    for value in score.values():
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+        ):
+            raise ValueError("GENERATED_CODE_SCORE_INVALID")
+    if '"""' in json.dumps(specification, ensure_ascii=False) or "\x00" in dataset_file:
+        raise ValueError("GENERATED_CODE_SPEC_ENCODING_INVALID")
+
+
+def _normalize_source(source: str) -> str:
+    return source.replace("\r\n", "\n").rstrip() + "\n"
 
 
 def extract_generated_spec(source: str) -> dict[str, Any]:

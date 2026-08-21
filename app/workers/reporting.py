@@ -10,6 +10,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from app.agents.reviewer import review_is_approved
 from app.core.security import sha256_file
 
 
@@ -47,15 +48,10 @@ def build_report(
         for name, details in model_result["champion_metrics"].items()
         if details
     }
-    selected = [
-        item
-        for item in screening.get("features", [])
-        if item.get("status") == "included"
-    ]
-    absolute_ordering = bool(
-        (champion.get("test_monotonicity") or {}).get("absolute")
-    )
-    review_passed = bool(reviews and reviews[-1].get("status") == "pass")
+    selected = [item for item in screening.get("features", []) if item.get("status") == "included"]
+    absolute_ordering = bool((champion.get("test_monotonicity") or {}).get("absolute"))
+    review_passed = bool(reviews and review_is_approved(reviews[-1]))
+    review_coverage = _review_coverage(reviews)
     quality_verdict = "pass" if review_passed and absolute_ordering else "conditional"
     quality_notes: list[str] = []
     if not absolute_ordering:
@@ -63,7 +59,7 @@ def build_report(
             "Test 等频分箱未达到绝对排序；模型可用于分析和后续调整，但不能标记为无条件通过。"
         )
     if not review_passed:
-        quality_notes.append("最近一轮 Reviewer 记录不是 pass，请复核质检证据。")
+        quality_notes.append("最近一轮 Reviewer 未达到可接受终态，请复核质检证据。")
     report = {
         "schema_version": REPORT_SCHEMA,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -103,7 +99,7 @@ def build_report(
         "split": {
             key: value
             for key, value in split.items()
-            if key not in {"indices", "row_ids"}
+            if key not in {"indices", "row_ids", "excluded_indices"}
         },
         "feature_selection": {
             "thresholds": screening.get("thresholds", {}),
@@ -124,6 +120,7 @@ def build_report(
         "score": model_result["score"],
         "review": {
             "records": reviews,
+            "coverage": review_coverage,
             "max_repair_rounds": 3,
             "independent_context": True,
         },
@@ -155,7 +152,7 @@ def _json_default(value: Any) -> Any:
 def _flatten_metrics(report: dict[str, Any]) -> list[list[Any]]:
     rows: list[list[Any]] = []
     for partition, values in report.get("sample_overview", {}).items():
-        metrics = (report.get("champion", {}).get(f"{partition}_metrics") or {})
+        metrics = report.get("champion", {}).get(f"{partition}_metrics") or {}
         rows.append(
             [
                 partition.upper(),
@@ -174,10 +171,14 @@ def _flatten_metrics(report: dict[str, Any]) -> list[list[Any]]:
     return rows
 
 
-def _append_table(sheet: Any, title: str, headers: list[str], rows: Iterable[Iterable[Any]]) -> None:
+def _append_table(
+    sheet: Any, title: str, headers: list[str], rows: Iterable[Iterable[Any]]
+) -> None:
     sheet.append([title])
     sheet.cell(sheet.max_row, 1).font = Font(bold=True, size=14, color="16324F")
-    sheet.merge_cells(start_row=sheet.max_row, start_column=1, end_row=sheet.max_row, end_column=len(headers))
+    sheet.merge_cells(
+        start_row=sheet.max_row, start_column=1, end_row=sheet.max_row, end_column=len(headers)
+    )
     sheet.append(headers)
     for cell in sheet[sheet.max_row]:
         cell.fill = HEADER_FILL
@@ -192,6 +193,40 @@ def _excel_value(value: Any) -> Any:
     if isinstance(value, (dict, list)):
         return json.dumps(value, ensure_ascii=False)
     return value
+
+
+def _review_coverage(reviews: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(reviews)
+    status_counts: dict[str, int] = {}
+    deterministic_reviewed = 0
+    llm_reviewed = 0
+    fallback = 0
+    for item in reviews:
+        status = str(item.get("status") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        evidence = item.get("evidence") or {}
+        deterministic_status = evidence.get("deterministic_status")
+        llm_status = evidence.get("llm_status")
+        if deterministic_status or status in {"deterministic_pass", "fallback_pass"}:
+            deterministic_reviewed += 1
+        if llm_status in {"llm_reviewer_pass", "revise", "blocked"}:
+            llm_reviewed += 1
+        if llm_status == "fallback_pass" or status == "fallback_pass":
+            fallback += 1
+
+    def ratio(value: int) -> float:
+        return round(value / total, 6) if total else 0.0
+
+    return {
+        "total_records": total,
+        "deterministic_reviewed": deterministic_reviewed,
+        "deterministic_coverage": ratio(deterministic_reviewed),
+        "llm_reviewed": llm_reviewed,
+        "llm_coverage": ratio(llm_reviewed),
+        "fallback_records": fallback,
+        "fallback_rate": ratio(fallback),
+        "status_counts": status_counts,
+    }
 
 
 def _finish_sheet(sheet: Any) -> None:
@@ -213,19 +248,32 @@ def write_report_excel(report: dict[str, Any], path: Path) -> Path:
     _append_table(
         overall,
         "模型管理摘要",
-        ["项目", "Y", "Champion", "Test AUC", "Test KS", "OOT AUC", "OOT KS", "绝对排序", "质检结论", "质检说明"],
-        [[
-            report["project"]["name"],
-            report["target"]["column"],
-            summary["champion"],
-            summary["test_auc"],
-            summary["test_ks"],
-            summary["oot_auc"],
-            summary["oot_ks"],
-            summary["absolute_ordering"],
-            summary["quality_verdict"],
-            "；".join(summary.get("quality_notes", [])),
-        ]],
+        [
+            "项目",
+            "Y",
+            "Champion",
+            "Test AUC",
+            "Test KS",
+            "OOT AUC",
+            "OOT KS",
+            "绝对排序",
+            "质检结论",
+            "质检说明",
+        ],
+        [
+            [
+                report["project"]["name"],
+                report["target"]["column"],
+                summary["champion"],
+                summary["test_auc"],
+                summary["test_ks"],
+                summary["oot_auc"],
+                summary["oot_ks"],
+                summary["absolute_ordering"],
+                summary["quality_verdict"],
+                "；".join(summary.get("quality_notes", [])),
+            ]
+        ],
     )
     _append_table(
         overall,
@@ -242,13 +290,20 @@ def write_report_excel(report: dict[str, Any], path: Path) -> Path:
         ["变量", "类型", "缺失率", "IV", "人工恢复", "恢复理由"],
         [
             [
-                item.get("column"), item.get("type"), item.get("missing_rate"), item.get("iv"),
-                item.get("restored", False), item.get("restore_reason", ""),
+                item.get("column"),
+                item.get("type"),
+                item.get("missing_rate"),
+                item.get("iv"),
+                item.get("restored", False),
+                item.get("restore_reason", ""),
             ]
             for item in report["feature_selection"]["selected"]
         ],
     )
-    importance = {item["feature"]: item["importance"] for item in report["champion"].get("feature_importance", [])}
+    importance = {
+        item["feature"]: item["importance"]
+        for item in report["champion"].get("feature_importance", [])
+    }
     _append_table(
         features,
         "特征重要性",
@@ -258,15 +313,37 @@ def write_report_excel(report: dict[str, Any], path: Path) -> Path:
     bin_rows: list[list[Any]] = []
     for feature, spec in report["binning"]["specs"].items():
         for row in spec.get("table", []):
-            bin_rows.append([
-                feature, spec.get("source"), spec.get("monotonic"), row.get("bin"),
-                row.get("count"), row.get("good"), row.get("bad"), row.get("bad_rate"),
-                row.get("woe"), row.get("iv"), spec.get("iv"),
-            ])
+            bin_rows.append(
+                [
+                    feature,
+                    spec.get("source"),
+                    spec.get("monotonic"),
+                    row.get("bin"),
+                    row.get("count"),
+                    row.get("good"),
+                    row.get("bad"),
+                    row.get("bad_rate"),
+                    row.get("woe"),
+                    row.get("iv"),
+                    spec.get("iv"),
+                ]
+            )
     _append_table(
         features,
         "最终入模变量分箱（Train 拟合）",
-        ["变量", "来源", "单调", "分箱", "样本量", "好样本", "坏样本", "坏占比", "WOE", "箱IV", "变量IV"],
+        [
+            "变量",
+            "来源",
+            "单调",
+            "分箱",
+            "样本量",
+            "好样本",
+            "坏样本",
+            "坏占比",
+            "WOE",
+            "箱IV",
+            "变量IV",
+        ],
         bin_rows,
     )
     _finish_sheet(features)
@@ -275,15 +352,33 @@ def write_report_excel(report: dict[str, Any], path: Path) -> Path:
     performance_rows: list[list[Any]] = []
     for dataset, rows in report["champion"].get("lift", {}).items():
         for row in rows:
-            performance_rows.append([
-                dataset.upper(), row.get("bucket"), row.get("count"), row.get("bad"),
-                row.get("bad_rate"), row.get("lift"), row.get("cumulative_capture"),
-                row.get("min_probability"), row.get("max_probability"),
-            ])
+            performance_rows.append(
+                [
+                    dataset.upper(),
+                    row.get("bucket"),
+                    row.get("count"),
+                    row.get("bad"),
+                    row.get("bad_rate"),
+                    row.get("lift"),
+                    row.get("cumulative_capture"),
+                    row.get("min_probability"),
+                    row.get("max_probability"),
+                ]
+            )
     _append_table(
         performance,
         "模型等频分箱",
-        ["数据集", "箱", "样本量", "坏样本", "坏占比", "Lift", "累计捕获", "最小坏概率", "最大坏概率"],
+        [
+            "数据集",
+            "箱",
+            "样本量",
+            "坏样本",
+            "坏占比",
+            "Lift",
+            "累计捕获",
+            "最小坏概率",
+            "最大坏概率",
+        ],
         performance_rows,
     )
     _finish_sheet(performance)
@@ -293,21 +388,52 @@ def write_report_excel(report: dict[str, Any], path: Path) -> Path:
         comparison,
         "候选模型对比",
         ["模型", "校准", "Test AUC", "Test KS", "Test PR-AUC", "Test Brier", "排序性", "选择分"],
-        [[
-            item["candidate"], item["calibration"], item["test_metrics"].get("roc_auc"),
-            item["test_metrics"].get("ks"), item["test_metrics"].get("pr_auc"),
-            item["test_metrics"].get("brier"), item["test_monotonicity"].get("absolute"),
-            item["selection_score"],
-        ] for item in report["model_comparison"]],
+        [
+            [
+                item["candidate"],
+                item["calibration"],
+                item["test_metrics"].get("roc_auc"),
+                item["test_metrics"].get("ks"),
+                item["test_metrics"].get("pr_auc"),
+                item["test_metrics"].get("brier"),
+                item["test_monotonicity"].get("absolute"),
+                item["selection_score"],
+            ]
+            for item in report["model_comparison"]
+        ],
     )
     _finish_sheet(comparison)
 
     review = workbook.create_sheet("质检记录")
+    coverage = report["review"]["coverage"]
+    _append_table(
+        review,
+        "Reviewer 覆盖与降级概览",
+        ["质检记录", "确定性覆盖率", "LLM 实际覆盖率", "降级比例", "状态分布"],
+        [
+            [
+                coverage["total_records"],
+                coverage["deterministic_coverage"],
+                coverage["llm_coverage"],
+                coverage["fallback_rate"],
+                coverage["status_counts"],
+            ]
+        ],
+    )
     _append_table(
         review,
         "独立 Reviewer 质检",
         ["轮次", "范围", "状态", "问题", "证据"],
-        [[item.get("round"), item.get("scope"), item.get("status"), item.get("issues"), item.get("evidence")] for item in report["review"]["records"]],
+        [
+            [
+                item.get("round"),
+                item.get("scope"),
+                item.get("status"),
+                item.get("issues"),
+                item.get("evidence"),
+            ]
+            for item in report["review"]["records"]
+        ],
     )
     _finish_sheet(review)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -322,7 +448,12 @@ def _metric(value: Any) -> str:
 def _html_rows(headers: list[str], rows: Iterable[Iterable[Any]]) -> str:
     head = "".join(f"<th>{html.escape(str(value))}</th>" for value in headers)
     body = "".join(
-        "<tr>" + "".join(f"<td>{html.escape(str(_excel_value(value) if value is not None else '—'))}</td>" for value in row) + "</tr>"
+        "<tr>"
+        + "".join(
+            f"<td>{html.escape(str(_excel_value(value) if value is not None else '—'))}</td>"
+            for value in row
+        )
+        + "</tr>"
         for row in rows
     )
     return f"<div class=table-wrap><table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>"
@@ -331,18 +462,40 @@ def _html_rows(headers: list[str], rows: Iterable[Iterable[Any]]) -> str:
 def write_report_html(report: dict[str, Any], path: Path) -> Path:
     summary = report["executive_summary"]
     comparison_rows = [
-        [item["candidate"], item["calibration"], _metric(item["test_metrics"].get("roc_auc")), _metric(item["test_metrics"].get("ks")), item["test_monotonicity"].get("absolute")]
+        [
+            item["candidate"],
+            item["calibration"],
+            _metric(item["test_metrics"].get("roc_auc")),
+            _metric(item["test_metrics"].get("ks")),
+            item["test_monotonicity"].get("absolute"),
+        ]
         for item in report["model_comparison"]
     ]
     lift_rows = []
     for dataset, rows in report["champion"].get("lift", {}).items():
         for row in rows:
-            lift_rows.append([dataset.upper(), row["bucket"], row["count"], row["bad"], _metric(row["bad_rate"]), _metric(row["lift"]), _metric(row["cumulative_capture"])])
+            lift_rows.append(
+                [
+                    dataset.upper(),
+                    row["bucket"],
+                    row["count"],
+                    row["bad"],
+                    _metric(row["bad_rate"]),
+                    _metric(row["lift"]),
+                    _metric(row["cumulative_capture"]),
+                ]
+            )
     serialized = html.escape(json.dumps(report, ensure_ascii=False), quote=False)
     quality_note = "；".join(summary.get("quality_notes", [])) or "Reviewer 与确定性检查均已通过。"
+    review_coverage = report["review"]["coverage"]
+    coverage_note = (
+        f"确定性审核 {review_coverage['deterministic_coverage']:.1%}；"
+        f"LLM Reviewer 实际覆盖 {review_coverage['llm_coverage']:.1%}；"
+        f"本地降级 {review_coverage['fallback_rate']:.1%}。"
+    )
     document = f"""<!doctype html>
 <html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
-<title>{html.escape(report['project']['name'])} · 风控模型报告</title><style>
+<title>{html.escape(report["project"]["name"])} · 风控模型报告</title><style>
 :root{{--ink:#17202a;--muted:#657587;--blue:#176b87;--teal:#1a8f83;--line:#dce5eb;--soft:#f4f7f9;--warn:#c67b19}}
 *{{box-sizing:border-box}}body{{margin:0;background:#eef3f5;color:var(--ink);font:14px/1.55 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
 .page{{max-width:1200px;margin:32px auto;background:white;border:1px solid var(--line);box-shadow:0 16px 48px #102a3b16}}
@@ -353,15 +506,15 @@ main{{padding:28px 42px 50px}}h2{{margin:34px 0 14px;font-size:19px;border-left:
 .note{{padding:13px 15px;background:#fff8e9;border:1px solid #f0d7a4;border-radius:8px;color:#765118}}footer{{padding:18px 42px;border-top:1px solid var(--line);color:var(--muted)}}
 @media(max-width:800px){{.page{{margin:0;border:0}}header,main,footer{{padding-left:20px;padding-right:20px}}.cards{{grid-template-columns:repeat(2,1fr)}}}}
 @media print{{body{{background:white}}.page{{margin:0;box-shadow:none;border:0}}}}
-</style></head><body><article class=page><header><h1>风控模型报告</h1><p>{html.escape(report['project']['name'])} · Y={html.escape(report['target']['column'])} · Run {html.escape(report['run']['id'])}</p></header><main>
-<section class=cards><div class=card><span>Champion</span><b>{html.escape(str(summary['champion']))}</b></div><div class=card><span>Test AUC</span><b>{_metric(summary['test_auc'])}</b></div><div class=card><span>Test KS</span><b>{_metric(summary['test_ks'])}</b></div><div class=card><span>OOT AUC</span><b>{_metric(summary['oot_auc'])}</b></div><div class=card><span>最终变量</span><b>{summary['selected_feature_count']}</b></div></section>
-<h2>管理摘要</h2><p class=note>质检结论：{html.escape(str(summary['quality_verdict']))}。{html.escape(quality_note)} 本报告中的训练、筛选与分箱仅在 Train 上拟合；Test 用于方案选择，OOT 只用于最终报告。AUC/KS 阈值为参考，不作为硬性业务准入。</p>
-<h2>候选模型对比</h2>{_html_rows(['模型','校准','Test AUC','Test KS','绝对排序'], comparison_rows)}
-<h2>Train / Test / OOT</h2>{_html_rows(['数据集','样本量','坏样本','好样本','坏占比','AUC','KS','PR-AUC','PSI'], _flatten_metrics(report))}
-<h2>模型分箱</h2>{_html_rows(['数据集','箱','样本量','坏样本','坏占比','Lift','累计捕获'], lift_rows)}
-<h2>最终入模变量</h2>{_html_rows(['变量','类型','缺失率','IV','人工恢复'], [[item.get('column'),item.get('type'),_metric(item.get('missing_rate')),_metric(item.get('iv')),item.get('restored',False)] for item in report['feature_selection']['selected']])}
-<h2>质检结论</h2>{_html_rows(['轮次','范围','状态','问题'], [[item.get('round'),item.get('scope'),item.get('status'),item.get('issues')] for item in report['review']['records']])}
-<script type=\"application/json\" id=\"risk-model-report-data\">{serialized}</script></main><footer>Risk Model Agent · 单文件离线报告 · {html.escape(report['generated_at'])}</footer></article></body></html>"""
+</style></head><body><article class=page><header><h1>风控模型报告</h1><p>{html.escape(report["project"]["name"])} · Y={html.escape(report["target"]["column"])} · Run {html.escape(report["run"]["id"])}</p></header><main>
+<section class=cards><div class=card><span>Champion</span><b>{html.escape(str(summary["champion"]))}</b></div><div class=card><span>Test AUC</span><b>{_metric(summary["test_auc"])}</b></div><div class=card><span>Test KS</span><b>{_metric(summary["test_ks"])}</b></div><div class=card><span>OOT AUC</span><b>{_metric(summary["oot_auc"])}</b></div><div class=card><span>最终变量</span><b>{summary["selected_feature_count"]}</b></div></section>
+<h2>管理摘要</h2><p class=note>质检结论：{html.escape(str(summary["quality_verdict"]))}。{html.escape(quality_note)} 本报告中的训练、筛选与分箱仅在 Train 上拟合；Test 用于方案选择，OOT 只用于最终报告。AUC/KS 阈值为参考，不作为硬性业务准入。</p>
+<h2>候选模型对比</h2>{_html_rows(["模型", "校准", "Test AUC", "Test KS", "绝对排序"], comparison_rows)}
+<h2>Train / Test / OOT</h2>{_html_rows(["数据集", "样本量", "坏样本", "好样本", "坏占比", "AUC", "KS", "PR-AUC", "PSI"], _flatten_metrics(report))}
+<h2>模型分箱</h2>{_html_rows(["数据集", "箱", "样本量", "坏样本", "坏占比", "Lift", "累计捕获"], lift_rows)}
+<h2>最终入模变量</h2>{_html_rows(["变量", "类型", "缺失率", "IV", "人工恢复"], [[item.get("column"), item.get("type"), _metric(item.get("missing_rate")), _metric(item.get("iv")), item.get("restored", False)] for item in report["feature_selection"]["selected"]])}
+<h2>质检结论</h2><p class=note>{html.escape(coverage_note)}</p>{_html_rows(["轮次", "范围", "状态", "问题"], [[item.get("round"), item.get("scope"), item.get("status"), item.get("issues")] for item in report["review"]["records"]])}
+<script type=\"application/json\" id=\"risk-model-report-data\">{serialized}</script></main><footer>Risk Model Agent · 单文件离线报告 · {html.escape(report["generated_at"])}</footer></article></body></html>"""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(document, encoding="utf-8")
     return path

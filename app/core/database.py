@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .paths import AppPaths, get_paths
+from .security import sha256_file
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def now_iso() -> str:
@@ -44,6 +45,7 @@ JSON_COLUMNS = {
     "payload_json",
     "review_json",
     "usage_json",
+    "security_json",
 }
 
 TABLES = {
@@ -66,6 +68,9 @@ TABLES = {
     "notebooks",
     "score_jobs",
     "provider_requests",
+    "run_manifests",
+    "traces",
+    "trace_spans",
     "legacy_records",
     "archives",
     "backups",
@@ -186,6 +191,39 @@ CREATE TABLE IF NOT EXISTS provider_requests (
   status TEXT NOT NULL, safe_payload_hash TEXT NOT NULL, usage_json TEXT NOT NULL DEFAULT '{}',
   response_summary TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS run_manifests (
+  id TEXT PRIMARY KEY, run_id TEXT NOT NULL UNIQUE REFERENCES runs(id),
+  schema_version TEXT NOT NULL, manifest_hash TEXT NOT NULL,
+  payload_json TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS trg_run_manifests_immutable_update
+BEFORE UPDATE ON run_manifests
+BEGIN
+  SELECT RAISE(ABORT, 'RUN_MANIFEST_IMMUTABLE');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_run_manifests_immutable_delete
+BEFORE DELETE ON run_manifests
+BEGIN
+  SELECT RAISE(ABORT, 'RUN_MANIFEST_IMMUTABLE');
+END;
+CREATE TABLE IF NOT EXISTS traces (
+  id TEXT PRIMARY KEY, run_id TEXT UNIQUE REFERENCES runs(id), conversation_id TEXT,
+  case_id TEXT, trial_id TEXT, status TEXT NOT NULL,
+  root_span_id TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL, finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS trace_spans (
+  id TEXT PRIMARY KEY, trace_id TEXT NOT NULL REFERENCES traces(id),
+  run_id TEXT REFERENCES runs(id), parent_span_id TEXT,
+  kind TEXT NOT NULL, stage TEXT NOT NULL, node TEXT NOT NULL,
+  agent TEXT NOT NULL, tool TEXT, status TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '', input_hash TEXT NOT NULL DEFAULT '',
+  output_hash TEXT NOT NULL DEFAULT '', error_code TEXT, error_type TEXT,
+  attempt INTEGER NOT NULL DEFAULT 1, retry_reason TEXT,
+  degradation_path TEXT, usage_json TEXT NOT NULL DEFAULT '{}',
+  security_json TEXT NOT NULL DEFAULT '{}', evidence_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL, finished_at TEXT, duration_ms INTEGER
+);
 CREATE TABLE IF NOT EXISTS legacy_records (
   id TEXT PRIMARY KEY, record_type TEXT NOT NULL, source_id TEXT NOT NULL,
   source_path TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL,
@@ -210,6 +248,8 @@ CREATE INDEX IF NOT EXISTS idx_events_run_seq ON events(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_artifacts_run ON artifacts(run_id, kind);
 CREATE INDEX IF NOT EXISTS idx_archives_project ON archives(project_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_conversation_events ON conversation_events(conversation_id, seq);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_trace ON trace_spans(trace_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_trace_spans_run ON trace_spans(run_id, started_at);
 """
 
 
@@ -219,7 +259,10 @@ class Database:
         self.path = (path or self.paths.database).resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        schema_snapshot = self._snapshot_before_schema_upgrade()
         self.initialize()
+        if schema_snapshot:
+            self._register_schema_snapshot(*schema_snapshot)
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
@@ -235,6 +278,74 @@ class Database:
             connection.execute(
                 "INSERT OR REPLACE INTO schema_meta(key, value) VALUES('version', ?)",
                 (str(SCHEMA_VERSION),),
+            )
+
+    def _snapshot_before_schema_upgrade(self) -> tuple[Path, str] | None:
+        if not self.path.is_file() or self.path.stat().st_size == 0:
+            return None
+        old_version = "unknown"
+        try:
+            with sqlite3.connect(self.path) as connection:
+                exists = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_meta'"
+                ).fetchone()
+                if exists:
+                    row = connection.execute(
+                        "SELECT value FROM schema_meta WHERE key='version'"
+                    ).fetchone()
+                    if row:
+                        old_version = str(row[0])
+        except sqlite3.Error as exc:
+            raise ValueError("DATABASE_SCHEMA_READ_FAILED") from exc
+        try:
+            if old_version != "unknown" and int(old_version) >= SCHEMA_VERSION:
+                return None
+        except ValueError:
+            pass
+        destination = self.paths.backups / f"pre-schema-v{old_version}-to-v{SCHEMA_VERSION}.sqlite3"
+        if not destination.exists():
+            temporary = destination.with_suffix(".tmp")
+            try:
+                with sqlite3.connect(self.path) as source, sqlite3.connect(temporary) as target:
+                    source.backup(target)
+                    integrity = target.execute("PRAGMA integrity_check").fetchone()[0]
+                    if integrity != "ok":
+                        raise ValueError("SCHEMA_BACKUP_INTEGRITY_CHECK_FAILED")
+                temporary.replace(destination)
+            finally:
+                temporary.unlink(missing_ok=True)
+        else:
+            with sqlite3.connect(destination) as backup:
+                if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise ValueError("SCHEMA_BACKUP_INTEGRITY_CHECK_FAILED")
+        return destination, old_version
+
+    def _register_schema_snapshot(self, path: Path, old_version: str) -> None:
+        source = f"schema_v{old_version}_to_v{SCHEMA_VERSION}"
+        with self.transaction() as connection:
+            existing = connection.execute(
+                "SELECT id FROM backups WHERE kind='schema_upgrade' AND source=?",
+                (source,),
+            ).fetchone()
+            if existing:
+                return
+            self._insert_on_connection(
+                connection,
+                "backups",
+                {
+                    "id": new_id("bak"),
+                    "kind": "schema_upgrade",
+                    "source": source,
+                    "path": str(path),
+                    "checksum": sha256_file(path),
+                    "size_bytes": path.stat().st_size,
+                    "metadata_json": {
+                        "from_schema": old_version,
+                        "to_schema": SCHEMA_VERSION,
+                        "automatic": True,
+                    },
+                    "created_at": now_iso(),
+                },
             )
 
     @contextmanager
@@ -283,17 +394,34 @@ class Database:
 
     def insert(self, table: str, data: dict[str, Any]) -> dict[str, Any]:
         table = self._table(table)
-        encoded = self._encode(data)
-        columns = ", ".join(encoded)
-        placeholders = ", ".join("?" for _ in encoded)
         with self.transaction() as connection:
-            connection.execute(
-                f"INSERT INTO {table} ({columns}) VALUES ({placeholders})", tuple(encoded.values())
-            )
+            self._insert_on_connection(connection, table, data)
         result = self.get(table, str(data["id"]))
         if result is None:  # pragma: no cover
             raise RuntimeError("INSERT_NOT_VISIBLE")
         return result
+
+    def _insert_on_connection(
+        self, connection: sqlite3.Connection, table: str, data: dict[str, Any]
+    ) -> None:
+        table = self._table(table)
+        encoded = self._encode(data)
+        columns = ", ".join(encoded)
+        placeholders = ", ".join("?" for _ in encoded)
+        connection.execute(
+            f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
+            tuple(encoded.values()),
+        )
+
+    def insert_many_atomic(self, rows: list[tuple[str, dict[str, Any]]]) -> None:
+        """Insert related rows in one SQLite transaction.
+
+        This is intentionally small and table-allowlisted; archive restoration and
+        migrations use it to avoid publishing a partially imported graph.
+        """
+        with self.transaction() as connection:
+            for table, data in rows:
+                self._insert_on_connection(connection, table, data)
 
     def get(self, table: str, identifier: str) -> dict[str, Any] | None:
         table = self._table(table)
@@ -317,6 +445,31 @@ class Database:
             rows = connection.execute(
                 f"SELECT * FROM {table} WHERE {where} ORDER BY {order_by} LIMIT ?",
                 (*filters.values(), min(max(limit, 1), 5000)),
+            ).fetchall()
+        return [self._decode(row) or {} for row in rows]
+
+    def list_all(
+        self,
+        table: str,
+        filters: dict[str, Any] | None = None,
+        order_by: str = "created_at DESC",
+    ) -> list[dict[str, Any]]:
+        """Return a complete internal export without the interactive API cap."""
+        table = self._table(table)
+        filters = filters or {}
+        if not re_safe_order(order_by):
+            raise ValueError("UNSAFE_ORDER_BY")
+        with self.connect() as connection:
+            columns = {
+                str(row["name"])
+                for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if not set(filters).issubset(columns):
+                raise ValueError("UNKNOWN_FILTER_COLUMN")
+            where = " AND ".join(f"{key}=?" for key in filters) or "1=1"
+            rows = connection.execute(
+                f"SELECT * FROM {table} WHERE {where} ORDER BY {order_by}",
+                tuple(filters.values()),
             ).fetchall()
         return [self._decode(row) or {} for row in rows]
 
@@ -344,6 +497,45 @@ class Database:
         table = self._table(table)
         with self.transaction() as connection:
             connection.execute(f"DELETE FROM {table} WHERE id=?", (identifier,))
+
+    def claim_decision(
+        self,
+        run_id: str,
+        decision_id: str,
+        response: dict[str, Any],
+    ) -> bool:
+        """Atomically claim one pending Human-in-the-Loop decision.
+
+        Persisting the response before queueing the graph makes retries
+        compare-and-set safe and lets startup recovery resume a claimed decision
+        even if the process stopped between the database commit and submission.
+        """
+        with self.transaction() as connection:
+            decision_row = connection.execute(
+                "SELECT * FROM decisions WHERE id=? AND run_id=? AND status='pending'",
+                (decision_id, run_id),
+            ).fetchone()
+            run_row = connection.execute(
+                "SELECT status FROM runs WHERE id=?",
+                (run_id,),
+            ).fetchone()
+            if decision_row is None or run_row is None or run_row["status"] != "awaiting_decision":
+                return False
+            payload = json.loads(decision_row["payload_json"] or "{}")
+            payload["response"] = response
+            changed = connection.execute(
+                "UPDATE decisions SET status='submitted', payload_json=? "
+                "WHERE id=? AND status='pending'",
+                (json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str), decision_id),
+            )
+            if changed.rowcount != 1:
+                return False
+            connection.execute(
+                "UPDATE runs SET status='queued', updated_at=? "
+                "WHERE id=? AND status='awaiting_decision'",
+                (now_iso(), run_id),
+            )
+        return True
 
     def append_event(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         with self.transaction() as connection:
@@ -386,9 +578,7 @@ class Database:
     def restore_from_backup(self, source: Path) -> Path:
         """Atomically replace the active database without replaying stale WAL pages."""
         source = source.resolve()
-        staged = self.path.with_name(
-            f".{self.path.name}.restore-{secrets.token_hex(6)}"
-        )
+        staged = self.path.with_name(f".{self.path.name}.restore-{secrets.token_hex(6)}")
         with self._lock:
             try:
                 shutil.copy2(source, staged)
@@ -412,6 +602,8 @@ def re_safe_order(value: str) -> bool:
         "created_at DESC",
         "created_at ASC",
         "updated_at DESC",
+        "started_at DESC",
+        "started_at ASC",
         "queue_position ASC",
         "seq ASC",
         "round ASC",

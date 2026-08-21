@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
 import re
 import secrets
-import base64
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -62,12 +62,26 @@ def _safe_scalar(value: Any) -> bool:
 
 
 def validate_safe_evidence(payload: Any, path: str = "evidence") -> None:
+    """Validate an already-sanitized SafeEvidence value.
+
+    This function is deliberately recursive because the Provider boundary accepts
+    nested JSON.  Field-name checks alone are not sufficient: a harmless-looking
+    key can otherwise carry a phone number, identity number, email address, secret,
+    or a pasted raw table in its value.
+    """
     if isinstance(payload, dict):
         for key, value in payload.items():
             lowered = str(key).lower()
             forbidden = {
-                "raw", "raw_data", "raw_rows", "raw_records", "records",
-                "sample_values", "record_values", "source_path", "stored_path",
+                "raw",
+                "raw_data",
+                "raw_rows",
+                "raw_records",
+                "records",
+                "sample_values",
+                "record_values",
+                "source_path",
+                "stored_path",
             }
             forbidden_key = lowered in forbidden or lowered.startswith("raw_")
             if is_pii_column(lowered) or (forbidden_key and value is not False):
@@ -80,11 +94,50 @@ def validate_safe_evidence(payload: Any, path: str = "evidence") -> None:
         return
     if not _safe_scalar(payload):
         raise ValueError(f"UNSAFE_EVIDENCE_TYPE: {path}")
-    if isinstance(payload, str) and contains_sensitive_text(payload):
-        raise ValueError(f"POSSIBLE_SECRET_FORBIDDEN: {path}")
+    if isinstance(payload, str):
+        try:
+            validate_provider_text(payload)
+        except ValueError as exc:
+            raise ValueError(f"{exc}: {path}") from exc
 
 
-def suppress_small_groups(rows: list[dict[str, Any]], count_key: str = "count") -> list[dict[str, Any]]:
+def sanitize_safe_evidence(payload: Any, path: str = "evidence") -> Any:
+    """Return the only representation that may cross the Provider gateway.
+
+    Aggregate list rows with a conventional ``count``/``n``/``sample_count``
+    field are suppressed below the product-wide threshold.  Validation is run on
+    the transformed value, so callers cannot accidentally validate one object and
+    transmit another.
+    """
+    if isinstance(payload, dict):
+        result = {
+            str(key): sanitize_safe_evidence(value, f"{path}.{key}")
+            for key, value in payload.items()
+        }
+        count_key = next(
+            (key for key in ("count", "sample_count", "n") if key in result),
+            None,
+        )
+        if count_key is not None:
+            count = result[count_key]
+            if isinstance(count, (int, float)) and not isinstance(count, bool):
+                if int(count) < MIN_AGGREGATE_COUNT:
+                    result = {count_key: int(count), "suppressed": True}
+        validate_safe_evidence(result, path)
+        return result
+    if isinstance(payload, list):
+        result = [
+            sanitize_safe_evidence(value, f"{path}[{index}]") for index, value in enumerate(payload)
+        ]
+        validate_safe_evidence(result, path)
+        return result
+    validate_safe_evidence(payload, path)
+    return payload
+
+
+def suppress_small_groups(
+    rows: list[dict[str, Any]], count_key: str = "count"
+) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for row in rows:
         count = int(row.get(count_key) or 0)
@@ -117,7 +170,9 @@ def generate_recovery_key() -> str:
     return "RMA-" + secrets.token_urlsafe(32)
 
 
-def encrypt_bytes(value: bytes, password: str, associated_data: bytes = b"risk-model-agent-v1") -> bytes:
+def encrypt_bytes(
+    value: bytes, password: str, associated_data: bytes = b"risk-model-agent-v1"
+) -> bytes:
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     except ImportError as exc:  # pragma: no cover - dependency contract
@@ -129,7 +184,9 @@ def encrypt_bytes(value: bytes, password: str, associated_data: bytes = b"risk-m
     return envelope.dumps()
 
 
-def decrypt_bytes(value: bytes, password: str, associated_data: bytes = b"risk-model-agent-v1") -> bytes:
+def decrypt_bytes(
+    value: bytes, password: str, associated_data: bytes = b"risk-model-agent-v1"
+) -> bytes:
     try:
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     except ImportError as exc:  # pragma: no cover - dependency contract
@@ -214,13 +271,30 @@ def decrypt_file_payload(
     if sha256_file(source) != manifest.get("ciphertext_sha256"):
         raise ValueError("ARCHIVE_CIPHERTEXT_CHECKSUM_MISMATCH")
     associated_data = str(manifest["associated_data"]).encode("ascii")
-    wrap_name = "recovery_wrap" if credential.startswith("RMA-") else "password_wrap"
-    wrap = manifest[wrap_name]
+    # ``RMA-`` is a display convention, not an authenticated credential type.
+    # A perfectly valid user password may start with that prefix, so try both
+    # independently wrapped data keys and disclose only one generic failure.
+    wrap_names = (
+        ("recovery_wrap", "password_wrap")
+        if credential.startswith("RMA-")
+        else ("password_wrap", "recovery_wrap")
+    )
+    data_key: bytes | None = None
+    for wrap_name in wrap_names:
+        try:
+            wrap = manifest[wrap_name]
+            wrapping_key = derive_key(credential, _unb64(wrap["salt"]))
+            data_key = AESGCM(wrapping_key).decrypt(
+                _unb64(wrap["nonce"]),
+                _unb64(wrap["wrapped_key"]),
+                associated_data + b"-data-key",
+            )
+            break
+        except (InvalidTag, KeyError, ValueError, TypeError):
+            continue
+    if data_key is None:
+        raise ValueError("INVALID_ARCHIVE_OR_CREDENTIAL")
     try:
-        wrapping_key = derive_key(credential, _unb64(wrap["salt"]))
-        data_key = AESGCM(wrapping_key).decrypt(
-            _unb64(wrap["nonce"]), _unb64(wrap["wrapped_key"]), associated_data + b"-data-key"
-        )
         decryptor = Cipher(
             algorithms.AES(data_key),
             modes.GCM(_unb64(manifest["payload_nonce"]), _unb64(manifest["payload_tag"])),
