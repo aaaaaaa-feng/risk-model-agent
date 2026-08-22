@@ -1,26 +1,47 @@
 import { ChangeEvent, useEffect, useState } from "react";
 import { api } from "../api";
+import { errorMessage, formatMetric, formatPercent } from "../lib/format";
 import type { Project, Run } from "../types";
 
-export function ReportView({
-  project,
-  run,
-  notify,
-}: {
+interface Props {
   project: Project;
   run: Run | null;
   notify: (message: string, error?: boolean) => void;
-}) {
-  const [report, setReport] = useState<any>(null);
-  const [models, setModels] = useState<any[]>([]);
+}
+
+interface ModelVersion {
+  id: string;
+  name: string;
+}
+
+interface ScoreJob {
+  id: string;
+  rows: number;
+}
+
+interface ReportData {
+  schema_version: string;
+  project: { name: string };
+  target: { column: string };
+  executive_summary?: Record<string, unknown>;
+  champion?: Record<string, unknown>;
+  sample_overview?: Record<string, unknown>;
+  model_comparison?: Array<Record<string, unknown>>;
+  feature_selection?: { selected?: Array<Record<string, unknown>> };
+}
+
+export function ReportView({ project, run, notify }: Props) {
+  const [report, setReport] = useState<ReportData | null>(null);
+  const [models, setModels] = useState<ModelVersion[]>([]);
   const [modelId, setModelId] = useState("");
   const [busy, setBusy] = useState(false);
-  const [scoreJob, setScoreJob] = useState<any>(null);
+  const [scoreJob, setScoreJob] = useState<ScoreJob | null>(null);
+
   useEffect(() => {
     setReport(null);
     setScoreJob(null);
     api
-      .get<{ models: any[] }>(`/projects/${project.id}/models`)
+      .get<{ models: ModelVersion[] }>(`/projects/${project.id}/models`)
       .then((value) => {
         setModels(value.models);
         setModelId((current) => current || value.models[0]?.id || "");
@@ -28,10 +49,11 @@ export function ReportView({
       .catch(() => undefined);
     if (run?.status === "succeeded")
       api
-        .get(`/reports/${run.id}`)
-        .then(setReport)
-        .catch((error) => notify(error instanceof Error ? error.message : "报告读取失败", true));
-  }, [project.id, run?.id, run?.status]);
+        .get<ReportData>(`/reports/${run.id}`)
+        .then((value) => setReport(value))
+        .catch((error) => notify(errorMessage(error), true));
+  }, [project.id, run?.id, run?.status, notify]);
+
   const score = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !modelId) return;
@@ -40,20 +62,21 @@ export function ReportView({
       const form = new FormData();
       form.append("file", file);
       form.append("kind", "score_input");
-      const uploaded = await api.upload<any>(`/projects/${project.id}/data-assets`, form);
-      const result = await api.post<any>("/score-jobs", {
+      const uploaded = await api.upload<{ asset: { id: string } }>(`/projects/${project.id}/data-assets`, form);
+      const result = await api.post<{ score_job: ScoreJob }>("/score-jobs", {
         model_version_id: modelId,
         input_asset_id: uploaded.asset.id,
       });
       setScoreJob(result.score_job);
       notify(`已为 ${result.score_job.rows.toLocaleString()} 条样本打分`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "评分失败", true);
+      notify(errorMessage(error), true);
     } finally {
       setBusy(false);
       event.target.value = "";
     }
   };
+
   if (!run || run.status !== "succeeded")
     return (
       <div className="report-empty">
@@ -71,8 +94,12 @@ export function ReportView({
       </div>
     );
   if (!report) return <div className="loading-panel">正在读取结构化模型报告…</div>;
+
   const summary = report.executive_summary || {};
   const champion = report.champion || {};
+  const championMetrics = (name: string) =>
+    (champion[`${name}_metrics`] as Record<string, unknown> | undefined) || {};
+
   return (
     <div className="report-view">
       <div className="stage-line">
@@ -99,9 +126,9 @@ export function ReportView({
       </div>
       <div className="summary-grid five">
         <Metric label="Champion" value={summary.champion} />
-        <Metric label="Test AUC" value={metric(summary.test_auc)} />
-        <Metric label="Test KS" value={metric(summary.test_ks)} />
-        <Metric label="OOT AUC" value={metric(summary.oot_auc)} />
+        <Metric label="Test AUC" value={formatMetric(championMetrics("test").roc_auc)} />
+        <Metric label="Test KS" value={formatMetric(championMetrics("test").ks)} />
+        <Metric label="OOT AUC" value={formatMetric(championMetrics("oot").roc_auc)} />
         <Metric label="质检结论" value={summary.quality_verdict === "pass" ? "通过" : "条件通过"} />
       </div>
       {summary.quality_verdict !== "pass" && (
@@ -110,7 +137,7 @@ export function ReportView({
             <span>QUALITY NOTICE</span>
             <strong>需关注排序</strong>
           </div>
-          <p>{summary.quality_notes?.[0] || "Test 等频分箱未达到绝对排序。"}</p>
+          <p>{(summary.quality_notes as string[] | undefined)?.[0] || "Test 等频分箱未达到绝对排序。"}</p>
         </div>
       )}
       <section className="report-section">
@@ -135,28 +162,31 @@ export function ReportView({
               </tr>
             </thead>
             <tbody>
-              {Object.entries(report.sample_overview || {}).map(([name, value]: any) => (
-                <tr key={name}>
-                  <td>
-                    <strong>{name.toUpperCase()}</strong>
-                  </td>
-                  <td>{value.rows.toLocaleString()}</td>
-                  <td>{value.positive_count.toLocaleString()}</td>
-                  <td>{percent(value.bad_rate)}</td>
-                  <td>{metric(champion[`${name}_metrics`]?.roc_auc)}</td>
-                  <td>{metric(champion[`${name}_metrics`]?.ks)}</td>
-                  <td>{metric(champion[`${name}_metrics`]?.pr_auc)}</td>
-                  <td>
-                    {metric(
-                      name === "test"
-                        ? champion.train_test_score_psi
-                        : name === "oot"
-                          ? champion.test_oot_score_psi
-                          : null,
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {Object.entries(report.sample_overview || {}).map(([name, value]) => {
+                const overview = value as Record<string, unknown>;
+                return (
+                  <tr key={name}>
+                    <td>
+                      <strong>{name.toUpperCase()}</strong>
+                    </td>
+                    <td>{Number(overview.rows).toLocaleString()}</td>
+                    <td>{Number(overview.positive_count).toLocaleString()}</td>
+                    <td>{formatPercent(overview.bad_rate)}</td>
+                    <td>{formatMetric(championMetrics(name).roc_auc)}</td>
+                    <td>{formatMetric(championMetrics(name).ks)}</td>
+                    <td>{formatMetric(championMetrics(name).pr_auc)}</td>
+                    <td>
+                      {formatMetric(
+                        name === "test"
+                          ? champion.train_test_score_psi
+                          : name === "oot"
+                            ? champion.test_oot_score_psi
+                            : null,
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -169,22 +199,28 @@ export function ReportView({
           </div>
         </div>
         <div className="candidate-bars">
-          {(report.model_comparison || []).map((item: any) => (
-            <div
-              key={item.candidate}
-              className={item.candidate === summary.champion ? "champion" : ""}
-            >
-              <span>{item.candidate}</span>
-              <i
-                style={{ width: `${Math.max(0, Number(item.test_metrics?.roc_auc || 0) * 100)}%` }}
-              />
-              <b>
-                {item.status === "trained"
-                  ? `AUC ${metric(item.test_metrics?.roc_auc)} · KS ${metric(item.test_metrics?.ks)}`
-                  : item.error_code}
-              </b>
-            </div>
-          ))}
+          {(report.model_comparison || []).map((item) => {
+            const candidate = item as Record<string, unknown>;
+            const metrics = (candidate.test_metrics as Record<string, unknown>) || {};
+            return (
+              <div
+                key={String(candidate.candidate)}
+                className={candidate.candidate === summary.champion ? "champion" : ""}
+              >
+                <span>{String(candidate.candidate)}</span>
+                <i
+                  style={{
+                    width: `${Math.max(0, Number(metrics.roc_auc || 0) * 100)}%`,
+                  }}
+                />
+                <b>
+                  {candidate.status === "trained"
+                    ? `AUC ${formatMetric(metrics.roc_auc)} · KS ${formatMetric(metrics.ks)}`
+                    : String(candidate.error_code ?? "—")}
+                </b>
+              </div>
+            );
+          })}
         </div>
       </section>
       <section className="report-section">
@@ -208,20 +244,21 @@ export function ReportView({
               </tr>
             </thead>
             <tbody>
-              {Object.entries(champion.lift || {}).flatMap(([name, rows]: any) =>
-                (rows || []).map((row: any) => (
-                  <tr key={`${name}-${row.bucket}`}>
-                    <td>{name.toUpperCase()}</td>
-                    <td>{row.bucket}</td>
-                    <td>{row.count}</td>
-                    <td>{percent(row.bad_rate)}</td>
-                    <td>{metric(row.lift)}</td>
-                    <td>{percent(row.cumulative_capture)}</td>
-                    <td>
-                      {metric(row.min_probability)}—{metric(row.max_probability)}
-                    </td>
-                  </tr>
-                )),
+              {Object.entries((champion.lift as Record<string, unknown>) || {}).flatMap(
+                ([name, rows]) =>
+                  ((rows as Array<Record<string, unknown>>) || []).map((row) => (
+                    <tr key={`${name}-${row.bucket}`}>
+                      <td>{name.toUpperCase()}</td>
+                      <td>{String(row.bucket)}</td>
+                      <td>{Number(row.count).toLocaleString()}</td>
+                      <td>{formatPercent(row.bad_rate)}</td>
+                      <td>{formatMetric(row.lift)}</td>
+                      <td>{formatPercent(row.cumulative_capture)}</td>
+                      <td>
+                        {formatMetric(row.min_probability)}—{formatMetric(row.max_probability)}
+                      </td>
+                    </tr>
+                  )),
               )}
             </tbody>
           </table>
@@ -236,11 +273,14 @@ export function ReportView({
           <span className="count-badge">{report.feature_selection?.selected?.length || 0}</span>
         </div>
         <div className="feature-pills">
-          {(report.feature_selection?.selected || []).map((item: any) => (
-            <span key={item.column}>
-              <b>{item.column}</b>IV {metric(item.iv)}
-            </span>
-          ))}
+          {(report.feature_selection?.selected || []).map((item) => {
+            const feature = item as Record<string, unknown>;
+            return (
+              <span key={String(feature.column)}>
+                <b>{String(feature.column)}</b>IV {formatMetric(feature.iv)}
+              </span>
+            );
+          })}
         </div>
       </section>
       <section className="score-panel">
@@ -278,17 +318,12 @@ export function ReportView({
   );
 }
 
-function Metric({ label, value }: { label: string; value: any }) {
+function Metric({ label, value }: { label: string; value: unknown }) {
+  const rendered = value == null ? "—" : typeof value === "string" || typeof value === "number" ? String(value) : "—";
   return (
     <div className="summary-cell">
       <span>{label}</span>
-      <strong>{value ?? "—"}</strong>
+      <strong>{rendered}</strong>
     </div>
   );
-}
-function metric(value: any) {
-  return value == null ? "—" : Number(value).toFixed(4);
-}
-function percent(value: any) {
-  return value == null ? "—" : `${(Number(value) * 100).toFixed(2)}%`;
 }

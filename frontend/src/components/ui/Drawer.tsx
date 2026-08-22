@@ -6,11 +6,12 @@ interface DrawerProps {
   titleId: string;
   onClose: () => void;
   children: React.ReactNode;
+  initialFocusRef?: React.RefObject<HTMLElement>;
 }
 
-export function Drawer({ open, titleId, onClose, children }: DrawerProps) {
+export function Drawer({ open, titleId, onClose, children, initialFocusRef }: DrawerProps) {
   const drawerRef = useRef<HTMLElement>(null);
-  useFocusTrap(drawerRef, { active: open, onClose });
+  useFocusTrap(drawerRef, { active: open, onClose, initialFocusRef });
 
   if (!open) return null;
   return (

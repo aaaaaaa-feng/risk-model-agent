@@ -1,6 +1,18 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, eventUrl } from "../api";
+import { errorMessage } from "../lib/format";
 import type { Message } from "../types";
+
+interface ConversationResponse {
+  conversation: { id: string };
+  messages: Message[];
+}
+
+interface MessagePostResponse {
+  conversation_id: string;
+  response_id: string;
+  user_message: Message;
+}
 
 export function AgentChat({
   projectId,
@@ -9,32 +21,32 @@ export function AgentChat({
   projectId: string | null;
   notify: (message: string, error?: boolean) => void;
 }) {
-  const [conversationId, setConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!projectId) {
       setMessages([]);
-      setConversationId("");
       return;
     }
     try {
-      const value = await api.get<any>(`/projects/${projectId}/conversation`);
-      setConversationId(value.conversation.id);
+      const value = await api.get<ConversationResponse>(`/projects/${projectId}/conversation`);
       setMessages(value.messages);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "对话读取失败", true);
+      notify(errorMessage(error), true);
     }
-  };
+  }, [projectId, notify]);
+
   useEffect(() => {
     load();
-  }, [projectId]);
+  }, [load]);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, draft]);
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!projectId || !input.trim() || busy) return;
@@ -43,7 +55,7 @@ export function AgentChat({
     setBusy(true);
     setDraft("");
     try {
-      const result = await api.post<any>(`/projects/${projectId}/conversation/messages`, {
+      const result = await api.post<MessagePostResponse>(`/projects/${projectId}/conversation/messages`, {
         content,
       });
       setMessages((current) => [...current, result.user_message]);
@@ -69,17 +81,19 @@ export function AgentChat({
       };
     } catch (error) {
       setBusy(false);
-      notify(error instanceof Error ? error.message : "发送失败", true);
+      notify(errorMessage(error), true);
     }
   };
+
   const feedback = async (messageId: string, rating: string) => {
     try {
       await api.post(`/conversation-messages/${messageId}/feedback`, { rating });
       notify(rating === "up" ? "已记录有帮助" : "已记录需要改进");
     } catch (error) {
-      notify(error instanceof Error ? error.message : "反馈失败", true);
+      notify(errorMessage(error), true);
     }
   };
+
   return (
     <section className="agent-chat" aria-label="项目 Agent 对话">
       <div className="chat-head">

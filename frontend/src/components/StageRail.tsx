@@ -1,6 +1,6 @@
 import { useState } from "react";
+import { reviewLabel, runStageLabel, statusLabel } from "../lib/labels";
 import type { Decision, Run, RunEvent } from "../types";
-import { stageLabel } from "./RunWorkbench";
 
 const stages = [
   "target_confirmation",
@@ -53,7 +53,7 @@ export function StageRail({
         <span className="eyebrow">
           当前阶段 · {String(currentIndex + 1).padStart(2, "0")} / {stages.length}
         </span>
-        <h2>{stageLabel(run.stage)}</h2>
+        <h2>{runStageLabel[run.stage]}</h2>
         <p>{latest?.summary || "等待节点事件"}</p>
       </div>
       <ul className="audit-list">
@@ -64,8 +64,8 @@ export function StageRail({
         <li>
           <span>Reviewer</span>
           <b className={["block", "blocked"].includes(review?.status || "") ? "danger" : "ok"}>
-            {review
-              ? reviewLabel(review.status)
+            {review?.status
+              ? reviewLabel[review.status] || "已完成预审"
               : run.stage === "training"
                 ? "质检中"
                 : "随节点执行"}
@@ -95,7 +95,7 @@ export function StageRail({
             className={index < currentIndex ? "done" : index === currentIndex ? "active" : ""}
           >
             <i>{index < currentIndex ? "✓" : index + 1}</i>
-            <span>{stageLabel(stage)}</span>
+            <span>{runStageLabel[stage]}</span>
           </li>
         ))}
       </ol>
@@ -127,39 +127,9 @@ export function StageRail({
   );
 }
 
-function statusLabel(value: string) {
-  return (
-    (
-      {
-        queued: "排队中",
-        running: "运行中",
-        awaiting_decision: "等待确认",
-        succeeded: "已完成",
-        failed: "失败",
-        blocked: "已停止",
-      } as Record<string, string>
-    )[value] || value
-  );
-}
-function reviewLabel(value: string) {
-  return (
-    (
-      {
-        pass: "预审通过",
-        deterministic_pass: "确定性通过",
-        llm_reviewer_pass: "LLM 复核通过",
-        fallback_pass: "本地降级通过",
-        conditional_pass: "有条件通过",
-        revise: "建议调整",
-        block: "发现阻断",
-        blocked: "发现阻断",
-      } as Record<string, string>
-    )[value] || value
-  );
-}
 function nextAction(run: Run, decision: Decision | null) {
   if (run.status === "awaiting_decision") return decision?.payload?.title || "确认当前方案";
   if (run.status === "succeeded") return "查看报告或批量评分";
   if (run.status === "failed") return "查看错误证据并重试";
-  return `等待 ${stageLabel(run.stage)} 完成`;
+  return `等待 ${runStageLabel[run.stage]} 完成`;
 }

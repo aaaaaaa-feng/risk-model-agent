@@ -1,5 +1,5 @@
+import { runStageLabel } from "../lib/labels";
 import type { Run, TargetTask } from "../types";
-import { stageLabel } from "./RunWorkbench";
 
 export function HistoryView({
   runs,
@@ -54,7 +54,7 @@ export function HistoryView({
                   <td>
                     <span className={`status ${run.status}`}>{run.status}</span>
                   </td>
-                  <td>{stageLabel(run.stage)}</td>
+                  <td>{runStageLabel[run.stage]}</td>
                   <td>{Math.round((run.progress || 0) * 100)}%</td>
                   <td>{new Date(run.updated_at).toLocaleString()}</td>
                   <td>

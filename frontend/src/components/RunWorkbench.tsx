@@ -1,3 +1,6 @@
+import { formatMetric } from "../lib/format";
+import { runStageLabel } from "../lib/labels";
+import type { ModelResult } from "../types/model";
 import type { Run, RunEvent } from "../types";
 
 export function RunWorkbench({
@@ -9,9 +12,11 @@ export function RunWorkbench({
   events: RunEvent[];
   onRetry?: () => void;
 }) {
-  const state = run.state || {};
-  const result = state.model_result || {};
-  const champion = result.candidates?.find((item: any) => item.candidate === result.champion);
+  const result = (run.state?.model_result as ModelResult) || {};
+  const candidates = result.candidates || [];
+  const champion = result.champion
+    ? candidates.find((item) => item.candidate === result.champion)
+    : undefined;
   const conditional =
     run.status === "succeeded" && champion && champion.test_monotonicity?.absolute !== true;
   if (run.status === "failed" || run.status === "blocked")
@@ -52,7 +57,7 @@ export function RunWorkbench({
               ? conditional
                 ? "模型已完成质检，需关注排序"
                 : "模型已通过最终质检"
-              : stageLabel(run.stage)}
+              : runStageLabel[run.stage] || run.stage}
           </h2>
           <p>
             {run.status === "succeeded"
@@ -79,8 +84,8 @@ export function RunWorkbench({
         <>
           <div className="summary-grid four">
             <Metric label="Champion" value={champion.candidate} />
-            <Metric label="Test AUC" value={metric(champion.test_metrics?.roc_auc)} />
-            <Metric label="Test KS" value={metric(champion.test_metrics?.ks)} />
+            <Metric label="Test AUC" value={formatMetric(champion.test_metrics?.roc_auc)} />
+            <Metric label="Test KS" value={formatMetric(champion.test_metrics?.ks)} />
             <Metric label="绝对排序" value={champion.test_monotonicity?.absolute ? "是" : "否"} />
           </div>
           <div className="section-heading">
@@ -102,7 +107,7 @@ export function RunWorkbench({
                 </tr>
               </thead>
               <tbody>
-                {result.candidates.map((item: any) => (
+                {candidates.map((item) => (
                   <tr key={item.candidate}>
                     <td>
                       <strong>{item.candidate}</strong>
@@ -111,9 +116,9 @@ export function RunWorkbench({
                       <span className={`status ${item.status}`}>{item.status}</span>
                     </td>
                     <td>{item.calibration || "—"}</td>
-                    <td>{metric(item.test_metrics?.roc_auc)}</td>
-                    <td>{metric(item.test_metrics?.ks)}</td>
-                    <td>{metric(item.train_test_score_psi)}</td>
+                    <td>{formatMetric(item.test_metrics?.roc_auc)}</td>
+                    <td>{formatMetric(item.test_metrics?.ks)}</td>
+                    <td>{formatMetric(item.train_test_score_psi)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -124,7 +129,7 @@ export function RunWorkbench({
         <div className="live-node">
           <div className="pulse" />
           <div>
-            <strong>{stageLabel(run.stage)}</strong>
+            <strong>{runStageLabel[run.stage] || run.stage}</strong>
             <p>页面关闭不会停止任务。所有拟合、统计与报告均在本机执行。</p>
           </div>
         </div>
@@ -152,28 +157,5 @@ function Metric({ label, value }: { label: string; value: string }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
-  );
-}
-function metric(value: any) {
-  return value == null ? "—" : Number(value).toFixed(4);
-}
-export function stageLabel(stage: string) {
-  return (
-    (
-      {
-        project_setup: "项目初始化",
-        target_confirmation: "Y 确认",
-        data_diagnosis: "建模前诊断",
-        cleaning: "数据清洗",
-        split: "样本切分",
-        screening: "变量筛选",
-        binning: "变量分箱",
-        model_plan: "建模方案",
-        code_review: "代码生成与质检",
-        training: "训练、调参与校准",
-        reporting: "报告与模型包",
-        completed: "已完成",
-      } as Record<string, string>
-    )[stage] || stage
   );
 }

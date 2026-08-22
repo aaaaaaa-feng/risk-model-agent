@@ -2,13 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { useRunEvents } from "./hooks";
 import { isCurrentSelection, mergeEventsForRun } from "./runState";
+import { errorMessage, isAbort } from "./lib/format";
 import type {
   Decision,
+  EventsResponse,
   Project,
+  ProjectCreatedResponse,
   ProjectDetail,
+  ProjectsResponse,
   Run,
+  RunCreatedResponse,
   RunEvent,
+  RunResponse,
   Settings,
+  SettingsResponse,
   WorkspaceStatus,
 } from "./types";
 import { AgentChat } from "./components/AgentChat";
@@ -57,14 +64,14 @@ export function App() {
   }, []);
   const loadSettings = useCallback(async () => {
     try {
-      const value = await api.get<any>("/providers/settings");
+      const value = await api.get<SettingsResponse>("/providers/settings");
       setSettings({
         ...value.settings,
         profiles: value.profiles || value.settings?.profiles || [],
         active_profile_id: value.active_profile_id || value.settings?.active_profile_id,
       });
     } catch (error) {
-      notify(msg(error), true);
+      notify(errorMessage(error), true);
     }
   }, [notify]);
   const loadWorkspace = useCallback(async () => {
@@ -73,19 +80,19 @@ export function App() {
       setWorkspace(value.workspace);
       if (value.workspace.needs_setup) setWorkspaceOpen(true);
     } catch (error) {
-      notify(msg(error), true);
+      notify(errorMessage(error), true);
     }
   }, [notify]);
   const loadProjects = useCallback(async () => {
     try {
-      const value = await api.get<{ projects: Project[] }>("/projects");
+      const value = await api.get<ProjectsResponse>("/projects");
       setProjects(value.projects);
       setSelectedId((current) => {
         if (current && value.projects.some((p) => p.id === current)) return current;
         return value.projects[0]?.id || null;
       });
     } catch (error) {
-      notify(msg(error), true);
+      notify(errorMessage(error), true);
     }
   }, [notify]);
   const loadDetail = useCallback(async () => {
@@ -112,7 +119,7 @@ export function App() {
         return active?.id || value.runs[0]?.id || null;
       });
     } catch (error) {
-      if (!isAbort(error)) notify(msg(error), true);
+      if (!isAbort(error)) notify(errorMessage(error), true);
     }
   }, [selectedId, notify]);
   const loadRun = useCallback(async () => {
@@ -130,8 +137,8 @@ export function App() {
     runAbort.current = controller;
     try {
       const [runValue, eventValue] = await Promise.all([
-        api.get<any>(`/runs/${expectedRunId}`, { signal: controller.signal }),
-        api.get<any>(`/runs/${expectedRunId}/events`, { signal: controller.signal }),
+        api.get<RunResponse>(`/runs/${expectedRunId}`, { signal: controller.signal }),
+        api.get<EventsResponse>(`/runs/${expectedRunId}/events`, { signal: controller.signal }),
       ]);
       if (
         requestId !== runRequest.current ||
@@ -142,14 +149,14 @@ export function App() {
       setDecision(runValue.pending_decisions?.[0] || null);
       setEvents(mergeEventsForRun([], eventValue.events, expectedRunId));
     } catch (error) {
-      if (!isAbort(error)) notify(msg(error), true);
+      if (!isAbort(error)) notify(errorMessage(error), true);
     }
   }, [selectedId, runId, notify]);
   useEffect(() => {
     loadWorkspace();
     loadProjects();
     loadSettings();
-  }, []);
+  }, [loadProjects, loadSettings, loadWorkspace]);
   useEffect(() => {
     selectedRef.current = selectedId;
     if (selectedId) {
@@ -191,17 +198,22 @@ export function App() {
       loadDetail();
     },
   );
-  const createProject = async (payload: any) => {
+  const createProject = async (payload: {
+    name: string;
+    description: string;
+    mode: string;
+    metadata: Record<string, string>;
+  }) => {
     setBusy(true);
     try {
-      const value = await api.post<any>("/projects", payload);
+      const value = await api.post<ProjectCreatedResponse>("/projects", payload);
       await loadProjects();
       setSelectedId(value.project.id);
       setCreateOpen(false);
       setDataMode(true);
       notify("项目已创建；可开始导入本地数据");
     } catch (error) {
-      notify(msg(error), true);
+      notify(errorMessage(error), true);
     } finally {
       setBusy(false);
     }
@@ -209,14 +221,18 @@ export function App() {
   const createDemo = async (mode: string) => {
     setBusy(true);
     try {
-      const value = await api.post<any>("/projects/demo", { mode, rows: 1200, seed: 20260821 });
+      const value = await api.post<ProjectCreatedResponse>("/projects/demo", {
+        mode,
+        rows: 1200,
+        seed: 20260821,
+      });
       await loadProjects();
       setSelectedId(value.project.id);
       setCreateOpen(false);
       setDataMode(true);
       notify("合成多表项目已就绪；三个 Y 可分别排队建模");
     } catch (error) {
-      notify(msg(error), true);
+      notify(errorMessage(error), true);
     } finally {
       setBusy(false);
     }
@@ -224,7 +240,7 @@ export function App() {
   const retry = async () => {
     if (!run || !detail) return;
     try {
-      const value = await api.post<any>("/runs", {
+      const value = await api.post<RunCreatedResponse>("/runs", {
         project_id: detail.project.id,
         target_task_id: run.target_task_id,
         mode: detail.project.mode,
@@ -234,7 +250,7 @@ export function App() {
       setView("workbench");
       notify("新 Run 已进入队列");
     } catch (error) {
-      notify(msg(error), true);
+      notify(errorMessage(error), true);
     }
   };
   const selectProject = (id: string) => {
@@ -453,10 +469,4 @@ function Welcome({ onCreate }: { onCreate: () => void }) {
       </button>
     </div>
   );
-}
-function msg(error: unknown) {
-  return error instanceof Error ? error.message : "操作失败";
-}
-function isAbort(error: unknown) {
-  return error instanceof DOMException && error.name === "AbortError";
 }

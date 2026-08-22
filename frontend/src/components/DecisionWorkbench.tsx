@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { formatMetric, formatNumber, formatPercent } from "../lib/format";
+import {
+  confirmLabel,
+  decisionStageName,
+  monotonicLabel,
+  reviewLabel,
+} from "../lib/labels";
 import type { Decision, Run } from "../types";
 
 interface Props {
@@ -20,38 +27,53 @@ const modelCatalog = [
   ["catboost", "CatBoost", "类别变量挑战模型"],
 ] as const;
 
+interface RestoreFeature {
+  column: string;
+  reason: string;
+}
+
 export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) {
-  const details = decision.payload || {};
-  const summary = details.summary || {};
+  const details = decision.payload;
+  const summary = details.summary;
   const [busy, setBusy] = useState(false);
-  const [edits, setEdits] = useState<Record<string, any>>({});
+  const [edits, setEdits] = useState<Record<string, unknown>>({});
   const [manualColumn, setManualColumn] = useState("");
   const [manualSpec, setManualSpec] = useState("");
+
   useEffect(() => {
-    if (decision.kind === "confirm_data")
+    if (decision.kind === "confirm_data") {
+      const dataSummary = summary as import("../types").DataSummary;
       setEdits({
-        accepted_action_ids: (summary.actions || [])
-          .filter((item: any) => item.recommended)
-          .map((item: any) => item.id),
+        accepted_action_ids: (dataSummary.actions || [])
+          .filter((action) => action.recommended)
+          .map((action) => action.id),
       });
-    else if (decision.kind === "confirm_split") setEdits({ ...(summary.plan || summary) });
-    else if (decision.kind === "confirm_models")
+    } else if (decision.kind === "confirm_split") {
+      const splitSummary = summary as import("../types").SplitSummary;
+      setEdits({ ...(splitSummary.plan || splitSummary) });
+    } else if (decision.kind === "confirm_models") {
+      const modelsSummary = summary as import("../types").ModelsSummary;
       setEdits({
-        models: summary.plan?.models || [],
-        score: summary.plan?.score || {},
-        search_budget: summary.plan?.search_budget ?? 0,
+        models: modelsSummary.plan?.models || [],
+        score: modelsSummary.plan?.score || {},
+        search_budget: modelsSummary.plan?.search_budget ?? 0,
       });
-    else if (decision.kind === "confirm_binning") {
-      const first = Object.keys(summary.specs || {})[0] || "";
+    } else if (decision.kind === "confirm_binning") {
+      const binningSummary = summary as import("../types").BinningSummary;
+      const first = Object.keys(binningSummary.specs || {})[0] || "";
       setManualColumn(first);
-      setManualSpec(first ? JSON.stringify(editableBinSpec(summary.specs[first]), null, 2) : "");
-    } else setEdits({});
+      setManualSpec(first ? JSON.stringify(editableBinSpec(binningSummary.specs?.[first]), null, 2) : "");
+    } else {
+      setEdits({});
+    }
     if (decision.kind !== "confirm_binning") {
       setManualColumn("");
       setManualSpec("");
     }
-  }, [decision.id]);
-  const review = summary.review || decision.review || {};
+  }, [decision.id, decision.kind, summary]);
+
+  const review: import("../types").Review = summary.review || decision.review || {};
+
   const confirm = async (approved: boolean) => {
     setBusy(true);
     try {
@@ -68,12 +90,13 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
       setBusy(false);
     }
   };
+
   return (
     <div className="decision-workbench">
       <div className="stage-line">
         <div>
           <span className="eyebrow">HUMAN IN THE LOOP · {decision.stage}</span>
-          <h2>{details.title || stageName(decision.stage)}</h2>
+          <h2>{details.title || decisionStageName[decision.stage] || decision.stage}</h2>
           <p>Reviewer 已先完成审核；你只需确认业务选择，不需要阅读长代码。</p>
         </div>
         <div className="run-meta">
@@ -85,7 +108,7 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
       <div className={`review-banner ${review.status || "pass"}`}>
         <div>
           <span>AI REVIEW</span>
-          <strong>{reviewLabel(review.status)}</strong>
+          <strong>{reviewLabel[review.status || ""] || "已完成预审"}</strong>
         </div>
         <p>
           {review.issues?.length
@@ -99,19 +122,21 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
           LLM，请到「设置中心」打开“启用 LLM”，保存后重新创建 Run；本次 Run 不会回溯重试。
         </p>
       )}
-      {decision.kind === "confirm_target" && <TargetDecision summary={summary.target || summary} />}
+      {decision.kind === "confirm_target" && (
+        <TargetDecision summary={summary as import("../types").TargetSummary} />
+      )}
       {decision.kind === "confirm_data" && (
-        <DataDecision summary={summary} edits={edits} setEdits={setEdits} />
+        <DataDecision summary={summary as import("../types").DataSummary} edits={edits} setEdits={setEdits} />
       )}
       {decision.kind === "confirm_split" && (
-        <SplitDecision plan={summary.plan || summary} edits={edits} setEdits={setEdits} />
+        <SplitDecision summary={summary as import("../types").SplitSummary} edits={edits} setEdits={setEdits} />
       )}
       {decision.kind === "confirm_screening" && (
-        <ScreeningDecision summary={summary} edits={edits} setEdits={setEdits} />
+        <ScreeningDecision summary={summary as import("../types").ScreeningSummary} edits={edits} setEdits={setEdits} />
       )}
       {decision.kind === "confirm_binning" && (
         <BinningDecision
-          summary={summary}
+          summary={summary as import("../types").BinningSummary}
           manualColumn={manualColumn}
           setManualColumn={setManualColumn}
           manualSpec={manualSpec}
@@ -119,13 +144,13 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
         />
       )}
       {decision.kind === "confirm_models" && (
-        <ModelDecision plan={summary.plan || {}} edits={edits} setEdits={setEdits} />
+        <ModelDecision plan={(summary as import("../types").ModelsSummary).plan || { models: [], score: {}, search_budget: 0 }} edits={edits} setEdits={setEdits} />
       )}
       <details className="review-details">
         <summary>查看 Reviewer 结论与证据</summary>
         {review.issues?.length ? (
           <ul>
-            {review.issues.map((issue: any, index: number) => (
+            {review.issues.map((issue, index) => (
               <li key={index}>
                 <b>{issue.code || "REVIEW"}</b>
                 <span>{issue.message || JSON.stringify(issue)}</span>
@@ -146,36 +171,45 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
           不批准并停止本 Run
         </button>
         <button className="button primary" disabled={busy} onClick={() => confirm(true)}>
-          {busy ? "提交中…" : confirmLabel(decision.kind)}
+          {busy ? "提交中…" : confirmLabel[decision.kind] || "确认并继续"}
         </button>
       </div>
     </div>
   );
 }
 
-function TargetDecision({ summary }: { summary: any }) {
+function TargetDecision({ summary }: { summary: import("../types").TargetSummary }) {
+  const target = summary.target || summary;
   return (
     <div className="summary-grid four">
       <Metric
         label="有效样本"
-        value={format(summary.valid_count)}
-        note={`排除 ${format((summary.invalid_count || 0) + (summary.missing_count || 0))}`}
+        value={formatNumber(target.valid_count)}
+        note={`排除 ${formatNumber((target.invalid_count || 0) + (target.missing_count || 0))}`}
       />
-      <Metric label="好样本 0" value={format(summary.negative_count)} />
-      <Metric label="坏样本 1" value={format(summary.positive_count)} />
-      <Metric label="坏占比" value={percent(summary.bad_rate)} note="不使用 -1 / 空值" />
+      <Metric label="好样本 0" value={formatNumber(target.negative_count)} />
+      <Metric label="坏样本 1" value={formatNumber(target.positive_count)} />
+      <Metric label="坏占比" value={formatPercent(target.bad_rate)} note="不使用 -1 / 空值" />
     </div>
   );
 }
 
-function DataDecision({ summary, edits, setEdits }: any) {
-  const accepted = edits.accepted_action_ids || [];
+function DataDecision({
+  summary,
+  edits,
+  setEdits,
+}: {
+  summary: import("../types").DataSummary;
+  edits: Record<string, unknown>;
+  setEdits: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
+}) {
+  const accepted = (edits.accepted_action_ids as string[]) || [];
   return (
     <section className="decision-section">
       <h3>诊断与清洗动作</h3>
       {(summary.issues || []).length === 0 && <p className="success-line">没有数据质量阻断。</p>}
       <div className="issue-list">
-        {(summary.issues || []).map((item: any, index: number) => (
+        {(summary.issues || []).map((item, index) => (
           <div key={index} className={`issue ${item.severity}`}>
             <b>{item.code}</b>
             <span>{item.message}</span>
@@ -184,18 +218,21 @@ function DataDecision({ summary, edits, setEdits }: any) {
       </div>
       <div className="action-list">
         {(summary.actions || []).length ? (
-          summary.actions.map((action: any) => (
+          (summary.actions || []).map((action) => (
             <label key={action.id}>
               <input
                 type="checkbox"
                 checked={accepted.includes(action.id)}
                 onChange={(e) =>
-                  setEdits((current: any) => ({
-                    ...current,
-                    accepted_action_ids: e.target.checked
-                      ? [...accepted, action.id]
-                      : accepted.filter((id: string) => id !== action.id),
-                  }))
+                  setEdits((current) => {
+                    const currentAccepted = (current.accepted_action_ids as string[]) || [];
+                    return {
+                      ...current,
+                      accepted_action_ids: e.target.checked
+                        ? [...currentAccepted, action.id]
+                        : currentAccepted.filter((id) => id !== action.id),
+                    };
+                  })
                 }
               />
               <span>
@@ -212,22 +249,31 @@ function DataDecision({ summary, edits, setEdits }: any) {
   );
 }
 
-function SplitDecision({ plan, edits, setEdits }: any) {
-  const change = (key: string, value: any) =>
-    setEdits((current: any) => ({ ...current, [key]: value }));
+function SplitDecision({
+  summary,
+  edits,
+  setEdits,
+}: {
+  summary: import("../types").SplitSummary;
+  edits: Record<string, unknown>;
+  setEdits: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
+}) {
+  const plan = summary.plan || summary;
+  const change = (key: string, value: unknown) =>
+    setEdits((current) => ({ ...current, [key]: value }));
   return (
     <section className="decision-section">
       <div className="summary-grid four">
         <Metric label="方法" value={edits.method === "time_holdout" ? "时间 OOT" : "随机分层"} />
-        <Metric label="时间字段" value={edits.time_column || "无"} />
-        <Metric label="客户隔离" value={edits.customer_key || "未识别"} />
+        <Metric label="时间字段" value={(edits.time_column as string | undefined) || "无"} />
+        <Metric label="客户隔离" value={(edits.customer_key as string | undefined) || "未识别"} />
         <Metric label="随机种子" value={String(edits.random_state || 42)} />
       </div>
       <div className="form-grid">
         <label>
           切分方法
           <select
-            value={edits.method || plan.method}
+            value={(edits.method as string | undefined) || plan.method || "time_holdout"}
             onChange={(e) => change("method", e.target.value)}
           >
             <option value="time_holdout">时间 Train/Test/OOT</option>
@@ -237,7 +283,7 @@ function SplitDecision({ plan, edits, setEdits }: any) {
         <label>
           时间字段
           <input
-            value={edits.time_column || ""}
+            value={(edits.time_column as string | undefined) || ""}
             onChange={(e) => change("time_column", e.target.value || null)}
             disabled={edits.method !== "time_holdout"}
           />
@@ -245,7 +291,7 @@ function SplitDecision({ plan, edits, setEdits }: any) {
         <label>
           客户主键
           <input
-            value={edits.customer_key || ""}
+            value={(edits.customer_key as string | undefined) || ""}
             onChange={(e) => change("customer_key", e.target.value || null)}
           />
         </label>
@@ -256,7 +302,7 @@ function SplitDecision({ plan, edits, setEdits }: any) {
             step="0.05"
             min="0.1"
             max="0.4"
-            value={edits.test_size ?? 0.2}
+            value={(edits.test_size as number | undefined) ?? 0.2}
             onChange={(e) => change("test_size", Number(e.target.value))}
           />
         </label>
@@ -267,7 +313,7 @@ function SplitDecision({ plan, edits, setEdits }: any) {
             step="0.05"
             min="0.1"
             max="0.4"
-            value={edits.oot_size ?? 0.2}
+            value={(edits.oot_size as number | undefined) ?? 0.2}
             onChange={(e) => change("oot_size", Number(e.target.value))}
             disabled={edits.method !== "time_holdout"}
           />
@@ -280,26 +326,34 @@ function SplitDecision({ plan, edits, setEdits }: any) {
   );
 }
 
-function ScreeningDecision({ summary, edits, setEdits }: any) {
+function ScreeningDecision({
+  summary,
+  edits,
+  setEdits,
+}: {
+  summary: import("../types").ScreeningSummary;
+  edits: Record<string, unknown>;
+  setEdits: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
+}) {
   const [reasons, setReasons] = useState<Record<string, string>>({});
-  const recoverable = (summary.excluded || []).filter((item: any) => item.recoverable);
-  const selected = new Set((edits.restore_features || []).map((item: any) => item.column));
-  const toggle = (item: any, checked: boolean) => {
-    const current = edits.restore_features || [];
+  const recoverable = (summary.excluded || []).filter((item) => item.recoverable);
+  const selected = new Set(((edits.restore_features as RestoreFeature[]) || []).map((item) => item.column));
+  const toggle = (item: import("../types").ScreeningExcluded, checked: boolean) => {
+    const current = (edits.restore_features as RestoreFeature[]) || [];
     const reason = (reasons[item.column] || "").trim();
     setEdits({
       ...edits,
       restore_features: checked
         ? [...current, { column: item.column, reason }]
-        : current.filter((v: any) => v.column !== item.column),
+        : current.filter((v) => v.column !== item.column),
     });
   };
   return (
     <section className="decision-section">
       <div className="summary-grid four">
-        <Metric label="最终入模" value={format(summary.included?.length)} />
+        <Metric label="最终入模" value={formatNumber(summary.included?.length)} />
         <Metric label="最低 IV" value={String(summary.thresholds?.iv ?? 0.02)} />
-        <Metric label="最大缺失率" value={percent(summary.thresholds?.missing_rate ?? 0.3)} />
+        <Metric label="最大缺失率" value={formatPercent(summary.thresholds?.missing_rate ?? 0.3)} />
         <Metric label="最大相关系数" value={String(summary.thresholds?.correlation ?? 0.7)} />
       </div>
       <h3>可恢复的排除变量</h3>
@@ -320,7 +374,7 @@ function ScreeningDecision({ summary, edits, setEdits }: any) {
             </tr>
           </thead>
           <tbody>
-            {recoverable.slice(0, 200).map((item: any) => (
+            {recoverable.slice(0, 200).map((item) => (
               <tr key={item.column}>
                 <td>
                   <input
@@ -333,26 +387,26 @@ function ScreeningDecision({ summary, edits, setEdits }: any) {
                 </td>
                 <td>{item.column}</td>
                 <td>{item.reason}</td>
-                <td>{percent(item.missing_rate)}</td>
-                <td>{metric(item.iv)}</td>
+                <td>{formatPercent(item.missing_rate)}</td>
+                <td>{formatMetric(item.iv)}</td>
                 <td>
                   <input
                     value={reasons[item.column] || ""}
                     onChange={(e) => {
                       const value = e.target.value;
                       setReasons((v) => ({ ...v, [item.column]: value }));
-                      if (selected.has(item.column))
+                      if (selected.has(item.column)) {
+                        const features = (edits.restore_features as RestoreFeature[]) || [];
                         setEdits({
                           ...edits,
                           restore_features:
                             value.trim().length >= 8
-                              ? (edits.restore_features || []).map((v: any) =>
+                              ? features.map((v) =>
                                   v.column === item.column ? { ...v, reason: value.trim() } : v,
                                 )
-                              : (edits.restore_features || []).filter(
-                                  (v: any) => v.column !== item.column,
-                                ),
+                              : features.filter((v) => v.column !== item.column),
                         });
+                      }
                     }}
                     placeholder="至少 8 个字符"
                   />
@@ -373,11 +427,17 @@ function BinningDecision({
   setManualColumn,
   manualSpec,
   setManualSpec,
-}: any) {
+}: {
+  summary: import("../types").BinningSummary;
+  manualColumn: string;
+  setManualColumn: (value: string) => void;
+  manualSpec: string;
+  setManualSpec: (value: string) => void;
+}) {
   const specs = summary.specs || {};
   const columns = Object.keys(specs);
-  const sample = specs[manualColumn];
-  const stats = useMemo(() => binStats(sample), [sample]);
+  const sample = manualColumn ? specs[manualColumn] : undefined;
+  const stats = useMemo(() => (sample ? binStats(sample) : null), [sample]);
   const load = (column: string) => {
     setManualColumn(column);
     setManualSpec(JSON.stringify(editableBinSpec(specs[column]), null, 2));
@@ -386,10 +446,10 @@ function BinningDecision({
     <section className="decision-section">
       <div className="summary-grid three">
         <Metric label="分箱版本" value={summary.version || "—"} />
-        <Metric label="入模变量" value={format(columns.length)} />
+        <Metric label="入模变量" value={formatNumber(columns.length)} />
         <Metric
           label="未绝对单调"
-          value={format(summary.non_monotonic?.length || 0)}
+          value={formatNumber(summary.non_monotonic?.length || 0)}
           note="可人工调整"
         />
       </div>
@@ -410,7 +470,7 @@ function BinningDecision({
               >
                 <strong>{column}</strong>
                 <span>
-                  {spec.kind} · {rows.length} 箱 · IV {metric(spec.iv)}
+                  {spec.kind} · {rows.length} 箱 · IV {formatMetric(spec.iv)}
                 </span>
                 <span className={spec.monotonic ? "bin-ok" : "bin-warn"}>
                   {spec.monotonic ? "单调" : "非单调，待调整"} ·{" "}
@@ -421,30 +481,30 @@ function BinningDecision({
           })}
         </div>
         <div className="bin-editor">
-          {manualColumn ? (
+          {manualColumn && sample && stats ? (
             <>
               <div className="section-heading bin-detail-head">
                 <div>
                   <h3>{manualColumn} · 分箱结果</h3>
                   <p>当前表格是已生成的分箱逻辑；如需调整，在下方编辑边界/类别组后确认。</p>
                 </div>
-                <span className={`status ${sample?.monotonic ? "succeeded" : "blocked"}`}>
-                  {monotonicLabel(stats.rates, sample?.monotonic)}
+                <span className={`status ${sample.monotonic ? "succeeded" : "blocked"}`}>
+                  {monotonicLabel(stats.rates, sample.monotonic)}
                 </span>
               </div>
               <div className="summary-grid five bin-metric-grid">
-                <Metric label="箱数" value={format(stats.rows.length)} />
-                <Metric label="Train 样本" value={format(stats.count)} />
-                <Metric label="坏占比" value={percent(stats.overallRate)} />
-                <Metric label="IV" value={metric(sample?.iv)} />
+                <Metric label="箱数" value={formatNumber(stats.rows.length)} />
+                <Metric label="Train 样本" value={formatNumber(stats.count)} />
+                <Metric label="坏占比" value={formatPercent(stats.overallRate)} />
+                <Metric label="IV" value={formatMetric(sample.iv)} />
                 <Metric
                   label="坏率范围"
-                  value={`${percent(stats.minRate)}—${percent(stats.maxRate)}`}
+                  value={`${formatPercent(stats.minRate)}—${formatPercent(stats.maxRate)}`}
                 />
               </div>
               <div className="bin-ordering">
                 <strong>单调性：</strong>
-                <span>{monotonicLabel(stats.rates, sample?.monotonic)}</span>
+                <span>{monotonicLabel(stats.rates, sample.monotonic)}</span>
                 <small>不把缺失箱参与趋势判断；缺失箱仍单独展示。</small>
               </div>
               <div className="table-wrap bin-table-wrap">
@@ -463,7 +523,7 @@ function BinningDecision({
                     </tr>
                   </thead>
                   <tbody>
-                    {stats.rows.map((row: any, index: number) => {
+                    {stats.rows.map((row, index) => {
                       const rate = Number(row.bad_rate);
                       const width = Number.isFinite(rate)
                         ? Math.max(
@@ -480,21 +540,21 @@ function BinningDecision({
                           <td>
                             <strong>{row.bin}</strong>
                           </td>
-                          <td>{format(row.count)}</td>
-                          <td>{percent(stats.count ? Number(row.count) / stats.count : null)}</td>
-                          <td>{format(row.good)}</td>
-                          <td>{format(row.bad)}</td>
+                          <td>{formatNumber(row.count)}</td>
+                          <td>{formatPercent(stats.count ? Number(row.count) / stats.count : null)}</td>
+                          <td>{formatNumber(row.good)}</td>
+                          <td>{formatNumber(row.bad)}</td>
                           <td>
                             <div className="bin-rate-cell">
                               <span className="bin-rate-track">
                                 <i style={{ width: `${width}%` }} />
                               </span>
-                              <b>{percent(row.bad_rate)}</b>
+                              <b>{formatPercent(row.bad_rate)}</b>
                             </div>
                           </td>
-                          <td>{metric(lift)}</td>
-                          <td>{metric(row.woe)}</td>
-                          <td>{metric(row.iv)}</td>
+                          <td>{formatMetric(lift)}</td>
+                          <td>{formatMetric(row.woe)}</td>
+                          <td>{formatMetric(row.iv)}</td>
                         </tr>
                       );
                     })}
@@ -514,16 +574,16 @@ function BinningDecision({
                 </div>
                 <div>
                   <h3>合并建议</h3>
-                  {sample?.merge_suggestions?.length ? (
+                  {sample.merge_suggestions?.length ? (
                     <ul className="bin-merge-list">
-                      {sample.merge_suggestions.slice(0, 8).map((item: any, index: number) => (
+                      {sample.merge_suggestions.slice(0, 8).map((item, index) => (
                         <li key={index}>
                           <b>
                             {item.left_bin} + {item.right_bin}
                           </b>
                           <span>
-                            合并后坏率 {percent(item.merged_bad_rate)} · 差异{" "}
-                            {metric(item.distance)}
+                            合并后坏率 {formatPercent(item.merged_bad_rate)} · 差异{" "}
+                            {formatMetric(item.distance)}
                           </span>
                         </li>
                       ))}
@@ -546,19 +606,29 @@ function BinningDecision({
   );
 }
 
-function editableBinSpec(spec: any) {
-  return spec?.kind === "numeric"
+function editableBinSpec(spec: import("../types").BinSpec | undefined) {
+  if (!spec) return { kind: "numeric", edges: [] };
+  return spec.kind === "numeric"
     ? { kind: "numeric", edges: spec.edges || [] }
-    : { kind: "categorical", groups: spec?.groups || [], rare_values: spec?.rare_values || [] };
+    : { kind: "categorical", groups: spec.groups || [], rare_values: spec.rare_values || [] };
 }
 
-function binStats(spec: any) {
-  const rows = Array.isArray(spec?.table) ? spec.table : [];
-  const count = rows.reduce((sum: number, row: any) => sum + Number(row.count || 0), 0);
-  const bad = rows.reduce((sum: number, row: any) => sum + Number(row.bad || 0), 0);
+interface BinStats {
+  rows: import("../types").BinRow[];
+  count: number;
+  overallRate: number | null;
+  rates: number[];
+  minRate: number | null;
+  maxRate: number | null;
+}
+
+function binStats(spec: import("../types").BinSpec): BinStats {
+  const rows = Array.isArray(spec.table) ? spec.table : [];
+  const count = rows.reduce((sum, row) => sum + Number(row.count || 0), 0);
+  const bad = rows.reduce((sum, row) => sum + Number(row.bad || 0), 0);
   const rates = rows
-    .filter((row: any) => row.bin !== "<MISSING>" && Number.isFinite(Number(row.bad_rate)))
-    .map((row: any) => Number(row.bad_rate));
+    .filter((row) => row.bin !== "<MISSING>" && Number.isFinite(Number(row.bad_rate)))
+    .map((row) => Number(row.bad_rate));
   return {
     rows,
     count,
@@ -569,23 +639,19 @@ function binStats(spec: any) {
   };
 }
 
-function monotonicLabel(rates: number[], monotonic: boolean | undefined) {
-  if (!monotonic) return "非单调（需要调整或业务例外）";
-  if (rates.length < 3) return "单调（箱数较少）";
-  const differences = rates.slice(1).map((value, index) => value - rates[index]);
-  if (differences.every((value) => value >= -1e-12)) return "单调递增（坏率）";
-  if (differences.every((value) => value <= 1e-12)) return "单调递减（坏率）";
-  return "单调性标记与趋势不一致，请复核";
-}
-
-function ModelDecision({ plan, edits, setEdits }: any) {
-  const selected: string[] = edits.models || [];
+function ModelDecision({
+  plan,
+  edits,
+  setEdits,
+}: {
+  plan: import("../types").ModelPlan;
+  edits: Record<string, unknown>;
+  setEdits: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
+}) {
+  const selected = (edits.models as string[]) || [];
   const toggle = (name: string, checked: boolean) =>
-    setEdits({
-      ...edits,
-      models: checked ? [...selected, name] : selected.filter((v) => v !== name),
-    });
-  const score = edits.score || plan.score || {};
+    setEdits({ ...edits, models: checked ? [...selected, name] : selected.filter((v) => v !== name) });
+  const score = (edits.score as import("../types").ScoreConfig) || plan.score || {};
   const scoreChange = (key: string, value: number) =>
     setEdits({ ...edits, score: { ...score, [key]: value } });
   const budget = Number(edits.search_budget ?? plan.search_budget ?? 0);
@@ -706,57 +772,4 @@ function Metric({ label, value, note }: { label: string; value: string; note?: s
       {note && <small>{note}</small>}
     </div>
   );
-}
-function stageName(stage: string) {
-  return (
-    (
-      {
-        target_confirmation: "Y 确认",
-        data_diagnosis: "数据诊断与清洗",
-        split: "样本切分",
-        screening: "变量筛选",
-        binning: "变量分箱",
-        model_plan: "建模方案",
-      } as Record<string, string>
-    )[stage] || stage
-  );
-}
-function reviewLabel(status?: string) {
-  return (
-    (
-      {
-        pass: "预审通过",
-        deterministic_pass: "确定性规则通过",
-        llm_reviewer_pass: "LLM Reviewer 通过",
-        fallback_pass: "本地降级质检通过",
-        conditional_pass: "有条件通过",
-        revise: "建议调整",
-        block: "发现阻断",
-        blocked: "发现阻断",
-      } as Record<string, string>
-    )[status || ""] || "已完成预审"
-  );
-}
-function confirmLabel(kind: string) {
-  return (
-    (
-      {
-        confirm_target: "确认 Y 并继续诊断",
-        confirm_data: "确认清洗并继续",
-        confirm_split: "确认切分并执行",
-        confirm_screening: "冻结变量并继续",
-        confirm_binning: "冻结分箱并继续",
-        confirm_models: "确认方案并开始训练",
-      } as Record<string, string>
-    )[kind] || "确认并继续"
-  );
-}
-function format(value: any) {
-  return value == null ? "—" : Number(value).toLocaleString();
-}
-function percent(value: any) {
-  return value == null ? "—" : `${(Number(value) * 100).toFixed(2)}%`;
-}
-function metric(value: any) {
-  return value == null ? "—" : Number(value).toFixed(4);
 }

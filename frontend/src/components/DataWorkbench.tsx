@@ -1,7 +1,8 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { errorMessage } from "../lib/format";
 import { Tabs } from "./ui/Tabs";
-import type { DataAsset, ProjectDetail } from "../types";
+import type { DataAsset, ProjectDetail, RunCreatedResponse } from "../types";
 
 interface Props {
   detail: ProjectDetail;
@@ -30,12 +31,12 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
   const [busy, setBusy] = useState("");
   const [baseId, setBaseId] = useState("");
   const [steps, setSteps] = useState<JoinStepDraft[]>([]);
-  const [recommendation, setRecommendation] = useState<any>(null);
+  const [recommendation, setRecommendation] = useState<unknown>(null);
   const [datasetId, setDatasetId] = useState("");
   const [targets, setTargets] = useState<string[]>([]);
   const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
-  const [notebook, setNotebook] = useState<any>(null);
-  const [document, setDocument] = useState<any>(null);
+  const [notebook, setNotebook] = useState<unknown>(null);
+  const [document, setDocument] = useState<unknown>(null);
   const assets = detail.assets.filter((item) => item.status !== "sheet_selection_required");
   const binaryCandidates = useMemo(
     () =>
@@ -43,6 +44,8 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
       [],
     [detail.dataset_versions, datasetId],
   );
+  /* eslint-disable react-hooks/exhaustive-deps */
+  // Initialize defaults once when the detail shape changes; full deps would restart selection logic.
   useEffect(() => {
     if (!baseId && assets.length)
       setBaseId((assets.find((item) => item.kind === "base") || assets[0]).id);
@@ -52,6 +55,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         detail.target_tasks.filter((item) => item.status === "queued").map((item) => item.id),
       );
   }, [assets.length, detail.dataset_versions.length, detail.target_tasks.length]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -67,7 +71,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
       notify(`${files.length} 个文件已保存在本机`);
       await onRefresh();
     } catch (error) {
-      notify(message(error), true);
+      notify(errorMessage(error), true);
     } finally {
       setBusy("");
       event.target.value = "";
@@ -78,7 +82,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
       await api.put(`/data-assets/${asset.id}/sheet`, { sheet });
       await onRefresh();
     } catch (error) {
-      notify(message(error), true);
+      notify(errorMessage(error), true);
     }
   };
   const materialize = async (assetId: string) => {
@@ -89,7 +93,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
       await onRefresh();
       setSection("target");
     } catch (error) {
-      notify(message(error), true);
+      notify(errorMessage(error), true);
     } finally {
       setBusy("");
     }
@@ -106,7 +110,9 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
     if (!baseId || !step.right_asset_id) return;
     setBusy(`recommend-${step.id}`);
     try {
-      const result = await api.get<any>(
+      const result = await api.get<{
+        recommendations?: Array<{ left_keys: string[]; right_keys: string[] }>;
+      }>(
         `/join-plans/recommend?left_asset_id=${encodeURIComponent(baseId)}&right_asset_id=${encodeURIComponent(step.right_asset_id)}`,
       );
       const best = result.recommendations?.[0];
@@ -124,7 +130,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
           ),
         );
     } catch (error) {
-      notify(message(error), true);
+      notify(errorMessage(error), true);
     } finally {
       setBusy("");
     }
@@ -141,7 +147,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         expected_cardinality: "many_to_one",
         suffix: "_right",
       }));
-      const created = await api.post<any>("/join-plans", {
+      const created = await api.post<{ join_plan: { id: string } }>("/join-plans", {
         project_id: detail.project.id,
         name: `关联方案 ${new Date().toLocaleTimeString()}`,
         base_asset_id: baseId,
@@ -155,7 +161,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
       await onRefresh();
       setSection("target");
     } catch (error) {
-      notify(message(error), true);
+      notify(errorMessage(error), true);
     } finally {
       setBusy("");
     }
@@ -164,7 +170,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
     const step = steps[0];
     setBusy("notebook");
     try {
-      const result = await api.post<any>("/notebooks", {
+      const result = await api.post<{ notebook: unknown; document: unknown }>("/notebooks", {
         project_id: detail.project.id,
         name: agentGenerated ? "Agent 关联草稿" : "手工关联 Notebook",
         template: agentGenerated ? "agent_join" : "blank",
@@ -177,7 +183,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
       setDocument(result.document);
       setSection("notebook");
     } catch (error) {
-      notify(message(error), true);
+      notify(errorMessage(error), true);
     } finally {
       setBusy("");
     }
@@ -195,7 +201,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
       setTargets([]);
       await onRefresh();
     } catch (error) {
-      notify(message(error), true);
+      notify(errorMessage(error), true);
     } finally {
       setBusy("");
     }
@@ -205,7 +211,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
     let first = "";
     try {
       for (const taskId of selectedTasks) {
-        const result = await api.post<any>("/runs", {
+        const result = await api.post<RunCreatedResponse>("/runs", {
           project_id: detail.project.id,
           target_task_id: taskId,
           mode: detail.project.mode,
@@ -216,7 +222,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
       await onRefresh();
       if (first) onRunsStarted(first);
     } catch (error) {
-      notify(message(error), true);
+      notify(errorMessage(error), true);
     } finally {
       setBusy("");
     }
@@ -394,11 +400,11 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
               </div>
             ))}
           </div>
-          {recommendation && (
+          {recommendation !== null && (
             <div className="review-strip">
               <strong>Agent 推荐</strong>
               <span>
-                {recommendation.recommendations?.length
+                {(recommendation as { recommendations?: unknown[] }).recommendations?.length
                   ? `已按重合率和唯一性填入推荐键；仍需执行完整校验。`
                   : "没有可靠推荐，请使用可视化键或 Notebook。"}
               </span>
@@ -543,10 +549,9 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         >
           {notebook && document ? (
             <NotebookEditor
-              notebook={notebook}
-              document={document}
-              setDocument={setDocument}
-              detail={detail}
+              notebook={notebook as { id: string; name: string; dataset_version_id?: string }}
+              document={document as { cells: NotebookCell[] }}
+              setDocument={setDocument as (value: { cells: NotebookCell[] }) => void}
               onRefresh={onRefresh}
               notify={notify}
             />
@@ -639,7 +644,36 @@ function AssetTable({
   );
 }
 
-function NotebookEditor({ notebook, document, setDocument, detail, onRefresh, notify }: any) {
+interface NotebookEditorProps {
+  notebook: { id: string; name: string; dataset_version_id?: string };
+  document: { cells: NotebookCell[] };
+  setDocument: (value: { cells: NotebookCell[] }) => void;
+  onRefresh: () => Promise<void>;
+  notify: (message: string, error?: boolean) => void;
+}
+
+interface NotebookCell {
+  cell_type: string;
+  source: string;
+  execution_count?: number;
+  outputs?: NotebookOutput[];
+}
+
+interface NotebookOutput {
+  text?: string;
+  evalue?: string;
+  data?: Record<string, unknown>;
+}
+
+interface NotebookExecuteResponse {
+  execution: {
+    status: string;
+    execution_count?: number;
+    outputs?: NotebookOutput[];
+  };
+}
+
+function NotebookEditor({ notebook, document, setDocument, onRefresh, notify }: NotebookEditorProps) {
   const [busy, setBusy] = useState("");
   const [output, setOutput] = useState("joined_output.csv");
   const [label, setLabel] = useState("Notebook 关联结果");
@@ -649,7 +683,7 @@ function NotebookEditor({ notebook, document, setDocument, detail, onRefresh, no
       await api.put(`/notebooks/${notebook.id}`, { notebook: document });
       notify("Notebook 已保存");
     } catch (e) {
-      notify(message(e), true);
+      notify(errorMessage(e), true);
     } finally {
       setBusy("");
     }
@@ -658,7 +692,7 @@ function NotebookEditor({ notebook, document, setDocument, detail, onRefresh, no
     setBusy(`cell-${index}`);
     try {
       await save();
-      const result = await api.post<any>(`/notebooks/${notebook.id}/execute-cell`, {
+      const result = await api.post<NotebookExecuteResponse>(`/notebooks/${notebook.id}/execute-cell`, {
         cell_index: index,
       });
       const copy = structuredClone(document);
@@ -670,7 +704,7 @@ function NotebookEditor({ notebook, document, setDocument, detail, onRefresh, no
         result.execution.status !== "succeeded",
       );
     } catch (e) {
-      notify(message(e), true);
+      notify(errorMessage(e), true);
     } finally {
       setBusy("");
     }
@@ -687,7 +721,7 @@ function NotebookEditor({ notebook, document, setDocument, detail, onRefresh, no
       notify("Notebook 输出已通过校验并生成数据版本");
       await onRefresh();
     } catch (e) {
-      notify(message(e), true);
+      notify(errorMessage(e), true);
     } finally {
       setBusy("");
     }
@@ -704,7 +738,7 @@ function NotebookEditor({ notebook, document, setDocument, detail, onRefresh, no
           {busy === "save" ? "保存中…" : "保存 Notebook"}
         </button>
       </div>
-      {document.cells.map((cell: any, index: number) => (
+      {document.cells.map((cell, index) => (
         <div className={`nb-cell ${cell.cell_type}`} key={index}>
           <div className="nb-gutter">[{cell.execution_count ?? " "}]</div>
           {cell.cell_type === "code" ? (
@@ -721,10 +755,10 @@ function NotebookEditor({ notebook, document, setDocument, detail, onRefresh, no
               <button className="cell-run" onClick={() => execute(index)} disabled={Boolean(busy)}>
                 ▶ 运行
               </button>
-              {cell.outputs?.length > 0 && (
+              {cell.outputs && cell.outputs.length > 0 && (
                 <pre className="cell-output">
                   {cell.outputs
-                    .map((item: any) => item.text || item.evalue || JSON.stringify(item.data || {}))
+                    .map((item) => (item as NotebookOutput).text || (item as NotebookOutput).evalue || JSON.stringify((item as NotebookOutput).data || {}))
                     .join("\n")}
                 </pre>
               )}
@@ -771,7 +805,4 @@ function splitKeys(value: string) {
     .split(/[,，]/)
     .map((item) => item.trim())
     .filter(Boolean);
-}
-function message(error: unknown) {
-  return error instanceof Error ? error.message : "操作失败";
 }
