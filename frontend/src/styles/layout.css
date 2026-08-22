@@ -619,6 +619,22 @@
   margin-left: 3px;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .cursor {
+    animation: blink 1s steps(2) infinite;
+  }
+}
+
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
 .chat-form {
   display: grid;
   grid-template-columns: 1fr 74px;
@@ -650,18 +666,6 @@
 
 .chat-form button:disabled {
   background: var(--quiet);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .cursor {
-    animation: blink 1s steps(2) infinite;
-  }
-}
-
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
 }
 
 /* Responsive layout */

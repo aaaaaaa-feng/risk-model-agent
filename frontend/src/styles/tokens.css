@@ -40,8 +40,8 @@
   --red-border: #fca5a5;
 
   /* Focus */
-  --focus-ring: 0 0 0 3px rgba(26, 86, 219, 0.35);
-  --focus-color: #93c5fd;
+  --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.55);
+  --focus-color: #2563eb;
 
   /* Typography */
   --body: "Plus Jakarta Sans", "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;

@@ -85,9 +85,12 @@ export function AgentChat({
     }
   };
 
+  const [pressed, setPressed] = useState<Record<string, string>>({});
+
   const feedback = async (messageId: string, rating: string) => {
     try {
       await api.post(`/conversation-messages/${messageId}/feedback`, { rating });
+      setPressed((current) => ({ ...current, [messageId]: rating }));
       notify(rating === "up" ? "已记录有帮助" : "已记录需要改进");
     } catch (error) {
       notify(errorMessage(error), true);
@@ -111,10 +114,18 @@ export function AgentChat({
               <p>{message.content}</p>
               {message.role === "assistant" && (
                 <div className="message-feedback">
-                  <button onClick={() => feedback(message.id, "up")} aria-label="有帮助">
+                  <button
+                    onClick={() => feedback(message.id, "up")}
+                    aria-label="有帮助"
+                    aria-pressed={pressed[message.id] === "up"}
+                  >
                     赞
                   </button>
-                  <button onClick={() => feedback(message.id, "down")} aria-label="需要改进">
+                  <button
+                    onClick={() => feedback(message.id, "down")}
+                    aria-label="需要改进"
+                    aria-pressed={pressed[message.id] === "down"}
+                  >
                     踩
                   </button>
                 </div>
