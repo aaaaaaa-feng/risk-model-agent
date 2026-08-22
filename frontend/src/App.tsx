@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { useRunEvents } from "./hooks";
 import { isCurrentSelection, mergeEventsForRun } from "./runState";
@@ -21,6 +21,7 @@ import { ReportView } from "./components/ReportView";
 import { RunWorkbench } from "./components/RunWorkbench";
 import { SettingsDrawer } from "./components/SettingsDrawer";
 import { StageRail } from "./components/StageRail";
+import { Tabs } from "./components/ui/Tabs";
 import { WorkspaceSetup } from "./components/WorkspaceSetup";
 
 type View = "workbench" | "report" | "history";
@@ -44,7 +45,6 @@ export function App() {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null);
-  const tabs = useRef<Array<HTMLButtonElement | null>>([]);
   const selectedRef = useRef<string | null>(selectedId);
   const runRef = useRef<string | null>(runId);
   const detailAbort = useRef<AbortController | null>(null);
@@ -271,20 +271,6 @@ export function App() {
     localStorage.removeItem("risk-agent-project");
     await Promise.all([loadProjects(), loadSettings()]);
   };
-  const activateTab = (next: View, index?: number) => {
-    setView(next);
-    if (index != null) tabs.current[index]?.focus();
-  };
-  const keyTab = (event: React.KeyboardEvent, index: number) => {
-    let next = index;
-    if (event.key === "ArrowRight") next = (index + 1) % 3;
-    else if (event.key === "ArrowLeft") next = (index + 2) % 3;
-    else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = 2;
-    else return;
-    event.preventDefault();
-    activateTab((["workbench", "report", "history"] as View[])[next], next);
-  };
   const selectedProject =
     detail?.project || projects.find((item) => item.id === selectedId) || null;
   const providerStatus = settings?.llm_enabled
@@ -337,37 +323,21 @@ export function App() {
             )}
           </div>
         </header>
-        <nav className="primary-tabs" role="tablist" aria-label="项目主视图">
-          {(["workbench", "report", "history"] as View[]).map((id, index) => (
-            <button
-              key={id}
-              id={`main-tab-${id}`}
-              ref={(node) => {
-                tabs.current[index] = node;
-              }}
-              role="tab"
-              aria-selected={view === id}
-              aria-controls="main-workspace"
-              tabIndex={view === id ? 0 : -1}
-              onClick={() => activateTab(id)}
-              onKeyDown={(event) => keyTab(event, index)}
-            >
-              {
-                (
-                  { workbench: "当前工作台", report: "产物报告", history: "历史 Run" } as Record<
-                    View,
-                    string
-                  >
-                )[id]
-              }
-            </button>
-          ))}
-        </nav>
+        <Tabs
+          aria-label="项目主视图"
+          items={[
+            { id: "workbench", label: "当前工作台" },
+            { id: "report", label: "产物报告" },
+            { id: "history", label: "历史 Run" },
+          ]}
+          value={view}
+          onChange={(id) => setView(id as View)}
+        />
         <section
           id="main-workspace"
           className="workspace"
           role="tabpanel"
-          aria-labelledby={`main-tab-${view}`}
+          aria-labelledby={`tab-${view}`}
         >
           {!selectedProject && <Welcome onCreate={() => setCreateOpen(true)} />}
           {selectedProject && detail && view === "workbench" && (dataMode || !run) ? (

@@ -1,6 +1,7 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import type { DataAsset, DatasetVersion, ProjectDetail } from "../types";
+import { Tabs } from "./ui/Tabs";
+import type { DataAsset, ProjectDetail } from "../types";
 
 interface Props {
   detail: ProjectDetail;
@@ -35,7 +36,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
   const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
   const [notebook, setNotebook] = useState<any>(null);
   const [document, setDocument] = useState<any>(null);
-  const sectionTabs = useRef<Array<HTMLButtonElement | null>>([]);
   const assets = detail.assets.filter((item) => item.status !== "sheet_selection_required");
   const binaryCandidates = useMemo(
     () =>
@@ -52,22 +52,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         detail.target_tasks.filter((item) => item.status === "queued").map((item) => item.id),
       );
   }, [assets.length, detail.dataset_versions.length, detail.target_tasks.length]);
-
-  const activateSection = (next: DataSection, index?: number) => {
-    setSection(next);
-    if (index != null) sectionTabs.current[index]?.focus();
-  };
-  const handleSectionKey = (event: React.KeyboardEvent, index: number) => {
-    let next = index;
-    if (event.key === "ArrowRight") next = (index + 1) % dataSections.length;
-    else if (event.key === "ArrowLeft")
-      next = (index + dataSections.length - 1) % dataSections.length;
-    else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = dataSections.length - 1;
-    else return;
-    event.preventDefault();
-    activateSection(dataSections[next][0], next);
-  };
 
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -252,31 +236,19 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
           ASSETS <b>{detail.assets.length}</b>
         </div>
       </div>
-      <div className="subnav" role="tablist" aria-label="数据准备步骤">
-        {dataSections.map(([id, label], index) => (
-          <button
-            key={id}
-            id={`data-tab-${id}`}
-            ref={(node) => {
-              sectionTabs.current[index] = node;
-            }}
-            role="tab"
-            aria-selected={section === id}
-            aria-controls={`data-panel-${id}`}
-            tabIndex={section === id ? 0 : -1}
-            onClick={() => activateSection(id)}
-            onKeyDown={(event) => handleSectionKey(event, index)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        aria-label="数据准备步骤"
+        className="subnav"
+        items={dataSections.map(([id, label]) => ({ id, label }))}
+        value={section}
+        onChange={(id) => setSection(id as DataSection)}
+      />
       {section === "upload" && (
         <section
           id="data-panel-upload"
           className="work-section"
           role="tabpanel"
-          aria-labelledby="data-tab-upload"
+          aria-labelledby="tab-upload"
         >
           <div className="section-heading">
             <div>
@@ -321,7 +293,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
           id="data-panel-join"
           className="work-section"
           role="tabpanel"
-          aria-labelledby="data-tab-join"
+          aria-labelledby="tab-join"
         >
           <div className="section-heading">
             <div>
@@ -464,7 +436,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
           id="data-panel-target"
           className="work-section"
           role="tabpanel"
-          aria-labelledby="data-tab-target"
+          aria-labelledby="tab-target"
         >
           <div className="section-heading">
             <div>
@@ -567,7 +539,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
           id="data-panel-notebook"
           className="work-section"
           role="tabpanel"
-          aria-labelledby="data-tab-notebook"
+          aria-labelledby="tab-notebook"
         >
           {notebook && document ? (
             <NotebookEditor

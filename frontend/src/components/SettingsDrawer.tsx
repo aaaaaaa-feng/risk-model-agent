@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../api";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import type { ProviderProfile, Settings, WorkspaceStatus } from "../types";
 
 interface Props {
@@ -71,8 +72,7 @@ export function SettingsDrawer({
   const [section, setSection] = useState<SectionId>("providers");
   const closeRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-  const onCloseRef = useRef(onClose);
+  useFocusTrap(drawerRef, { active: open, onClose, initialFocusRef: closeRef });
 
   useEffect(() => {
     if (!settings) return;
@@ -84,45 +84,11 @@ export function SettingsDrawer({
   }, [settings]);
 
   useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-  useEffect(() => {
     if (!open) return;
-    previousFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    window.setTimeout(() => closeRef.current?.focus(), 0);
     api
       .get<{ backups: any[] }>("/backups")
       .then((value) => setBackups(value.backups))
       .catch(() => undefined);
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== "Tab" || !drawerRef.current) return;
-      const focusable = Array.from(
-        drawerRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ),
-      );
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      previousFocusRef.current?.focus();
-    };
   }, [open]);
 
   if (!open || !settings) return null;
