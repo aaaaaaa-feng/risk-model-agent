@@ -99,11 +99,10 @@ class SettingsStore:
         # disable LLM.  Once a key is present, migrate that legacy default to
         # enabled.  A later explicit save of False records the marker below
         # and is respected thereafter.
-        if (
-            raw.get("llm_enabled") is False
-            and raw.get("api_key_configured") is True
-            and raw.get("_llm_enabled_explicit") is not True
-        ):
+        has_configured_key = raw.get("api_key_configured") is True or bool(
+            os.getenv("RISK_AGENT_API_KEY", "").strip()
+        )
+        if raw.get("llm_enabled") is False and has_configured_key and raw.get("_llm_enabled_explicit") is not True:
             settings.llm_enabled = True
         if os.getenv("RISK_AGENT_API_KEY", "").strip():
             settings.api_key_configured = True
