@@ -31,8 +31,13 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
     if (decision.kind === "confirm_data") setEdits({ accepted_action_ids: (summary.actions || []).filter((item:any) => item.recommended).map((item:any) => item.id) });
     else if (decision.kind === "confirm_split") setEdits({ ...(summary.plan || summary) });
     else if (decision.kind === "confirm_models") setEdits({ models: summary.plan?.models || [], score: summary.plan?.score || {}, search_budget: summary.plan?.search_budget ?? 0 });
+    else if (decision.kind === "confirm_binning") {
+      const first = Object.keys(summary.specs || {})[0] || "";
+      setManualColumn(first);
+      setManualSpec(first ? JSON.stringify(editableBinSpec(summary.specs[first]), null, 2) : "");
+    }
     else setEdits({});
-    setManualColumn(""); setManualSpec("");
+    if (decision.kind !== "confirm_binning") { setManualColumn(""); setManualSpec(""); }
   }, [decision.id]);
   const review = summary.review || decision.review || {};
   const confirm = async (approved: boolean) => {
@@ -50,6 +55,7 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
   return <div className="decision-workbench">
     <div className="stage-line"><div><span className="eyebrow">HUMAN IN THE LOOP · {decision.stage}</span><h2>{details.title || stageName(decision.stage)}</h2><p>Reviewer 已先完成审核；你只需确认业务选择，不需要阅读长代码。</p></div><div className="run-meta">RUN <b>{run.id.slice(-8)}</b><br />CHECKPOINT <b>{run.node}</b></div></div>
     <div className={`review-banner ${review.status || "pass"}`}><div><span>AI REVIEW</span><strong>{reviewLabel(review.status)}</strong></div><p>{review.issues?.length ? `${review.issues.length} 条意见；展开下方可查看。` : "没有发现逻辑或安全阻断。"}</p></div>
+    {review.status === "fallback_pass" && <p className="inline-warning agent-fallback-note">本阶段没有调用外部 LLM：当前使用本地确定性 Reviewer。若要启用 LLM，请到「设置中心」打开“启用 LLM”，保存后重新创建 Run；本次 Run 不会回溯重试。</p>}
     {decision.kind === "confirm_target" && <TargetDecision summary={summary.target || summary} />}
     {decision.kind === "confirm_data" && <DataDecision summary={summary} edits={edits} setEdits={setEdits} />}
     {decision.kind === "confirm_split" && <SplitDecision plan={summary.plan || summary} edits={edits} setEdits={setEdits} />}
@@ -88,10 +94,78 @@ function ScreeningDecision({ summary, edits, setEdits }: any) {
 }
 
 function BinningDecision({ summary, manualColumn, setManualColumn, manualSpec, setManualSpec }: any) {
-  const specs = summary.specs || {}; const columns=Object.keys(specs);
+  const specs = summary.specs || {};
+  const columns = Object.keys(specs);
   const sample = specs[manualColumn];
-  const load = (column:string) => { setManualColumn(column); const spec=specs[column]; setManualSpec(JSON.stringify(spec?.kind === "numeric" ? {kind:"numeric",edges:spec.edges || []}:{kind:"categorical",groups:spec.groups || [],rare_values:spec.rare_values || []},null,2)); };
-  return <section className="decision-section"><div className="summary-grid three"><Metric label="分箱版本" value={summary.version || "—"} /><Metric label="入模变量" value={format(columns.length)} /><Metric label="未绝对单调" value={format(summary.non_monotonic?.length || 0)} note="可人工调整" /></div><div className="bin-layout"><div className="bin-list">{columns.map(column=><button className={manualColumn===column?"active":""} key={column} onClick={()=>load(column)}><strong>{column}</strong><span>{specs[column].kind} · IV {metric(specs[column].iv)} · {specs[column].monotonic?"单调":"待调整"}</span></button>)}</div><div className="bin-editor">{manualColumn ? <><h3>人工分箱：{manualColumn}</h3><p>编辑边界或类别组。保存后会生成新分箱版本，并使训练、质检和报告失效重跑。</p><textarea value={manualSpec} onChange={e=>setManualSpec(e.target.value)} spellCheck={false} rows={13}/><div className="mini-table">{sample?.table?.slice(0,8).map((row:any)=><span key={row.bin}>{row.bin}<b>{percent(row.bad_rate)}</b></span>)}</div></> : <div className="empty-state"><span>OPTIONAL</span><p>自动分箱已完成。只在需要人工调整时选择变量。</p></div>}</div></div></section>;
+  const stats = useMemo(() => binStats(sample), [sample]);
+  const load = (column: string) => {
+    setManualColumn(column);
+    setManualSpec(JSON.stringify(editableBinSpec(specs[column]), null, 2));
+  };
+  return <section className="decision-section">
+    <div className="summary-grid three">
+      <Metric label="分箱版本" value={summary.version || "—"} />
+      <Metric label="入模变量" value={format(columns.length)} />
+      <Metric label="未绝对单调" value={format(summary.non_monotonic?.length || 0)} note="可人工调整" />
+    </div>
+    <p className="section-copy">分箱只在 Train 样本拟合。左侧每个字段都能看到箱数、IV 和单调状态；选择字段后，右侧展示完整的箱级样本、坏率、Lift、WOE、IV 和坏率趋势。</p>
+    <div className="bin-layout">
+      <div className="bin-list" aria-label="分箱字段列表">
+        {columns.map(column => {
+          const spec = specs[column];
+          const rows = spec.table || [];
+          return <button className={manualColumn === column ? "active" : ""} key={column} onClick={() => load(column)}>
+            <strong>{column}</strong>
+            <span>{spec.kind} · {rows.length} 箱 · IV {metric(spec.iv)}</span>
+            <span className={spec.monotonic ? "bin-ok" : "bin-warn"}>{spec.monotonic ? "单调" : "非单调，待调整"} · {spec.source === "manual" ? "人工" : "自动"}</span>
+          </button>;
+        })}
+      </div>
+      <div className="bin-editor">
+        {manualColumn ? <>
+          <div className="section-heading bin-detail-head"><div><h3>{manualColumn} · 分箱结果</h3><p>当前表格是已生成的分箱逻辑；如需调整，在下方编辑边界/类别组后确认。</p></div><span className={`status ${sample?.monotonic ? "succeeded" : "blocked"}`}>{monotonicLabel(stats.rates, sample?.monotonic)}</span></div>
+          <div className="summary-grid five bin-metric-grid">
+            <Metric label="箱数" value={format(stats.rows.length)} />
+            <Metric label="Train 样本" value={format(stats.count)} />
+            <Metric label="坏占比" value={percent(stats.overallRate)} />
+            <Metric label="IV" value={metric(sample?.iv)} />
+            <Metric label="坏率范围" value={`${percent(stats.minRate)}—${percent(stats.maxRate)}`} />
+          </div>
+          <div className="bin-ordering"><strong>单调性：</strong><span>{monotonicLabel(stats.rates, sample?.monotonic)}</span><small>不把缺失箱参与趋势判断；缺失箱仍单独展示。</small></div>
+          <div className="table-wrap bin-table-wrap"><table className="bin-table"><thead><tr><th>分箱</th><th>样本数</th><th>占比</th><th>好</th><th>坏</th><th>坏率 / 趋势</th><th>Lift</th><th>WOE</th><th>IV</th></tr></thead><tbody>{stats.rows.map((row:any,index:number) => {
+            const rate = Number(row.bad_rate);
+            const width = Number.isFinite(rate) ? Math.max(3, Math.round((rate / Math.max(stats.maxRate || 0.01, 0.01)) * 100)) : 0;
+            const lift = stats.overallRate ? rate / stats.overallRate : null;
+            return <tr key={`${row.bin}-${index}`} className={row.bin === "<MISSING>" ? "bin-missing" : ""}><td><strong>{row.bin}</strong></td><td>{format(row.count)}</td><td>{percent(stats.count ? Number(row.count) / stats.count : null)}</td><td>{format(row.good)}</td><td>{format(row.bad)}</td><td><div className="bin-rate-cell"><span className="bin-rate-track"><i style={{ width: `${width}%` }} /></span><b>{percent(row.bad_rate)}</b></div></td><td>{metric(lift)}</td><td>{metric(row.woe)}</td><td>{metric(row.iv)}</td></tr>;
+          })}</tbody></table></div>
+          <div className="bin-editor-grid"><div><h3>人工分箱规则</h3><p>保存后会生成新分箱版本，并使训练、质检和报告失效重跑。</p><textarea value={manualSpec} onChange={e => setManualSpec(e.target.value)} spellCheck={false} rows={10} /></div><div><h3>合并建议</h3>{sample?.merge_suggestions?.length ? <ul className="bin-merge-list">{sample.merge_suggestions.slice(0, 8).map((item:any, index:number) => <li key={index}><b>{item.left_bin} + {item.right_bin}</b><span>合并后坏率 {percent(item.merged_bad_rate)} · 差异 {metric(item.distance)}</span></li>)}</ul> : <p className="success-line">当前没有需要优先合并的相邻箱。</p>}</div></div>
+        </> : <div className="empty-state"><span>OPTIONAL</span><p>自动分箱已完成。请选择左侧变量查看完整结果。</p></div>}
+      </div>
+    </div>
+  </section>;
+}
+
+function editableBinSpec(spec: any) {
+  return spec?.kind === "numeric"
+    ? { kind: "numeric", edges: spec.edges || [] }
+    : { kind: "categorical", groups: spec?.groups || [], rare_values: spec?.rare_values || [] };
+}
+
+function binStats(spec: any) {
+  const rows = Array.isArray(spec?.table) ? spec.table : [];
+  const count = rows.reduce((sum: number, row: any) => sum + Number(row.count || 0), 0);
+  const bad = rows.reduce((sum: number, row: any) => sum + Number(row.bad || 0), 0);
+  const rates = rows.filter((row: any) => row.bin !== "<MISSING>" && Number.isFinite(Number(row.bad_rate))).map((row: any) => Number(row.bad_rate));
+  return { rows, count, overallRate: count ? bad / count : null, rates, minRate: rates.length ? Math.min(...rates) : null, maxRate: rates.length ? Math.max(...rates) : null };
+}
+
+function monotonicLabel(rates: number[], monotonic: boolean | undefined) {
+  if (!monotonic) return "非单调（需要调整或业务例外）";
+  if (rates.length < 3) return "单调（箱数较少）";
+  const differences = rates.slice(1).map((value, index) => value - rates[index]);
+  if (differences.every(value => value >= -1e-12)) return "单调递增（坏率）";
+  if (differences.every(value => value <= 1e-12)) return "单调递减（坏率）";
+  return "单调性标记与趋势不一致，请复核";
 }
 
 function ModelDecision({ plan, edits, setEdits }: any) {
