@@ -1,0 +1,80 @@
+:root {
+  color-scheme: light;
+  font-synthesis: none;
+  line-break: strict;
+
+  /* Canvas & surfaces */
+  --paper: #ffffff;
+  --ground: #f3f4f6;
+  --panel: rgba(255, 255, 255, 0.76);
+
+  /* Text */
+  --ink: #18181b;
+  --muted: #71717a;
+  --quiet: #a1a1aa;
+
+  /* Borders */
+  --line: #e4e4e7;
+  --line-strong: #d4d4d8;
+  --line-blue: #bfdbfe;
+
+  /* Brand */
+  --black: #18181b;
+  --blue: #1a56db;
+  --blue-hover: #1648b8;
+  --blue-soft: #eff6ff;
+  --blue-text: #1d4ed8;
+  --blue-subtle: #dbeafe;
+
+  /* Status */
+  --green: #16a34a;
+  --green-soft: #ecfdf3;
+  --green-text: #15803d;
+  --amber: #b45309;
+  --amber-soft: #fff7ed;
+  --amber-text: #9a3412;
+  --amber-border: #fed7aa;
+  --red: #dc2626;
+  --red-soft: #fef2f2;
+  --red-text: #b91c1c;
+  --red-border: #fca5a5;
+
+  /* Focus */
+  --focus-ring: 0 0 0 3px rgba(26, 86, 219, 0.35);
+  --focus-color: #93c5fd;
+
+  /* Typography */
+  --body: "Plus Jakarta Sans", "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+
+  /* Border radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-full: 999px;
+
+  /* Shadows */
+  --shadow-xs: 0 2px 6px rgba(24, 24, 27, 0.03);
+  --shadow-sm: 0 4px 12px rgba(24, 24, 27, 0.04);
+  --shadow-md: 0 8px 22px rgba(24, 24, 27, 0.05);
+  --shadow-lg: 0 12px 30px rgba(24, 24, 27, 0.06);
+  --shadow-xl: 0 20px 60px rgba(24, 24, 27, 0.12);
+  --shadow-blue: 0 7px 15px rgba(26, 86, 219, 0.2);
+
+  /* Z-index scale */
+  --z-modal-backdrop: 50;
+  --z-drawer: 60;
+  --z-toast: 80;
+  --z-workspace-setup: 90;
+}
