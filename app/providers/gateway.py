@@ -65,7 +65,15 @@ class ProviderGateway:
         self._usage_callback = usage_callback
         self._request_callback = request_callback
         self._result_callback = result_callback
-        self._secrets = SecretStore(paths)
+        # Each active Provider profile has its own namespaced secret.  The
+        # explicit api_key override remains useful for the connection-test
+        # endpoint and never gets persisted by the gateway.
+        self._secrets = SecretStore(paths, profile_id=self.settings.provider)
+        if not self._api_key_override:
+            # A worker can start before the settings page is opened after an
+            # upgrade.  Migrate the legacy single-key slot lazily as a second
+            # line of defence so that existing users never lose access.
+            self._secrets.migrate_legacy()
 
     @property
     def key(self) -> str:

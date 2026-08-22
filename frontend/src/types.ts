@@ -130,6 +130,23 @@ export interface Settings {
   secret_storage: string;
   data_dir: string;
   synced_path_warning: boolean;
+  active_profile_id?: string;
+  profiles?: ProviderProfile[];
+}
+
+export interface ProviderProfile {
+  id: string;
+  label: string;
+  provider: string;
+  api_format: "openai" | "anthropic";
+  base_url: string;
+  model: string;
+  reviewer_model: string;
+  llm_enabled: boolean;
+  api_key: string;
+  api_key_configured: boolean;
+  secret_storage: string;
+  active?: boolean;
 }
 
 export interface WorkspaceStatus {

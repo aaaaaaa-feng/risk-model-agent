@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, fields
 from typing import Any
 from urllib.parse import urlparse
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import PROVIDER_PRESETS, Settings, SettingsStore
 from app.providers.gateway import ProviderGateway
+from app.providers.profiles import ProviderProfileStore
 from app.providers.secrets import SecretStore
 from app.runtime import AppContext
 
@@ -19,6 +21,7 @@ router = APIRouter(tags=["providers-and-settings"])
 
 
 class SettingsPayload(BaseModel):
+    profile_id: str | None = None
     provider: str | None = None
     api_format: str | None = None
     base_url: str | None = None
@@ -56,30 +59,54 @@ def presets() -> dict[str, Any]:
 def get_settings(ctx: AppContext = Depends(context)) -> dict[str, Any]:
     store = SettingsStore(ctx.paths)
     settings = store.load()
-    secret = SecretStore(ctx.paths)
+    profiles = ProviderProfileStore(ctx.paths)
+    active_profile_id = profiles.ensure_for_settings(settings)
+    secret = SecretStore(ctx.paths, profile_id=active_profile_id)
     configured = bool(secret.read())
     if configured != settings.api_key_configured:
-        storage = "environment" if __import__("os").getenv("RISK_AGENT_API_KEY", "").strip() else (settings.secret_storage if settings.secret_storage != "not_configured" else "local-or-keychain")
+        storage = "environment" if os.getenv("RISK_AGENT_API_KEY", "").strip() else (settings.secret_storage if settings.secret_storage != "not_configured" else "local-or-keychain")
         settings = store.save_secret_state(configured, storage if configured else "not_configured")
-    return {"settings": settings.public(ctx.paths), "provider_status": ProviderGateway(settings=settings, paths=ctx.paths).status()}
+    public = settings.public(ctx.paths)
+    public["active_profile_id"] = active_profile_id
+    public["profiles"] = profiles.public_profiles(active_profile_id)
+    return {"settings": public, "profiles": public["profiles"], "active_profile_id": active_profile_id, "provider_status": ProviderGateway(settings=settings, paths=ctx.paths).status()}
 
 
 @router.put("/providers/settings")
 def save_settings(payload: SettingsPayload, ctx: AppContext = Depends(context)) -> dict[str, Any]:
     data = payload.model_dump(exclude_none=True)
+    profile_id = str(data.pop("profile_id", "") or data.get("provider") or "").strip()
     key = str(data.pop("api_key", "") or "").strip()
     clear = bool(data.pop("clear_api_key", False))
     if "base_url" in data:
         _validate_url(str(data["base_url"]))
+    if data.get("provider") not in {None, *PROVIDER_PRESETS.keys()}:
+        raise ValueError("PROVIDER_INVALID")
     if data.get("api_format") not in {None, "openai", "anthropic"}:
         raise ValueError("API_FORMAT_INVALID")
     if data.get("mode") not in {None, "semi_trusted", "fully_trusted"}:
         raise ValueError("RUN_MODE_INVALID")
     store = SettingsStore(ctx.paths)
+    profiles = ProviderProfileStore(ctx.paths)
+    # Snapshot the previously active profile before a provider switch.  This
+    # preserves an existing legacy/single-provider key instead of overwriting
+    # it when the user adds a second configuration.
+    previous = store.load()
+    profiles.ensure_for_settings(previous)
     settings = store.save(data)
-    secrets = SecretStore(ctx.paths)
+    profile_id = profile_id or settings.provider
+    profile_values = {field.name: getattr(settings, field.name) for field in fields(Settings) if field.name in {"provider", "api_format", "base_url", "model", "reviewer_model", "llm_enabled"}}
+    profile_values["provider"] = settings.provider
+    profiles.upsert(profile_id, profile_values)
+    profiles_data = profiles.load()
+    active_profile = next((item for item in profiles_data["profiles"] if item["id"] == profile_id), None)
+    if active_profile and active_profile.get("provider") != settings.provider:
+        # A custom profile id may be used for a Provider; the active Settings
+        # remain authoritative for the selected profile.
+        profiles.upsert(profile_id, {"provider": settings.provider})
+    secrets = SecretStore(ctx.paths, profile_id=profile_id)
     if clear:
-        storage = secrets.clear()
+        storage = secrets.clear(include_legacy=True)
         configured = bool(secrets.read())
         settings = store.save_secret_state(configured, storage)
     elif key:
@@ -91,7 +118,29 @@ def save_settings(payload: SettingsPayload, ctx: AppContext = Depends(context)) 
             configured,
             settings.secret_storage if configured else "not_configured",
         )
-    return {"settings": settings.public(ctx.paths), "provider_status": ProviderGateway(settings=settings, paths=ctx.paths).status()}
+    active_profile_id = profiles.ensure_for_settings(settings)
+    public = settings.public(ctx.paths)
+    public["active_profile_id"] = active_profile_id
+    public["profiles"] = profiles.public_profiles(active_profile_id)
+    return {"settings": public, "profiles": public["profiles"], "active_profile_id": active_profile_id, "provider_status": ProviderGateway(settings=settings, paths=ctx.paths).status()}
+
+
+@router.post("/providers/profiles/{profile_id}/activate")
+def activate_profile(profile_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
+    profiles = ProviderProfileStore(ctx.paths)
+    profile = profiles.activate(profile_id)
+    store = SettingsStore(ctx.paths)
+    current = store.load()
+    values = {key: profile[key] for key in ("provider", "api_format", "base_url", "model", "reviewer_model", "llm_enabled") if key in profile}
+    settings = store.save(values)
+    active_profile_id = profiles.active_profile_id(settings)
+    secret = SecretStore(ctx.paths, profile_id=active_profile_id)
+    configured = bool(secret.read())
+    settings = store.save_secret_state(configured, "environment" if os.getenv("RISK_AGENT_API_KEY", "").strip() else (settings.secret_storage if configured else "not_configured"))
+    public = settings.public(ctx.paths)
+    public["active_profile_id"] = active_profile_id
+    public["profiles"] = profiles.public_profiles(active_profile_id)
+    return {"settings": public, "profiles": public["profiles"], "active_profile_id": active_profile_id, "provider_status": ProviderGateway(settings=settings, paths=ctx.paths).status()}
 
 
 @router.post("/providers/test")
@@ -109,7 +158,7 @@ def test_provider(payload: SettingsPayload | None = None, ctx: AppContext = Depe
     settings.llm_enabled = True
     if settings.base_url:
         _validate_url(settings.base_url)
-    gateway = ProviderGateway(settings=settings, api_key=api_key, paths=ctx.paths)
+    gateway = ProviderGateway(settings=settings, api_key=api_key or None, paths=ctx.paths)
     result = gateway.connectivity_check()
     return {
         "ok": result.ok,
@@ -131,15 +180,18 @@ def tool_manifest(ctx: AppContext = Depends(context)) -> dict[str, Any]:
 def reset_settings(payload: ResetSettings, ctx: AppContext = Depends(context)) -> dict[str, Any]:
     if not payload.confirm:
         raise ValueError("SETTINGS_RESET_CONFIRMATION_REQUIRED")
-    secrets = SecretStore(ctx.paths)
-    previous = SettingsStore(ctx.paths).load()
+    store = SettingsStore(ctx.paths)
+    previous = store.load()
+    profiles = ProviderProfileStore(ctx.paths)
+    active_profile_id = profiles.ensure_for_settings(previous)
+    secrets = SecretStore(ctx.paths, profile_id=active_profile_id)
     storage = previous.secret_storage
     configured = bool(secrets.read())
     if payload.clear_api_key:
-        storage = secrets.clear()
+        storage = secrets.clear(include_legacy=True)
         configured = bool(secrets.read())
-    settings = SettingsStore(ctx.paths).reset(preserve_secret_state=True)
-    settings = SettingsStore(ctx.paths).save_secret_state(configured, storage if configured else "not_configured")
+    settings = store.reset(preserve_secret_state=True)
+    settings = store.save_secret_state(configured, storage if configured else "not_configured")
     return {"settings": settings.public(ctx.paths), "api_key_cleared": payload.clear_api_key and not configured}
 
 
