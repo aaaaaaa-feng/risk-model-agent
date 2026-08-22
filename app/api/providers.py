@@ -183,14 +183,17 @@ def reset_settings(payload: ResetSettings, ctx: AppContext = Depends(context)) -
     store = SettingsStore(ctx.paths)
     previous = store.load()
     profiles = ProviderProfileStore(ctx.paths)
-    active_profile_id = profiles.ensure_for_settings(previous)
-    secrets = SecretStore(ctx.paths, profile_id=active_profile_id)
-    storage = previous.secret_storage
-    configured = bool(secrets.read())
+    previous_profile_id = profiles.ensure_for_settings(previous)
+    previous_secrets = SecretStore(ctx.paths, profile_id=previous_profile_id)
     if payload.clear_api_key:
-        storage = secrets.clear(include_legacy=True)
-        configured = bool(secrets.read())
+        previous_secrets.clear(include_legacy=True)
     settings = store.reset(preserve_secret_state=True)
+    active_profile_id = profiles.ensure_for_settings(settings)
+    secrets = SecretStore(ctx.paths, profile_id=active_profile_id)
+    configured = bool(secrets.read())
+    storage = "environment" if os.getenv("RISK_AGENT_API_KEY", "").strip() else (
+        "local-or-keychain" if configured else "not_configured"
+    )
     settings = store.save_secret_state(configured, storage if configured else "not_configured")
     return {"settings": settings.public(ctx.paths), "api_key_cleared": payload.clear_api_key and not configured}
 
