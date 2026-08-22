@@ -33,7 +33,12 @@ export interface DatasetVersion {
   profile?: {
     binary_candidates?: string[];
     target_candidates?: Array<{ column: string; missing: number; values: string[] }>;
-    columns_detail?: Array<{ name: string; type: string; id_candidate?: boolean; time_candidate?: boolean }>;
+    columns_detail?: Array<{
+      name: string;
+      type: string;
+      id_candidate?: boolean;
+      time_candidate?: boolean;
+    }>;
   };
   lineage?: Record<string, unknown>;
   created_at: string;

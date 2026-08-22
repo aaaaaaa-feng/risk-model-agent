@@ -2,12 +2,138 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { api, eventUrl } from "../api";
 import type { Message } from "../types";
 
-export function AgentChat({ projectId, notify }: { projectId: string | null; notify:(message:string,error?:boolean)=>void }) {
-  const [conversationId,setConversationId]=useState("");const [messages,setMessages]=useState<Message[]>([]);const [input,setInput]=useState("");const [draft,setDraft]=useState("");const [busy,setBusy]=useState(false);const scrollRef=useRef<HTMLDivElement>(null);
-  const load=async()=>{if(!projectId){setMessages([]);setConversationId("");return;}try{const value=await api.get<any>(`/projects/${projectId}/conversation`);setConversationId(value.conversation.id);setMessages(value.messages);}catch(error){notify(error instanceof Error?error.message:"对话读取失败",true);}};
-  useEffect(()=>{load();},[projectId]);
-  useEffect(()=>{scrollRef.current?.scrollTo({top:scrollRef.current.scrollHeight});},[messages,draft]);
-  const submit=async(event:FormEvent)=>{event.preventDefault();if(!projectId||!input.trim()||busy)return;const content=input.trim();setInput("");setBusy(true);setDraft("");try{const result=await api.post<any>(`/projects/${projectId}/conversation/messages`,{content});setMessages(current=>[...current,result.user_message]);const source=new EventSource(eventUrl(`/conversations/${result.conversation_id}/events/stream?response_id=${encodeURIComponent(result.response_id)}`));source.addEventListener("conversation_event",message=>{const item=JSON.parse((message as MessageEvent).data);if(item.status==="delta")setDraft(current=>current+item.content);});source.addEventListener("stream_end",async()=>{source.close();setDraft("");setBusy(false);await load();});source.onerror=()=>{source.close();setBusy(false);notify("对话事件流断开，可重新发送或刷新恢复。",true);};}catch(error){setBusy(false);notify(error instanceof Error?error.message:"发送失败",true);}};
-  const feedback=async(messageId:string,rating:string)=>{try{await api.post(`/conversation-messages/${messageId}/feedback`,{rating});notify(rating==="up"?"已记录有帮助":"已记录需要改进");}catch(error){notify(error instanceof Error?error.message:"反馈失败",true);}};
-  return <section className="agent-chat" aria-label="项目 Agent 对话"><div className="chat-head"><strong>项目 Agent 对话</strong><span>多轮持久化 · 流式执行摘要 · 不展示隐藏思维链</span></div><div className="chat-messages" ref={scrollRef}>{!projectId&&<p className="chat-placeholder">创建或选择项目后开始对话。</p>}{messages.map(message=><div className={`chat-message ${message.role}`} key={message.id}><span>{message.role==="user"?"YOU":message.agent?.replace("_"," ")||"AGENT"}</span><div><p>{message.content}</p>{message.role==="assistant"&&<div className="message-feedback"><button onClick={()=>feedback(message.id,"up")} aria-label="有帮助">赞</button><button onClick={()=>feedback(message.id,"down")} aria-label="需要改进">踩</button></div>}</div></div>)}{draft&&<div className="chat-message assistant streaming"><span>MAIN AGENT</span><p>{draft}<i className="cursor"/></p></div>}{busy&&!draft&&<div className="chat-message assistant"><span>MAIN AGENT</span><p>正在读取当前项目节点与 Reviewer 证据…</p></div>}</div><form className="chat-form" onSubmit={submit}><input aria-label="给 Agent 发送消息" value={input} onChange={e=>setInput(e.target.value)} disabled={!projectId||busy} placeholder={projectId?"补充业务要求，或询问当前阶段…":"请先选择项目"}/><button disabled={!projectId||busy||!input.trim()}>{busy?"处理中":"发送"}</button></form></section>;
+export function AgentChat({
+  projectId,
+  notify,
+}: {
+  projectId: string | null;
+  notify: (message: string, error?: boolean) => void;
+}) {
+  const [conversationId, setConversationId] = useState("");
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const load = async () => {
+    if (!projectId) {
+      setMessages([]);
+      setConversationId("");
+      return;
+    }
+    try {
+      const value = await api.get<any>(`/projects/${projectId}/conversation`);
+      setConversationId(value.conversation.id);
+      setMessages(value.messages);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "对话读取失败", true);
+    }
+  };
+  useEffect(() => {
+    load();
+  }, [projectId]);
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [messages, draft]);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!projectId || !input.trim() || busy) return;
+    const content = input.trim();
+    setInput("");
+    setBusy(true);
+    setDraft("");
+    try {
+      const result = await api.post<any>(`/projects/${projectId}/conversation/messages`, {
+        content,
+      });
+      setMessages((current) => [...current, result.user_message]);
+      const source = new EventSource(
+        eventUrl(
+          `/conversations/${result.conversation_id}/events/stream?response_id=${encodeURIComponent(result.response_id)}`,
+        ),
+      );
+      source.addEventListener("conversation_event", (message) => {
+        const item = JSON.parse((message as MessageEvent).data);
+        if (item.status === "delta") setDraft((current) => current + item.content);
+      });
+      source.addEventListener("stream_end", async () => {
+        source.close();
+        setDraft("");
+        setBusy(false);
+        await load();
+      });
+      source.onerror = () => {
+        source.close();
+        setBusy(false);
+        notify("对话事件流断开，可重新发送或刷新恢复。", true);
+      };
+    } catch (error) {
+      setBusy(false);
+      notify(error instanceof Error ? error.message : "发送失败", true);
+    }
+  };
+  const feedback = async (messageId: string, rating: string) => {
+    try {
+      await api.post(`/conversation-messages/${messageId}/feedback`, { rating });
+      notify(rating === "up" ? "已记录有帮助" : "已记录需要改进");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "反馈失败", true);
+    }
+  };
+  return (
+    <section className="agent-chat" aria-label="项目 Agent 对话">
+      <div className="chat-head">
+        <strong>项目 Agent 对话</strong>
+        <span>多轮持久化 · 流式执行摘要 · 不展示隐藏思维链</span>
+      </div>
+      <div className="chat-messages" ref={scrollRef}>
+        {!projectId && <p className="chat-placeholder">创建或选择项目后开始对话。</p>}
+        {messages.map((message) => (
+          <div className={`chat-message ${message.role}`} key={message.id}>
+            <span>
+              {message.role === "user" ? "YOU" : message.agent?.replace("_", " ") || "AGENT"}
+            </span>
+            <div>
+              <p>{message.content}</p>
+              {message.role === "assistant" && (
+                <div className="message-feedback">
+                  <button onClick={() => feedback(message.id, "up")} aria-label="有帮助">
+                    赞
+                  </button>
+                  <button onClick={() => feedback(message.id, "down")} aria-label="需要改进">
+                    踩
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {draft && (
+          <div className="chat-message assistant streaming">
+            <span>MAIN AGENT</span>
+            <p>
+              {draft}
+              <i className="cursor" />
+            </p>
+          </div>
+        )}
+        {busy && !draft && (
+          <div className="chat-message assistant">
+            <span>MAIN AGENT</span>
+            <p>正在读取当前项目节点与 Reviewer 证据…</p>
+          </div>
+        )}
+      </div>
+      <form className="chat-form" onSubmit={submit}>
+        <input
+          aria-label="给 Agent 发送消息"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          disabled={!projectId || busy}
+          placeholder={projectId ? "补充业务要求，或询问当前阶段…" : "请先选择项目"}
+        />
+        <button disabled={!projectId || busy || !input.trim()}>{busy ? "处理中" : "发送"}</button>
+      </form>
+    </section>
+  );
 }

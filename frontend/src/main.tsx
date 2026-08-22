@@ -11,7 +11,9 @@ async function bootstrap() {
     // The regular API error states remain available when the local service is down.
   }
   ReactDOM.createRoot(document.getElementById("root")!).render(
-    <React.StrictMode><App /></React.StrictMode>,
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
   );
 }
 

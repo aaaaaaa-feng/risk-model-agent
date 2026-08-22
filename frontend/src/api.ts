@@ -16,16 +16,25 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   const method = (init?.method || "GET").toUpperCase();
-  if (init?.body && !(init.body instanceof FormData)) headers.set("content-type", "application/json");
+  if (init?.body && !(init.body instanceof FormData))
+    headers.set("content-type", "application/json");
   if (MUTATING_METHODS.has(method) && localSessionToken) {
     headers.set("x-risk-agent-session", localSessionToken);
   }
   const response = await fetch(`${API_ROOT}${path}`, { ...init, headers });
   if (!response.ok) {
     let body: any = {};
-    try { body = await response.json(); } catch { /* response may not be JSON */ }
+    try {
+      body = await response.json();
+    } catch {
+      /* response may not be JSON */
+    }
     const detail = body.error || body.detail || {};
-    throw new ApiError(response.status, detail.code || `HTTP_${response.status}`, detail.message || String(detail));
+    throw new ApiError(
+      response.status,
+      detail.code || `HTTP_${response.status}`,
+      detail.message || String(detail),
+    );
   }
   return response.json() as Promise<T>;
 }
@@ -36,16 +45,22 @@ export async function initializeLocalSession(): Promise<void> {
     cache: "no-store",
   });
   if (!response.ok) throw new Error(`LOCAL_SESSION_${response.status}`);
-  const body = await response.json() as { request_token?: string };
+  const body = (await response.json()) as { request_token?: string };
   if (!body.request_token) throw new Error("LOCAL_SESSION_TOKEN_MISSING");
   localSessionToken = body.request_token;
 }
 
 export const api = {
   get: <T>(path: string, init?: RequestInit) => request<T>(path, init),
-  post: <T>(path: string, payload?: unknown) => request<T>(path, { method: "POST", body: payload === undefined ? undefined : JSON.stringify(payload) }),
-  put: <T>(path: string, payload: unknown) => request<T>(path, { method: "PUT", body: JSON.stringify(payload) }),
-  patch: <T>(path: string, payload: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(payload) }),
+  post: <T>(path: string, payload?: unknown) =>
+    request<T>(path, {
+      method: "POST",
+      body: payload === undefined ? undefined : JSON.stringify(payload),
+    }),
+  put: <T>(path: string, payload: unknown) =>
+    request<T>(path, { method: "PUT", body: JSON.stringify(payload) }),
+  patch: <T>(path: string, payload: unknown) =>
+    request<T>(path, { method: "PATCH", body: JSON.stringify(payload) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
   upload: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
 };
