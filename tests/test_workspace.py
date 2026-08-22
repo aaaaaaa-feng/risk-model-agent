@@ -25,11 +25,22 @@ def test_workspace_manager_persists_pointer_and_project_boundary(tmp_path: Path)
     assert status["project_storage"] == "<workspace>/projects/<project_id>/"
 
 
-def test_workspace_manager_does_not_switch_with_projects_or_active_runs(tmp_path: Path):
+def test_workspace_manager_allows_first_selection_with_existing_control_projects(tmp_path: Path):
     paths = AppPaths(tmp_path / "control").ensure()
     manager = WorkspaceManager()
+    selected = manager.select(paths, str(tmp_path / "first-workspace"), project_count=1)
+    assert selected.root == (tmp_path / "first-workspace").resolve()
+    assert not (tmp_path / "first-workspace" / "projects" / "old-project").exists()
+
+
+def test_workspace_manager_does_not_switch_configured_workspace_with_projects_or_active_runs(tmp_path: Path):
+    paths = AppPaths(tmp_path / "control").ensure()
+    manager = WorkspaceManager()
+    selected = manager.select(paths, str(tmp_path / "configured-workspace"))
     with pytest.raises(ValueError, match="WORKSPACE_SWITCH_REQUIRES_EMPTY_CURRENT_PROJECTS"):
-        manager.select(paths, str(tmp_path / "other"), project_count=1)
+        manager.select(selected, str(tmp_path / "other"), project_count=1)
+    with pytest.raises(ValueError, match="WORKSPACE_SWITCH_ACTIVE_RUNS"):
+        manager.select(selected, str(tmp_path / "running"), active_run_count=1)
     assert not (tmp_path / "other" / ".risk-model-agent-workspace.json").exists()
 
 

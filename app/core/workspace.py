@@ -112,11 +112,29 @@ class WorkspaceManager:
         active_run_count: int = 0,
     ) -> AppPaths:
         candidate = self._validate_requested_path(requested_path)
-        if candidate != paths.root.expanduser().resolve() and (project_count or active_run_count):
-            raise ValueError("WORKSPACE_SWITCH_REQUIRES_EMPTY_CURRENT_PROJECTS")
+        active = paths.root.expanduser().resolve()
+        if candidate != active:
+            # A first-run install may still have projects in the temporary
+            # application directory (for example, data created before the
+            # workspace picker was introduced).  Selecting the real workspace
+            # must remain possible; those old projects stay in the old
+            # directory and are never deleted or silently moved.
+            if active_run_count:
+                raise ValueError("WORKSPACE_SWITCH_ACTIVE_RUNS")
+            if project_count and not self._is_initial_control_context(paths):
+                raise ValueError("WORKSPACE_SWITCH_REQUIRES_EMPTY_CURRENT_PROJECTS")
         selected = self.prepare(paths, str(candidate))
         self.persist(paths, selected)
         return selected
+
+    def _is_initial_control_context(self, paths: AppPaths) -> bool:
+        """Return whether ``paths`` is the unconfigured first-run context."""
+
+        active = paths.root.expanduser().resolve()
+        control = (paths.control_root or paths.root).expanduser().resolve()
+        if active != control or self._matching_environment_override(paths):
+            return False
+        return not self.status(paths).get("configured", False)
 
     @staticmethod
     def _validate_requested_path(requested_path: str) -> Path:
