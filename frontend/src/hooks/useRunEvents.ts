@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
-import { eventUrl } from "./api";
-import type { RunEvent } from "./types";
+import { eventUrl } from "../api";
+import type { RunEvent } from "../types";
 
 export function useRunEvents(
   runId: string | null,
