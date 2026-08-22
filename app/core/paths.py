@@ -88,6 +88,11 @@ class AppPaths:
     def config(self) -> Path:
         return self.root / "settings.json"
 
+    @property
+    def provider_profiles(self) -> Path:
+        """Non-secret Provider configurations kept alongside app settings."""
+        return self.root / "provider_profiles.json"
+
     def project_dir(self, project_id: str) -> Path:
         return self.projects / project_id
 

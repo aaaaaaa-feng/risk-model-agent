@@ -51,7 +51,10 @@ class Settings:
     base_url: str = "https://api.deepseek.com"
     model: str = "deepseek-v4-flash"
     reviewer_model: str = ""
-    llm_enabled: bool = False
+    # The product defaults to LLM enabled.  ProviderGateway still fails closed
+    # when no key/base URL/model is configured, so this does not cause a
+    # network request on a fresh install.
+    llm_enabled: bool = True
     mode: str = "semi_trusted"
     run_token_budget: int = 0
     monthly_token_budget: int = 0
@@ -91,6 +94,17 @@ class SettingsStore:
             pass
         allowed = {item.name for item in fields(Settings)}
         settings = Settings(**{key: value for key, value in raw.items() if key in allowed})
+        # Configurations written by versions before the default changed have
+        # an explicit-looking false value but no marker that the user chose to
+        # disable LLM.  Once a key is present, migrate that legacy default to
+        # enabled.  A later explicit save of False records the marker below
+        # and is respected thereafter.
+        if (
+            raw.get("llm_enabled") is False
+            and raw.get("api_key_configured") is True
+            and raw.get("_llm_enabled_explicit") is not True
+        ):
+            settings.llm_enabled = True
         if os.getenv("RISK_AGENT_API_KEY", "").strip():
             settings.api_key_configured = True
             settings.secret_storage = "environment"
@@ -102,26 +116,25 @@ class SettingsStore:
         for item in fields(Settings):
             if item.name in payload and item.name not in immutable:
                 setattr(current, item.name, payload[item.name])
-        self.paths.config.write_text(
-            json.dumps(asdict(current), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        try:
-            self.paths.config.chmod(0o600)
-        except OSError:
-            pass
+        value = asdict(current)
+        if "llm_enabled" in payload:
+            value["_llm_enabled_explicit"] = True
+        self._write(value)
         return current
 
     def save_secret_state(self, configured: bool, storage: str) -> Settings:
         current = self.load()
         current.api_key_configured = configured
         current.secret_storage = storage
-        self.paths.config.write_text(
-            json.dumps(asdict(current), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        raw: dict[str, Any] = {}
         try:
-            self.paths.config.chmod(0o600)
-        except OSError:
+            raw = json.loads(self.paths.config.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
             pass
+        value = asdict(current)
+        if raw.get("_llm_enabled_explicit") is True:
+            value["_llm_enabled_explicit"] = True
+        self._write(value)
         return current
 
     def reset(self, preserve_secret_state: bool = True) -> Settings:
@@ -130,10 +143,18 @@ class SettingsStore:
         if preserve_secret_state:
             reset.api_key_configured = previous.api_key_configured
             reset.secret_storage = previous.secret_storage
-        self.paths.config.write_text(
-            json.dumps(asdict(reset), ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        self._write(asdict(reset))
         return reset
+
+    def _write(self, value: dict[str, Any]) -> None:
+        self.paths.config.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.config.write_text(
+            json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        try:
+            self.paths.config.chmod(0o600)
+        except OSError:
+            pass
 
 
 def env_int(name: str, default: int) -> int:
