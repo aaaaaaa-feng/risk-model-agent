@@ -171,7 +171,7 @@
 
 .summary-cell span {
   display: block;
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   color: var(--muted);
   text-transform: uppercase;
   font-weight: 700;
@@ -184,6 +184,7 @@
   font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
   margin-top: 6px;
   white-space: nowrap;
   overflow: hidden;
@@ -257,7 +258,7 @@
 
 .review-banner div span {
   display: block;
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   color: var(--muted);
 }
 
@@ -318,7 +319,7 @@
 .review-details pre {
   background: var(--ground);
   padding: 10px;
-  font-size: 9px;
+  font-size: 10px;
   overflow: auto;
   max-height: 150px;
   border-radius: var(--radius-sm);
@@ -635,7 +636,7 @@
 }
 
 .bin-list span {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--muted);
   margin-top: 3px;
 }
@@ -756,6 +757,7 @@
 
 .bin-rate-cell b {
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .bin-editor-grid {
@@ -841,7 +843,7 @@
 .model-grid small {
   display: block;
   color: var(--quiet);
-  font: 9px var(--mono);
+  font: 10px var(--mono);
 }
 
 .recommended,
@@ -917,6 +919,7 @@
 .candidate-bars b {
   font-weight: 500;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .feature-pills {
@@ -1313,7 +1316,7 @@
 }
 
 .settings-nav-item span {
-  font-size: 9px;
+  font-size: 10px;
   margin-top: 3px;
   line-height: 1.35;
 }
@@ -1356,7 +1359,7 @@
 
 .provider-profiles-head span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .provider-profile {
@@ -1410,13 +1413,13 @@
 }
 
 .provider-profile-copy small {
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   color: var(--muted);
   margin-top: 2px;
 }
 
 .provider-profile-state {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--muted);
   white-space: nowrap;
 }

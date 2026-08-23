@@ -286,6 +286,7 @@ table {
   border-collapse: collapse;
   white-space: nowrap;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 th,

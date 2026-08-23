@@ -152,7 +152,7 @@ body.col-resizing .chat-rail {
 .brand span {
   display: block;
   color: var(--muted);
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   margin-top: 2px;
 }
 
@@ -245,7 +245,7 @@ body.col-resizing .chat-rail {
   display: block;
   margin-top: 5px;
   color: var(--muted);
-  font: 9px var(--mono);
+  font: 10px var(--mono);
 }
 
 .project-item.active {
@@ -561,7 +561,7 @@ body.col-resizing .chat-rail {
 
 .panel-label {
   display: block;
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   letter-spacing: 0.12em;
   color: var(--quiet);
   font-weight: 700;
@@ -699,7 +699,7 @@ body.col-resizing .chat-rail {
 
 .stage-substeps i {
   font-style: normal;
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   width: 18px;
   height: 18px;
   border-radius: 6px;
@@ -767,7 +767,7 @@ body.col-resizing .chat-rail {
 }
 
 .chat-rail-head > span {
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   letter-spacing: 0.12em;
   color: var(--quiet);
   font-weight: 700;
@@ -836,6 +836,7 @@ body.col-resizing .chat-rail {
 .audit-list b {
   text-align: right;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -867,7 +868,7 @@ body.col-resizing .chat-rail {
 }
 
 .rail-history time {
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   color: var(--quiet);
 }
 
@@ -907,7 +908,7 @@ body.col-resizing .chat-rail {
 }
 
 .chat-head span {
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   color: var(--quiet);
 }
 
@@ -981,7 +982,7 @@ body.col-resizing .chat-rail {
 
 .chat-meta {
   display: block;
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   color: var(--quiet);
   text-transform: uppercase;
   margin-bottom: 3px;
@@ -1097,7 +1098,7 @@ body.col-resizing .chat-rail {
   border: 0;
   background: transparent;
   color: var(--quiet);
-  font-size: 9px;
+  font-size: 10px;
   padding: 2px 4px;
   cursor: pointer;
   border-radius: var(--radius-sm);
