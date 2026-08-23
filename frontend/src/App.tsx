@@ -6,6 +6,8 @@ import { useProjects } from "./hooks/useProjects";
 import { useRunData } from "./hooks/useRunData";
 import { useSelectionState, type View } from "./hooks/useSelectionState";
 import { useSettings } from "./hooks/useSettings";
+import { useChatRailState } from "./hooks/useChatRailState";
+import { useSidebarState } from "./hooks/useSidebarState";
 import { useToast } from "./hooks/useToast";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { errorMessage } from "./lib/format";
@@ -20,7 +22,8 @@ import { ProjectSidebar } from "./components/ProjectSidebar";
 import { ReportView } from "./components/ReportView";
 import { RunWorkbench } from "./components/RunWorkbench";
 import { SettingsDrawer } from "./components/SettingsDrawer";
-import { StageRail } from "./components/StageRail";
+import { StagePanel } from "./components/StagePanel";
+import { StageProgressBar } from "./components/StageProgressBar";
 import { Tabs } from "./components/ui/Tabs";
 import { WorkspaceSetup } from "./components/WorkspaceSetup";
 
@@ -58,6 +61,8 @@ export function App() {
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sidebarOpen, toggleSidebar] = useSidebarState();
+  const chatRail = useChatRailState();
 
   useEffect(() => {
     // 应用启动时只加载一次基础上下文；项目详情和 Run 事件由各自的 Hook 管理。
@@ -189,11 +194,14 @@ export function App() {
           projects={projects}
           selectedId={selectedId}
           settings={settings}
+          open={sidebarOpen}
+          onToggle={toggleSidebar}
           onSelect={selectProject}
           onCreate={() => setCreateOpen(true)}
           onSettings={() => setSettingsOpen(true)}
         />
         <main className="main-column">
+          <StageProgressBar run={run} />
           <header className="app-header">
             <div className="head-title">
               <span>
@@ -238,6 +246,7 @@ export function App() {
             value={view}
             onChange={(id) => setView(id as View)}
           />
+          <StagePanel run={run} decision={decision} events={events} />
           <section
             id="main-workspace"
             className="workspace"
@@ -283,9 +292,39 @@ export function App() {
               />
             )}
           </section>
-          <AgentChat projectId={selectedId} notify={notify} />
         </main>
-        <StageRail run={run} decision={decision} events={events} />
+        <aside
+          className={`chat-rail ${chatRail.collapsed ? "collapsed" : chatRail.mode}`}
+          aria-label="Agent 对话"
+        >
+          {chatRail.collapsed ? (
+            <button
+              className="chat-expand"
+              type="button"
+              aria-expanded={false}
+              aria-label="展开 Agent 对话栏"
+              onClick={chatRail.toggle}
+            >
+              ◂
+            </button>
+          ) : (
+            <>
+              <div className="chat-rail-head">
+                <span>AGENT</span>
+                <button
+                  className="chat-collapse"
+                  type="button"
+                  aria-expanded={true}
+                  aria-label="收起 Agent 对话栏"
+                  onClick={chatRail.toggle}
+                >
+                  ▸
+                </button>
+              </div>
+              <AgentChat projectId={selectedId} notify={notify} />
+            </>
+          )}
+        </aside>
         <NewProjectDialog
           open={createOpen}
           busy={busy}

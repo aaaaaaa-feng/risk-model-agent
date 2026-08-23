@@ -15,8 +15,9 @@
   .sidebar,
   .app-header,
   .primary-tabs,
-  .stage-rail,
-  .agent-chat {
+  .stage-progress,
+  .stage-panel,
+  .chat-rail {
     animation: none !important;
   }
 }

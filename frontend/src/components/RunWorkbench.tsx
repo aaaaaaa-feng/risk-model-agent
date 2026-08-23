@@ -22,19 +22,10 @@ export function RunWorkbench({
   if (run.status === "failed" || run.status === "blocked")
     return (
       <div className="run-workbench">
-        <div className="stage-line">
-          <div>
-            <span className="eyebrow">{run.status.toUpperCase()}</span>
-            <h2>{run.status === "failed" ? "当前 Run 执行失败" : "当前 Run 已安全停止"}</h2>
-            <p>其他 Y 任务不受影响；错误码和最后证据保留在事件记录中。</p>
-          </div>
-          <div className="run-meta">
-            RUN <b>{run.id.slice(-8)}</b>
-            <br />
-            NODE <b>{run.node}</b>
-          </div>
-        </div>
         <div className="error-panel">
+          <span className="eyebrow">{run.status.toUpperCase()}</span>
+          <h2>{run.status === "failed" ? "当前 Run 执行失败" : "当前 Run 已安全停止"}</h2>
+          <p>其他 Y 任务不受影响；错误码和最后证据保留在事件记录中。</p>
           <strong>{run.error || "USER_REJECTED"}</strong>
           <p>{events.at(-1)?.summary}</p>
           {onRetry && (
@@ -47,32 +38,18 @@ export function RunWorkbench({
     );
   return (
     <div className="run-workbench">
-      <div className="stage-line">
-        <div>
-          <span className="eyebrow">
-            {run.status === "succeeded" ? "RUN COMPLETED" : "LOCAL WORKER RUNNING"}
-          </span>
-          <h2>
-            {run.status === "succeeded"
-              ? conditional
-                ? "模型已完成质检，需关注排序"
-                : "模型已通过最终质检"
-              : runStageLabel[run.stage] || run.stage}
-          </h2>
+      {run.status === "succeeded" && (
+        <div className="run-complete">
+          <strong>
+            {conditional ? "模型已完成质检，需关注排序" : "模型已通过最终质检"}
+          </strong>
           <p>
-            {run.status === "succeeded"
-              ? conditional
-                ? "产物已生成；Test 等频分箱未达到绝对排序，报告已标记条件通过。"
-                : "报告、模型包与独立评分入口已生成。"
-              : events.at(-1)?.summary || "等待本地节点反馈…"}
+            {conditional
+              ? "产物已生成；Test 等频分箱未达到绝对排序，报告已标记条件通过。"
+              : "报告、模型包与独立评分入口已生成。"}
           </p>
         </div>
-        <div className="run-meta">
-          RUN <b>{run.id.slice(-8)}</b>
-          <br />
-          CHECKPOINT <b>{run.node}</b>
-        </div>
-      </div>
+      )}
       <div className="progress-block">
         <div>
           <span>整体进度</span>

@@ -1078,6 +1078,16 @@
   padding: var(--space-4);
 }
 
+.error-panel .eyebrow {
+  color: var(--red-text);
+}
+
+.error-panel h2 {
+  font-size: 18px;
+  font-weight: 800;
+  margin: var(--space-2) 0;
+}
+
 .error-panel strong {
   font-family: var(--mono);
   color: var(--red);
@@ -1085,6 +1095,28 @@
 
 .error-panel p {
   margin: 7px 0 14px;
+}
+
+/* Run 完成提示条（替代原蓝色 stage-line） */
+.run-complete {
+  margin: var(--space-4) 0 0;
+  border: 1px solid var(--line-blue);
+  border-left: 4px solid var(--green);
+  border-radius: var(--radius-xl);
+  background: var(--green-soft);
+  padding: var(--space-3) var(--space-4);
+}
+
+.run-complete strong {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--green-text);
+}
+
+.run-complete p {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--muted);
 }
 
 /* Welcome */
@@ -1470,8 +1502,9 @@
   .sidebar,
   .app-header,
   .primary-tabs,
-  .stage-rail,
-  .agent-chat {
+  .stage-progress,
+  .stage-panel,
+  .chat-rail {
     animation: surface-in 0.45s ease-out both;
   }
 
