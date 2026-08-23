@@ -36,6 +36,16 @@ const promptSuggestions = [
   "审阅特征工程与分箱方案",
 ];
 
+/* 各 Provider 的常用模型(与设置中心 preset 对齐,可在对话栏快速切换) */
+const modelVariants: Record<string, string[]> = {
+  deepseek: ["deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"],
+  kimi: ["kimi-k2.6", "kimi-k2", "moonshot-v1-32k"],
+  "kimi-code": ["kimi-for-coding"],
+  openai: ["gpt-5", "gpt-5-mini", "gpt-4o"],
+  anthropic: ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"],
+  custom: [],
+};
+
 interface Props {
   projectId: string | null;
   settings: Settings | null;
@@ -121,14 +131,18 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
     }
   };
 
-  /* 模型配置:多个可用 Provider 时允许在对话栏直接切换 */
+  /* 模型切换:已保存的 Provider 配置(activate)+ 当前 Provider 的常用模型(改 settings.model) */
   const profiles = settings?.profiles || [];
   const activeId = settings?.active_profile_id || settings?.provider || "";
   const activeProfile = profiles.find((profile) => profile.id === activeId);
   const modelLabel = activeProfile?.model || settings?.model || "";
-  const switchable = profiles.filter(
-    (profile) => profile.llm_enabled && profile.api_key_configured,
-  );
+  const provider = activeProfile?.provider || settings?.provider || "";
+  const variants = modelVariants[provider] || [];
+  const modelOptions = variants.includes(modelLabel)
+    ? variants
+    : [modelLabel, ...variants].filter(Boolean);
+  const otherProfiles = profiles.filter((profile) => profile.id !== activeId);
+  const canSwitch = modelOptions.length > 1 || otherProfiles.length > 0;
 
   const activate = async (profileId: string) => {
     if (profileId === activeId || switching) return;
@@ -143,6 +157,25 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
     } finally {
       setSwitching(false);
     }
+  };
+
+  const switchModel = async (model: string) => {
+    if (model === modelLabel || switching) return;
+    setSwitching(true);
+    try {
+      await api.put("/providers/settings", { model });
+      notify(`已切换模型：${model}`);
+      onProviderChange();
+    } catch (error) {
+      notify(errorMessage(error), true);
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  const onModelSelect = (value: string) => {
+    if (value.startsWith("p:")) activate(value.slice(2));
+    else if (value.startsWith("m:")) switchModel(value.slice(2));
   };
 
   const welcome = projectId && !messages.length && !busy && !draft;
@@ -253,17 +286,22 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
         />
         <div className="flex w-full items-center justify-between gap-2">
           {settings?.llm_enabled && modelLabel ? (
-            switchable.length > 1 ? (
-              <Select value={activeId} onValueChange={activate} disabled={switching}>
+            canSwitch ? (
+              <Select value={`m:${modelLabel}`} onValueChange={onModelSelect} disabled={switching}>
                 <SelectTrigger
-                  aria-label="切换模型配置"
+                  aria-label="切换模型"
                   className="h-[30px] w-auto gap-1.5 px-2 font-mono text-[10px]"
                 >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {switchable.map((profile) => (
-                    <SelectItem value={profile.id} key={profile.id}>
+                  {modelOptions.map((model) => (
+                    <SelectItem value={`m:${model}`} key={`m:${model}`}>
+                      {model}
+                    </SelectItem>
+                  ))}
+                  {otherProfiles.map((profile) => (
+                    <SelectItem value={`p:${profile.id}`} key={`p:${profile.id}`}>
                       {profile.label}
                       {profile.model ? ` · ${profile.model}` : ""}
                     </SelectItem>
@@ -287,7 +325,10 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
             >
               <RefreshCw className="h-3.5 w-3.5" />
             </Button>
-            <ChatInputSubmit aria-label="发送" />
+            <ChatInputSubmit
+              aria-label="发送"
+              className="h-[30px] w-[30px] p-0 [&_svg]:h-3.5 [&_svg]:w-3.5"
+            />
           </div>
         </div>
       </ChatInput>
