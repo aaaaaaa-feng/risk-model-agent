@@ -36,6 +36,8 @@ a:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
   border-radius: var(--radius-sm);
+  /* 焦点环必须瞬现:键盘用户等不起 200ms 的淡入 */
+  transition: none;
 }
 
 h1,
