@@ -223,7 +223,6 @@ body.col-resizing .chat-rail {
   width: 100%;
   min-height: 64px;
   border: 1px solid var(--line);
-  border-left: 3px solid transparent;
   border-radius: var(--radius-lg);
   background: var(--panel-solid);
   color: var(--ink);
@@ -255,7 +254,7 @@ body.col-resizing .chat-rail {
 }
 
 .project-item.active {
-  border-left-color: var(--blue);
+  border-color: var(--line-blue);
   background: var(--blue-soft);
   box-shadow: inset 0 0 0 1px var(--line-blue);
 }
@@ -298,7 +297,6 @@ body.col-resizing .chat-rail {
   display: grid;
   place-items: center;
   text-align: center;
-  border-left: 0;
 }
 
 .project-item.compact strong {
@@ -321,7 +319,6 @@ body.col-resizing .chat-rail {
 
 .network-note {
   border: 1px solid var(--amber-border);
-  border-left: 3px solid var(--amber);
   border-radius: var(--radius-lg);
   background: var(--amber-soft);
   padding: 11px 10px;

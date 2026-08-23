@@ -488,7 +488,7 @@ tbody tr:last-child td {
   line-height: 1.5;
   padding: 10px 12px;
   background: var(--amber-soft);
-  border-left: 4px solid var(--amber);
+  border: 1px solid var(--amber-border);
   border-radius: var(--radius-lg);
   color: var(--amber-deep);
   margin: 10px 0;
