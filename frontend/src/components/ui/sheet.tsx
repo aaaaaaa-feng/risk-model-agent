@@ -40,7 +40,7 @@ const SheetContent = React.forwardRef<
       ref={ref}
       aria-describedby={undefined}
       className={cn(
-        "fixed inset-y-3 right-3 z-[var(--z-drawer)] grid w-[min(500px,calc(100dvw-30px))] max-[620px]:w-[calc(100dvw-16px)] grid-rows-[76px_minmax(0,1fr)] overflow-hidden rounded-[10px] border border-[var(--line)] bg-background shadow-[var(--shadow-xl)]",
+        "fixed inset-y-3 right-3 z-[var(--z-drawer)] grid w-[min(500px,calc(100dvw-30px))] max-[620px]:w-[calc(100dvw-16px)] grid-rows-[76px_minmax(0,1fr)] overflow-hidden rounded-[24px] border border-[var(--line)] bg-background shadow-[var(--shadow-xl)]",
         className,
       )}
       {...props}

@@ -47,6 +47,25 @@ p {
   margin-top: 0;
 }
 
+/* Tofu 风格细滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c8c8c4;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9a9a96;
+}
+
 /* Reduced motion preferences are applied at the component level via media queries. */
 @media (prefers-reduced-motion: reduce) {
   *,

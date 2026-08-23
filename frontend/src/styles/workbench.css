@@ -1073,7 +1073,7 @@
   color: var(--muted);
 }
 
-/* Welcome — 排版主导:纯色纸面 + 发丝分隔的事实条 */
+/* Welcome — Tofu bento:三俏色大圆角卡片 + hover 微放大 */
 .welcome {
   max-width: none;
   min-height: 0;
@@ -1104,27 +1104,39 @@
 .welcome-grid {
   display: grid;
   grid-template-columns: 1.2fr 1fr 1fr;
-  border-top: 1px solid var(--line-strong);
-  border-bottom: 1px solid var(--line-strong);
+  gap: var(--space-4);
   margin: 20px 0;
 }
 
 .welcome-grid > div {
-  padding: 14px var(--space-4) 14px 0;
-  border-right: 1px solid var(--line);
+  padding: var(--space-5);
+  border-radius: var(--radius-xl);
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  transition: transform var(--dur-med) var(--ease-out);
 }
 
-.welcome-grid > div + div {
-  padding-left: var(--space-4);
+.welcome-grid > div:hover {
+  transform: scale(1.015);
 }
 
-.welcome-grid > div:last-child {
-  border: 0;
+.welcome-grid > div:nth-child(1) {
+  background: var(--tofu-green);
+}
+
+.welcome-grid > div:nth-child(2) {
+  background: var(--tofu-purple);
+}
+
+.welcome-grid > div:nth-child(3) {
+  background: var(--tofu-orange);
 }
 
 .welcome-grid b {
   font: 500 10px var(--mono);
-  color: var(--blue-text);
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .welcome-grid strong,
@@ -1134,12 +1146,14 @@
 
 .welcome-grid strong {
   margin: 6px 0 3px;
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
 }
 
 .welcome-grid span {
-  font-size: 10px;
-  color: var(--muted);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.88);
   line-height: 1.5;
 }
 

@@ -47,7 +47,7 @@ const DialogContent = React.forwardRef<
       ref={ref}
       aria-describedby={undefined}
       className={cn(
-        "fixed left-1/2 top-1/2 z-[calc(var(--z-modal-backdrop)+1)] w-[min(520px,calc(100dvw-40px))] max-h-[calc(100dvh-40px)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-[10px] bg-background shadow-[var(--shadow-modal)]",
+        "fixed left-1/2 top-1/2 z-[calc(var(--z-modal-backdrop)+1)] w-[min(520px,calc(100dvw-40px))] max-h-[calc(100dvh-40px)] -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-[24px] bg-background shadow-[var(--shadow-modal)]",
         className,
       )}
       {...props}

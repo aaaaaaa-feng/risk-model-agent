@@ -2,14 +2,14 @@
  * shadcn/ui 基础设施(2026-08-23)
  * Tailwind v4 分层引入:preflight/utilities 进入 cascade layer,
  * 现有手写 CSS(未分层)优先级恒高于层内样式,迁移期两套体系并存、互不覆盖。
- * 主题直接引用 tokens.css 变量,保持单一事实源;视觉语言不变(冷峻座舱)。
+ * 主题直接引用 tokens.css 变量,保持单一事实源;视觉语言为 Tofu 嘉年华。
  */
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css" layer(utilities);
 
 @theme {
-  /* 色彩 — 引用 tokens.css:墨色行动层 + 钴蓝 accent */
+  /* 色彩 — 引用 tokens.css:黑色行动层 + 豆腐紫 accent */
   --color-background: var(--paper);
   --color-foreground: var(--ink);
   --color-card: var(--panel);
@@ -30,14 +30,14 @@
   --color-input: var(--line-strong);
   --color-ring: var(--blue);
 
-  /* 字体 — IBM Plex 本地字体族 */
+  /* 字体 — Shrikhand/DM Sans/Plex Mono 本地字体族 */
   --font-sans: var(--body);
   --font-mono: var(--mono);
 
-  /* 圆角 — 锐利座舱:控件 2-4px,面板 6-10px */
-  --radius-sm: 2px;
-  --radius-md: 4px;
-  --radius-lg: 6px;
-  --radius-xl: 8px;
-  --radius-2xl: 10px;
+  /* 圆角 — Tofu 大圆角:控件 8-12px,卡片 16-32px */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
 }

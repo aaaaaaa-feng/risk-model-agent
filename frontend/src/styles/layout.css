@@ -340,7 +340,7 @@ body.col-resizing .chat-rail {
 
 .app-header {
   border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-full);
   padding: 0 var(--space-5);
   background: var(--paper);
   box-shadow: var(--shadow-sm);
@@ -382,17 +382,17 @@ body.col-resizing .chat-rail {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 4px;
+  padding: 5px;
   border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-full);
   background: var(--panel);
   box-shadow: var(--shadow-sm);
 }
 
 .primary-tabs button {
-  height: 42px;
+  height: 38px;
   border: 0;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-full);
   padding: 0 var(--space-4);
   background: transparent;
   color: var(--muted);
@@ -423,7 +423,7 @@ body.col-resizing .chat-rail {
 /* Stage progress bar（顶部业务流程条） */
 .stage-progress {
   border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-full);
   background: var(--paper);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
@@ -489,6 +489,8 @@ body.col-resizing .chat-rail {
   color: var(--paper);
   background: var(--black);
   overflow: hidden;
+  border-radius: var(--radius-full);
+  margin: 4px 2px;
 }
 
 .stage-step.current .step-index {

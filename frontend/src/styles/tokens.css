@@ -4,80 +4,86 @@
   line-break: strict;
 
   /*
-   * 视觉语言:taste-skill 重构 · 冷峻座舱(2026-08-23)
-   * 材质:发丝线 + 锐利小圆角,不用柔和大阴影
-   * 色彩:冷调灰纸面 + 墨色行动层 + 单一钴蓝 accent(链接/聚焦/选中/活跃数据)
-   * 字体:IBM Plex Sans 标题 + IBM Plex Sans 正文 + IBM Plex Mono 数据(衬线显示体下线)
-   * 规则:accent 全站锁定钴蓝;行动面(主按钮/选中态/深色板)一律墨色;状态色仅表语义
+   * 视觉语言:Tofu 嘉年华(2026-08-23,DesignFest 模板风格)
+   * 材质:浅灰画布 + 白色大圆角卡片/胶囊,软卡片投影,hover 轻微放大
+   * 色彩:黑色行动层 + 三俏色(绿 #00C65E / 紫 #5C5FEF / 橙 #FF5C00);
+   *       链接/聚焦/选中锁定豆腐紫,状态色仅表语义
+   * 字体:Shrikhand 拉丁显示体 + DM Sans 正文(中文回退苹方)+ IBM Plex Mono 数据
+   * 规则:按钮/导航/输入一律胶囊(full);卡片 16-32px 大圆角;装饰几何仅用三俏色
    */
 
   /* Canvas & surfaces */
-  --paper: #fbfcfd;
-  --ground: #eceff3;
-  --panel: #fbfcfd;
+  --paper: #ffffff;
+  --ground: #f2f2f0;
+  --panel: #ffffff;
 
   /* Text */
-  --ink: #14181f;
+  --ink: #111827;
   --muted: #4b5563;
-  --quiet: #98a2b3;
+  --quiet: #9ca3af;
 
   /* Borders */
-  --line: #e3e7ec;
-  --line-strong: #c9d1da;
-  --line-soft: #eff1f4;
-  --line-blue: #c3d3f8;
-  --green-border: #bfe6cc;
+  --line: #e5e7eb;
+  --line-strong: #d1d5db;
+  --line-soft: #f3f4f6;
+  --line-blue: #d6d8fb;
+  --green-border: #a7ecc6;
 
   /* Derived surfaces & text */
-  --ground-hover: #e4e9ef;
-  --blue-hover-tint: #f0f5fe;
-  --panel-solid: #f4f6f9;
-  --track: #e2e6ec;
-  --code-bg: #f0f2f5;
+  --ground-hover: #e8e8e4;
+  --blue-hover-tint: #f2f3fe;
+  --panel-solid: #f6f6f4;
+  --track: #e8e8e4;
+  --code-bg: #f3f4f6;
   --output-text: #e4e4e7;
   --th-text: #4b5563;
-  --disabled-bg: #d4d8de;
+  --disabled-bg: #d4d4d0;
   --disabled-text: #6b7280;
-  --amber-deep: #6b5310;
-  --amber-missing: #fff9e6;
-  --black-hover: #232a35;
-  --blue-on-dark: #93c5fd;
+  --amber-deep: #8a3a06;
+  --amber-missing: #fff6ec;
+  --black-hover: #1f2937;
+  --blue-on-dark: #b7bbff;
   --ink-inverse-soft: #c8cdd5;
   --on-blue-border: rgba(255, 255, 255, 0.55);
   --on-blue-fill: rgba(255, 255, 255, 0.16);
   --on-blue-shimmer: rgba(255, 255, 255, 0.28);
-  --scrim: rgba(20, 24, 31, 0.44);
-  --scrim-strong: rgba(20, 24, 31, 0.76);
-  --pulse-glow: rgba(30, 80, 216, 0.35);
+  --scrim: rgba(17, 24, 39, 0.44);
+  --scrim-strong: rgba(17, 24, 39, 0.76);
+  --pulse-glow: rgba(92, 95, 239, 0.35);
 
-  /* Brand — 墨色行动层 + 钴蓝 accent */
-  --black: #14181f;
-  --blue: #1e50d8;
-  --blue-hover: #1a45bb;
-  --blue-soft: #eef3fe;
-  --blue-text: #1d4ed8;
-  --blue-subtle: #d9e4fc;
+  /* Brand — 黑色行动层 + 豆腐紫 accent */
+  --black: #000000;
+  --blue: #5c5fef;
+  --blue-hover: #4a4de0;
+  --blue-soft: #eef0fe;
+  --blue-text: #4f52e8;
+  --blue-subtle: #dcdff9;
+
+  /* Tofu 三俏色 — 装饰与状态共用 */
+  --tofu-green: #00c65e;
+  --tofu-purple: #5c5fef;
+  --tofu-orange: #ff5c00;
 
   /* Status — 仅表语义,不作装饰 */
-  --green: #16a34a;
-  --green-soft: #ecfdf3;
-  --green-text: #15803d;
-  --amber: #d97706;
-  --amber-soft: #fffbeb;
-  --amber-text: #92400e;
-  --amber-border: #fcd34d;
+  --green: #00c65e;
+  --green-soft: #e0f9ec;
+  --green-text: #00964a;
+  --amber: #ff5c00;
+  --amber-soft: #fff1e8;
+  --amber-text: #d64d00;
+  --amber-border: #ffc9a6;
   --red: #dc2626;
   --red-soft: #fef2f2;
   --red-text: #b91c1c;
   --red-border: #fecaca;
 
-  /* Focus — 钴蓝,瞬现,不做过渡 */
-  --focus-ring: 0 0 0 3px rgba(30, 80, 216, 0.45);
-  --focus-color: #1e50d8;
+  /* Focus — 豆腐紫,瞬现,不做过渡 */
+  --focus-ring: 0 0 0 3px rgba(92, 95, 239, 0.4);
+  --focus-color: #5c5fef;
 
-  /* Typography — 衬线显示体下线;标题/正文 Sans,数据 Mono */
-  --body: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --display: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* Typography — Shrikhand 拉丁显示体 + DM Sans 正文,数据 Mono */
+  --body: "DM Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --display: "Shrikhand", "DM Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
   --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
 
   /* Spacing scale */
@@ -89,21 +95,21 @@
   --space-6: 24px;
   --space-7: 28px;
 
-  /* Border radius — 锐利座舱体系:控件 2-4px,面板 6-10px,full 仅限状态 pill */
-  --radius-sm: 2px;
-  --radius-md: 4px;
-  --radius-lg: 6px;
-  --radius-xl: 8px;
-  --radius-2xl: 10px;
+  /* Border radius — Tofu 大圆角体系:控件胶囊,卡片 16-32px */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
   --radius-full: 999px;
 
-  /* Shadows — 平面优先:面板无投影,仅浮层保留 */
-  --shadow-xs: 0 1px 2px rgba(20, 24, 31, 0.05);
-  --shadow-sm: 0 1px 3px rgba(20, 24, 31, 0.07);
-  --shadow-xl: 0 16px 40px rgba(20, 24, 31, 0.16);
-  --shadow-modal: 0 24px 70px rgba(20, 24, 31, 0.22);
-  --shadow-toast: 0 12px 28px rgba(20, 24, 31, 0.16);
-  --shadow-panel-dark: 0 10px 20px rgba(20, 24, 31, 0.12);
+  /* Shadows — 软卡片投影(模板 card shadow),浮层加深 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-xl: 0 16px 40px rgba(17, 24, 39, 0.16);
+  --shadow-modal: 0 24px 70px rgba(17, 24, 39, 0.22);
+  --shadow-toast: 0 12px 28px rgba(17, 24, 39, 0.16);
+  --shadow-panel-dark: 0 10px 20px rgba(17, 24, 39, 0.12);
 
   /* Motion — 命名缓动与时长,禁止浏览器默认 ease */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
