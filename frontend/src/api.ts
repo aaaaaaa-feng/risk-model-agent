@@ -1,3 +1,4 @@
+// 使用同源相对路径，确保开发页和打包页不会混用不同端口的后端。
 const API_ROOT = "/api/v1";
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 let localSessionToken = "";
@@ -19,6 +20,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body && !(init.body instanceof FormData))
     headers.set("content-type", "application/json");
   if (MUTATING_METHODS.has(method) && localSessionToken) {
+    // 只有写操作需要本机临时会话令牌，避免把令牌发给只读请求。
     headers.set("x-risk-agent-session", localSessionToken);
   }
   const response = await fetch(`${API_ROOT}${path}`, { ...init, headers });
@@ -43,6 +45,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function initializeLocalSession(): Promise<void> {
+  // 页面加载时先建立本机会话，后续写操作才能被后端的本地边界校验放行。
   const response = await fetch(`${API_ROOT}/session`, {
     credentials: "same-origin",
     cache: "no-store",

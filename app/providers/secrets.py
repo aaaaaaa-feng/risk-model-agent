@@ -32,6 +32,7 @@ class SecretStore:
             self.username = USERNAME
 
     def read(self) -> str:
+        # 环境变量只作为显式部署覆盖；普通桌面运行只读本地受限权限文件。
         environment = os.getenv("RISK_AGENT_API_KEY", "").strip()
         if environment:
             return environment
@@ -41,6 +42,7 @@ class SecretStore:
             return ""
 
     def save(self, value: str) -> str:
+        # 不再默认写入系统钥匙串，避免每次启动触发桌面密码提示。
         if os.getenv("RISK_AGENT_API_KEY", "").strip():
             return "environment"
         value = value.strip()
@@ -61,12 +63,10 @@ class SecretStore:
         return "environment" if os.getenv("RISK_AGENT_API_KEY", "").strip() else "not_configured"
 
     def migrate_keyring_to_local(self, *, remove_source: bool = True) -> bool:
-        """Move a legacy keyring value to local storage once.
+        """仅在升级迁移时把旧钥匙串值搬到本地文件。
 
-        Normal application reads never touch the OS keychain.  This explicit
-        migration is kept for upgrades where an older version stored the key
-        there.  The value is never returned or logged; after a successful
-        local write the old keyring entry is removed by default.
+        正常读取不会访问钥匙串；迁移过程不返回、不记录密钥，写入成功后
+        默认删除旧钥匙串条目。
         """
 
         if os.getenv("RISK_AGENT_API_KEY", "").strip() or self.read():

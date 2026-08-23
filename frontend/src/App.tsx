@@ -28,6 +28,7 @@ export function App() {
   const { toast, notify } = useToast();
   const { projects, loadProjects } = useProjects(notify);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  // 该回调必须保持稳定，否则工作区 Hook 会把每次渲染都当成一次初始化。
   const openWorkspaceSetup = useCallback(() => setWorkspaceOpen(true), []);
   const { workspace, setWorkspace, loadWorkspace } = useWorkspace(notify, openWorkspaceSetup);
   const { settings, loadSettings } = useSettings(notify);
@@ -59,6 +60,7 @@ export function App() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    // 应用启动时只加载一次基础上下文；项目详情和 Run 事件由各自的 Hook 管理。
     loadWorkspace();
     loadProjects();
     loadSettings();
