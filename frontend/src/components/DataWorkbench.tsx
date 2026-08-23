@@ -410,7 +410,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
               onClick={executeJoin}
               disabled={!steps.length || busy === "join"}
             >
-              <b>1—2</b>
+              <b>1-2</b>
               <strong>执行可视化关联</strong>
               <span>使用 Agent 推荐或手动编辑后的键</span>
             </button>

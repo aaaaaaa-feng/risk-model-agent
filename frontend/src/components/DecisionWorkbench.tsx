@@ -519,7 +519,7 @@ function BinningDecision({
                 <Metric label="IV" value={formatMetric(sample.iv)} />
                 <Metric
                   label="坏率范围"
-                  value={`${formatPercent(stats.minRate)}—${formatPercent(stats.maxRate)}`}
+                  value={`${formatPercent(stats.minRate)}-${formatPercent(stats.maxRate)}`}
                 />
               </div>
               <div className="bin-ordering">
@@ -782,7 +782,7 @@ function ModelDecision({
         </label>
       </div>
       <p className="boundary-note">
-        默认不额外调参；设为 1—12 后只在 Train/CV 使用固定小网格，Test 仍只用于方案选择，OOT
+        默认不额外调参；设为 1-12 后只在 Train/CV 使用固定小网格，Test 仍只用于方案选择，OOT
         不参与调参。
       </p>
     </section>

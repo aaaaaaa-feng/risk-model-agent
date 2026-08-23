@@ -258,7 +258,7 @@ export function ReportView({ project, run, notify }: Props) {
                       <td>{formatMetric(row.lift)}</td>
                       <td>{formatPercent(row.cumulative_capture)}</td>
                       <td>
-                        {formatMetric(row.min_probability)}—{formatMetric(row.max_probability)}
+                        {formatMetric(row.min_probability)}-{formatMetric(row.max_probability)}
                       </td>
                     </tr>
                   )),
