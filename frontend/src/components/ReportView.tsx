@@ -85,7 +85,6 @@ export function ReportView({ project, run, notify }: Props) {
       <div className="report-empty">
         <div className="stage-line">
           <div>
-            <span className="eyebrow">REPORT</span>
             <h2>产物将在最终质检后生成</h2>
             <p>Web、Excel、单文件 HTML 和模型包共享同一结构化报告数据。</p>
           </div>
@@ -107,11 +106,10 @@ export function ReportView({ project, run, notify }: Props) {
     <div className="report-view">
       <div className="stage-line">
         <div>
-          <span className="eyebrow">RISK MODEL REPORT · {report.schema_version}</span>
           <h2>
             {report.project.name} · {report.target.column}
           </h2>
-          <p>管理摘要与专业详情来自同一份事实数据。</p>
+          <p>管理摘要与专业详情来自同一份事实数据 · Schema {report.schema_version}。</p>
         </div>
         <div className="report-actions">
           <a className="button secondary" href={`/api/v1/reports/${run.id}/excel`}>
@@ -291,7 +289,6 @@ export function ReportView({ project, run, notify }: Props) {
       </section>
       <section className="score-panel">
         <div>
-          <span className="eyebrow">BATCH SCORING</span>
           <h3>给新样本批量打分</h3>
           <p>输出列使用模型名称命名，并同时保留原始分、坏概率与封顶/封底证据。</p>
         </div>

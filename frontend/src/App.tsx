@@ -403,7 +403,6 @@ export function App() {
 function Welcome({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="welcome">
-      <span className="eyebrow">LOCAL RISK MODELING</span>
       <h2>从一个可追溯的建模项目开始</h2>
       <p>
         导入本地 CSV / Excel，多表关联，确认多个 0/1 Y，再由主 Agent、Reviewer 与确定性 Worker

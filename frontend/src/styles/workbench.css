@@ -963,10 +963,6 @@
   grid-row: span 2;
 }
 
-.score-panel .eyebrow {
-  color: var(--blue-on-dark);
-}
-
 .score-panel h3 {
   margin: 4px 0;
 }
@@ -1063,10 +1059,6 @@
   padding: var(--space-4);
 }
 
-.error-panel .eyebrow {
-  color: var(--red-text);
-}
-
 .error-panel h2 {
   font-size: 18px;
   font-weight: 800;
@@ -1114,10 +1106,6 @@
   color: var(--ink);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
-}
-
-.welcome .eyebrow {
-  color: var(--blue-text);
 }
 
 .welcome h2 {
@@ -1210,10 +1198,6 @@
   background: var(--blue);
   color: var(--paper);
   padding: 22px var(--space-5);
-}
-
-.workspace-setup-head .eyebrow {
-  color: var(--blue-on-dark);
 }
 
 .workspace-setup-head h2 {

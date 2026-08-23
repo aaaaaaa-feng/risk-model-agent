@@ -217,7 +217,6 @@ export function SettingsDrawer({
     <Drawer open={open} titleId="settings-title" onClose={onClose} initialFocusRef={closeRef}>
       <div className="drawer-head">
         <div>
-          <span className="eyebrow">SETTINGS</span>
           <h2 id="settings-title">设置中心</h2>
         </div>
         <button

@@ -232,7 +232,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
     <div className="data-workbench">
       <div className="stage-line">
         <div>
-          <span className="eyebrow">DATA PREPARATION</span>
           <h2>准备本地建模数据</h2>
           <p>支持直接建模、多表关联和 Notebook 兜底；每个结果都会重新校验。</p>
         </div>
@@ -739,7 +738,6 @@ function NotebookEditor({
     <div className="notebook-editor">
       <div className="section-heading">
         <div>
-          <span className="eyebrow">LOCAL KERNEL</span>
           <h3>{notebook.name}</h3>
           <p>网络默认开启 · 用户代码不在安全沙箱中 · 产品不会主动外发原始数据</p>
         </div>

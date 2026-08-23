@@ -66,7 +66,6 @@ export function WorkspaceSetup({ workspace, onSelected, onClose, notify }: Props
         aria-labelledby="workspace-setup-title"
       >
         <div className="workspace-setup-head">
-          <span className="eyebrow">FIRST-RUN STORAGE</span>
           <h2 id="workspace-setup-title">先选择工作文件夹</h2>
         </div>
         <div className="workspace-setup-body">

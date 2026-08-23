@@ -33,7 +33,6 @@ export function NewProjectDialog({ open, busy, onClose, onCreate, onCreateDemo }
     <Dialog open={open} titleId="new-project-title" onClose={onClose}>
       <div className="modal-head">
         <div>
-          <span className="eyebrow">NEW PROJECT</span>
           <h2 id="new-project-title">创建建模项目</h2>
         </div>
         <button className="icon-button" onClick={onClose} aria-label="关闭">

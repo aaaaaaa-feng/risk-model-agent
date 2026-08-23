@@ -17,7 +17,6 @@ export function HistoryView({
     <div className="history-view">
       <div className="stage-line">
         <div>
-          <span className="eyebrow">RUN HISTORY</span>
           <h2>历史 Run 与只读证据</h2>
           <p>新 Run 不覆盖旧记录；失败和阻断同样保留。</p>
         </div>
