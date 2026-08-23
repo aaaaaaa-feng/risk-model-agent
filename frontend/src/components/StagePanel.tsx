@@ -73,7 +73,9 @@ export function StagePanel({
         </div>
         <div className="panel-next">
           <span className="panel-label">NEXT ACTION</span>
-          <strong>{awaiting ? `需要你确认：${nextAction(run, decision)}` : nextAction(run, decision)}</strong>
+          <strong>
+            {awaiting ? `需要你确认：${nextAction(run, decision)}` : nextAction(run, decision)}
+          </strong>
         </div>
         <button
           className="panel-toggle"

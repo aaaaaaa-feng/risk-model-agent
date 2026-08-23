@@ -75,5 +75,16 @@ export function useRunData(
     setEvents([]);
   }, []);
 
-  return { run, setRun, decision, setDecision, events, setEvents, loadRun, runAbort, runRequest, clearRun };
+  return {
+    run,
+    setRun,
+    decision,
+    setDecision,
+    events,
+    setEvents,
+    loadRun,
+    runAbort,
+    runRequest,
+    clearRun,
+  };
 }

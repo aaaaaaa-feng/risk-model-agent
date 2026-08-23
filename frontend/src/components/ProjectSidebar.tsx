@@ -29,11 +29,7 @@ export function ProjectSidebar({
   return (
     <aside
       className={`sidebar ${open ? "" : "collapsed"}`}
-      style={
-        open && width
-          ? ({ "--sidebar-width": `${width}px` } as CSSProperties)
-          : undefined
-      }
+      style={open && width ? ({ "--sidebar-width": `${width}px` } as CSSProperties) : undefined}
       aria-label="项目列表"
     >
       <div className="brand">

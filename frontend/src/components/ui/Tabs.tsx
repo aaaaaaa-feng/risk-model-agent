@@ -13,7 +13,13 @@ interface TabsProps {
   className?: string;
 }
 
-export function Tabs({ items, value, onChange, "aria-label": ariaLabel, className = "primary-tabs" }: TabsProps) {
+export function Tabs({
+  items,
+  value,
+  onChange,
+  "aria-label": ariaLabel,
+  className = "primary-tabs",
+}: TabsProps) {
   const { setItemRef, handleKeyDown } = useRovingTabIndex({
     active: true,
     itemCount: items.length,

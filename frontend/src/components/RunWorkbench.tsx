@@ -40,9 +40,7 @@ export function RunWorkbench({
     <div className="run-workbench">
       {run.status === "succeeded" && (
         <div className="run-complete">
-          <strong>
-            {conditional ? "模型已完成质检，需关注排序" : "模型已通过最终质检"}
-          </strong>
+          <strong>{conditional ? "模型已完成质检，需关注排序" : "模型已通过最终质检"}</strong>
           <p>
             {conditional
               ? "产物已生成；Test 等频分箱未达到绝对排序，报告已标记条件通过。"

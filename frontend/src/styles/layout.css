@@ -11,7 +11,7 @@
 
 .sidebar,
 .chat-rail {
-  border: 1px solid rgba(228, 228, 231, 0.92);
+  border: 1px solid var(--line);
   border-radius: var(--radius-2xl);
   background: var(--panel);
   color: var(--ink);
@@ -201,7 +201,7 @@ body.col-resizing .chat-rail {
 .new-project:hover,
 .settings-open:hover {
   background: var(--blue-hover);
-  box-shadow: 0 8px 18px rgba(26, 86, 219, 0.24);
+  box-shadow: 0 8px 18px rgba(43, 63, 214, 0.24);
 }
 
 .settings-open {
@@ -210,7 +210,7 @@ body.col-resizing .chat-rail {
 }
 
 .settings-open:hover {
-  background: #27272a;
+  background: #2e2b25;
 }
 
 .project-list {
@@ -225,7 +225,7 @@ body.col-resizing .chat-rail {
   border: 1px solid var(--line);
   border-left: 3px solid transparent;
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(253, 252, 249, 0.82);
   color: var(--ink);
   text-align: left;
   padding: 10px 11px;
@@ -238,7 +238,7 @@ body.col-resizing .chat-rail {
 
 .project-item:hover {
   background: var(--paper);
-  border-color: #c7d2fe;
+  border-color: var(--line-blue);
 }
 
 .project-item strong {
@@ -321,7 +321,7 @@ body.col-resizing .chat-rail {
 
 .network-note {
   border: 1px solid var(--amber-border);
-  border-left: 3px solid #f59e0b;
+  border-left: 3px solid var(--amber);
   border-radius: var(--radius-lg);
   background: var(--amber-soft);
   padding: 11px 10px;
@@ -336,7 +336,7 @@ body.col-resizing .chat-rail {
 .network-note p {
   font-size: 10px;
   line-height: 1.5;
-  color: #78716c;
+  color: var(--muted);
   margin: 4px 0 11px;
 }
 
@@ -377,8 +377,9 @@ body.col-resizing .chat-rail {
 }
 
 .head-title h1 {
-  font-size: 20px;
-  font-weight: 800;
+  font-family: var(--display);
+  font-size: 21px;
+  font-weight: 600;
   margin: 3px 0 0;
   white-space: nowrap;
   overflow: hidden;
@@ -398,7 +399,7 @@ body.col-resizing .chat-rail {
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
-  background: rgba(255, 255, 255, 0.74);
+  background: rgba(253, 252, 249, 0.78);
   box-shadow: var(--shadow-sm);
 }
 
@@ -417,14 +418,14 @@ body.col-resizing .chat-rail {
 }
 
 .primary-tabs button:hover {
-  background: #f4f4f5;
+  background: #f0eee8;
   color: var(--ink);
 }
 
 .primary-tabs button[aria-selected="true"] {
   background: var(--blue);
   color: var(--paper);
-  box-shadow: 0 5px 12px rgba(26, 86, 219, 0.2);
+  box-shadow: 0 5px 12px rgba(43, 63, 214, 0.2);
 }
 
 .workspace {
@@ -495,7 +496,7 @@ body.col-resizing .chat-rail {
 }
 
 .stage-step.done .step-index {
-  border-color: #bbf7d0;
+  border-color: #bfe6cc;
   background: var(--green-soft);
 }
 
@@ -722,7 +723,7 @@ body.col-resizing .chat-rail {
 }
 
 .stage-substeps li.done i {
-  border-color: #bbf7d0;
+  border-color: #bfe6cc;
   background: var(--green-soft);
 }
 
@@ -1372,7 +1373,7 @@ body.col-resizing .chat-rail {
 
   .welcome-grid > div {
     border-right: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+    border-bottom: 1px solid var(--line);
   }
 
   .welcome-grid > div:last-child {

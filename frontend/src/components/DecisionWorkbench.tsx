@@ -1,12 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { formatMetric, formatNumber, formatPercent } from "../lib/format";
-import {
-  confirmLabel,
-  decisionStageName,
-  monotonicLabel,
-  reviewLabel,
-} from "../lib/labels";
+import { confirmLabel, decisionStageName, monotonicLabel, reviewLabel } from "../lib/labels";
 import type { Decision, Run } from "../types";
 
 interface Props {
@@ -62,7 +57,9 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
       const binningSummary = summary as import("../types").BinningSummary;
       const first = Object.keys(binningSummary.specs || {})[0] || "";
       setManualColumn(first);
-      setManualSpec(first ? JSON.stringify(editableBinSpec(binningSummary.specs?.[first]), null, 2) : "");
+      setManualSpec(
+        first ? JSON.stringify(editableBinSpec(binningSummary.specs?.[first]), null, 2) : "",
+      );
     } else {
       setEdits({});
     }
@@ -126,13 +123,25 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
         <TargetDecision summary={summary as import("../types").TargetSummary} />
       )}
       {decision.kind === "confirm_data" && (
-        <DataDecision summary={summary as import("../types").DataSummary} edits={edits} setEdits={setEdits} />
+        <DataDecision
+          summary={summary as import("../types").DataSummary}
+          edits={edits}
+          setEdits={setEdits}
+        />
       )}
       {decision.kind === "confirm_split" && (
-        <SplitDecision summary={summary as import("../types").SplitSummary} edits={edits} setEdits={setEdits} />
+        <SplitDecision
+          summary={summary as import("../types").SplitSummary}
+          edits={edits}
+          setEdits={setEdits}
+        />
       )}
       {decision.kind === "confirm_screening" && (
-        <ScreeningDecision summary={summary as import("../types").ScreeningSummary} edits={edits} setEdits={setEdits} />
+        <ScreeningDecision
+          summary={summary as import("../types").ScreeningSummary}
+          edits={edits}
+          setEdits={setEdits}
+        />
       )}
       {decision.kind === "confirm_binning" && (
         <BinningDecision
@@ -144,7 +153,17 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
         />
       )}
       {decision.kind === "confirm_models" && (
-        <ModelDecision plan={(summary as import("../types").ModelsSummary).plan || { models: [], score: {}, search_budget: 0 }} edits={edits} setEdits={setEdits} />
+        <ModelDecision
+          plan={
+            (summary as import("../types").ModelsSummary).plan || {
+              models: [],
+              score: {},
+              search_budget: 0,
+            }
+          }
+          edits={edits}
+          setEdits={setEdits}
+        />
       )}
       <details className="review-details">
         <summary>查看 Reviewer 结论与证据</summary>
@@ -337,7 +356,9 @@ function ScreeningDecision({
 }) {
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const recoverable = (summary.excluded || []).filter((item) => item.recoverable);
-  const selected = new Set(((edits.restore_features as RestoreFeature[]) || []).map((item) => item.column));
+  const selected = new Set(
+    ((edits.restore_features as RestoreFeature[]) || []).map((item) => item.column),
+  );
   const toggle = (item: import("../types").ScreeningExcluded, checked: boolean) => {
     const current = (edits.restore_features as RestoreFeature[]) || [];
     const reason = (reasons[item.column] || "").trim();
@@ -541,7 +562,9 @@ function BinningDecision({
                             <strong>{row.bin}</strong>
                           </td>
                           <td>{formatNumber(row.count)}</td>
-                          <td>{formatPercent(stats.count ? Number(row.count) / stats.count : null)}</td>
+                          <td>
+                            {formatPercent(stats.count ? Number(row.count) / stats.count : null)}
+                          </td>
                           <td>{formatNumber(row.good)}</td>
                           <td>{formatNumber(row.bad)}</td>
                           <td>
@@ -650,7 +673,10 @@ function ModelDecision({
 }) {
   const selected = (edits.models as string[]) || [];
   const toggle = (name: string, checked: boolean) =>
-    setEdits({ ...edits, models: checked ? [...selected, name] : selected.filter((v) => v !== name) });
+    setEdits({
+      ...edits,
+      models: checked ? [...selected, name] : selected.filter((v) => v !== name),
+    });
   const score = (edits.score as import("../types").ScoreConfig) || plan.score || {};
   const scoreChange = (key: string, value: number) =>
     setEdits({ ...edits, score: { ...score, [key]: value } });

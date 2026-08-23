@@ -57,9 +57,10 @@
 .stage-line h2 {
   max-width: 760px;
   color: var(--paper);
+  font-family: var(--display);
   font-size: clamp(24px, 3vw, 40px);
-  font-weight: 800;
-  letter-spacing: -0.04em;
+  font-weight: 600;
+  letter-spacing: -0.015em;
   margin: 6px 0 8px;
 }
 
@@ -99,7 +100,7 @@
   padding: 13px 15px;
   border: 1px solid var(--blue-subtle);
   border-radius: var(--radius-xl);
-  background: #f8fbff;
+  background: var(--blue-soft);
 }
 
 .progress-block > div {
@@ -107,7 +108,7 @@
   justify-content: space-between;
   font-size: 11px;
   font-weight: 700;
-  color: #1e3a8a;
+  color: var(--blue-text);
 }
 
 .progress-block progress {
@@ -162,7 +163,7 @@
 }
 
 .summary-cell:hover {
-  background: #f8fbff;
+  background: var(--blue-soft);
 }
 
 .summary-cell:first-child {
@@ -184,9 +185,10 @@
 
 .summary-cell strong {
   display: block;
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   margin-top: 6px;
   white-space: nowrap;
   overflow: hidden;
@@ -223,7 +225,7 @@
 }
 
 .subnav button:hover {
-  background: #f4f4f5;
+  background: #f0eee8;
 }
 
 .subnav button[aria-selected="true"] {
@@ -282,7 +284,7 @@
   padding: var(--space-4);
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
-  background: #fafafa;
+  background: var(--ground);
 }
 
 .decision-actions {
@@ -613,7 +615,7 @@
 }
 
 .bin-list {
-  background: #fafafa;
+  background: var(--ground);
   border-right: 1px solid var(--line);
   max-height: 390px;
   overflow: auto;
@@ -735,7 +737,7 @@
 .bin-table th {
   position: sticky;
   top: 0;
-  background: #f4f4f5;
+  background: #f0eee8;
   z-index: 1;
 }
 
@@ -819,7 +821,7 @@
 
 .model-grid.head {
   min-height: 36px;
-  background: #f4f4f5;
+  background: #f0eee8;
   border-top: 1px solid var(--line);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   font-weight: 600;
@@ -835,7 +837,7 @@
 }
 
 .model-grid.row:hover {
-  background: #f8fbff;
+  background: var(--blue-soft);
 }
 
 .model-grid > span {
@@ -1008,7 +1010,7 @@
   gap: 15px;
   border: 1px solid var(--blue-subtle);
   border-radius: var(--radius-xl);
-  background: #f8fbff;
+  background: var(--blue-soft);
   padding: var(--space-5);
 }
 
@@ -1043,7 +1045,7 @@
   padding: 15px var(--space-4);
   border: 1px solid var(--line);
   border-radius: 15px;
-  background: #fafafa;
+  background: var(--ground);
 }
 
 .event-preview h3 {
@@ -1123,28 +1125,32 @@
 .welcome {
   max-width: none;
   min-height: 0;
-  padding: 28px 32px;
+  padding: 32px 36px;
+  border: 1px solid var(--line);
   border-radius: var(--radius-2xl);
-  background: var(--blue);
-  color: var(--paper);
-  box-shadow: var(--shadow-blue);
+  background:
+    radial-gradient(120% 160% at 8% -20%, rgba(43, 63, 214, 0.1), transparent 46%),
+    radial-gradient(90% 130% at 96% 8%, rgba(180, 83, 9, 0.07), transparent 42%), var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
 
 .welcome .eyebrow {
-  color: var(--blue-subtle);
+  color: var(--blue-text);
 }
 
 .welcome h2 {
-  font-size: clamp(26px, 3vw, 44px);
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  margin: 6px 0 8px;
+  font-family: var(--display);
+  font-size: clamp(28px, 3vw, 46px);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin: 8px 0 10px;
 }
 
 .welcome > p {
   max-width: 720px;
-  color: var(--blue-subtle);
+  color: var(--muted);
   font-size: 13px;
   margin: 0;
 }
@@ -1152,14 +1158,14 @@
 .welcome-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  border-top: 1px solid rgba(255, 255, 255, 0.32);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.32);
-  margin: 18px 0;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  margin: 20px 0;
 }
 
 .welcome-grid > div {
-  padding: 12px var(--space-4);
-  border-right: 1px solid rgba(255, 255, 255, 0.22);
+  padding: 14px var(--space-4);
+  border-right: 1px solid var(--line);
 }
 
 .welcome-grid > div:last-child {
@@ -1167,8 +1173,8 @@
 }
 
 .welcome-grid b {
-  font: 10px var(--mono);
-  color: var(--paper);
+  font: 500 10px var(--mono);
+  color: var(--blue-text);
 }
 
 .welcome-grid strong,
@@ -1183,21 +1189,17 @@
 
 .welcome-grid span {
   font-size: 10px;
-  color: var(--blue-subtle);
-  line-height: 1.4;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .welcome .button.primary {
-  background: var(--paper);
-  border-color: var(--paper);
-  color: var(--blue);
-  box-shadow: none;
   min-height: 38px;
   padding: 0 18px;
 }
 
 .welcome .button.primary:hover {
-  background: var(--blue-soft);
+  background: var(--blue-hover);
 }
 
 /* Workspace setup */
@@ -1314,7 +1316,7 @@
 .settings-nav {
   padding: var(--space-3) 8px;
   border-right: 1px solid var(--line);
-  background: #fafafa;
+  background: var(--ground);
   overflow: auto;
 }
 
@@ -1374,7 +1376,7 @@
 .provider-profiles {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: #fafafa;
+  background: var(--ground);
   padding: 9px;
   margin-bottom: 13px;
 }
@@ -1410,7 +1412,7 @@
 
 .provider-profile:hover {
   border-color: var(--focus-color);
-  background: #f8fbff;
+  background: var(--blue-soft);
 }
 
 .provider-profile.active {

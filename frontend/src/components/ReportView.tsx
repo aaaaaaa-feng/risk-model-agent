@@ -62,7 +62,10 @@ export function ReportView({ project, run, notify }: Props) {
       const form = new FormData();
       form.append("file", file);
       form.append("kind", "score_input");
-      const uploaded = await api.upload<{ asset: { id: string } }>(`/projects/${project.id}/data-assets`, form);
+      const uploaded = await api.upload<{ asset: { id: string } }>(
+        `/projects/${project.id}/data-assets`,
+        form,
+      );
       const result = await api.post<{ score_job: ScoreJob }>("/score-jobs", {
         model_version_id: modelId,
         input_asset_id: uploaded.asset.id,
@@ -137,7 +140,10 @@ export function ReportView({ project, run, notify }: Props) {
             <span>QUALITY NOTICE</span>
             <strong>需关注排序</strong>
           </div>
-          <p>{(summary.quality_notes as string[] | undefined)?.[0] || "Test 等频分箱未达到绝对排序。"}</p>
+          <p>
+            {(summary.quality_notes as string[] | undefined)?.[0] ||
+              "Test 等频分箱未达到绝对排序。"}
+          </p>
         </div>
       )}
       <section className="report-section">
@@ -319,7 +325,12 @@ export function ReportView({ project, run, notify }: Props) {
 }
 
 function Metric({ label, value }: { label: string; value: unknown }) {
-  const rendered = value == null ? "—" : typeof value === "string" || typeof value === "number" ? String(value) : "—";
+  const rendered =
+    value == null
+      ? "—"
+      : typeof value === "string" || typeof value === "number"
+        ? String(value)
+        : "—";
   return (
     <div className="summary-cell">
       <span>{label}</span>

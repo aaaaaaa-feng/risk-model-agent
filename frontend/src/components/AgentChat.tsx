@@ -56,9 +56,12 @@ export function AgentChat({
     setBusy(true);
     setDraft("");
     try {
-      const result = await api.post<MessagePostResponse>(`/projects/${projectId}/conversation/messages`, {
-        content,
-      });
+      const result = await api.post<MessagePostResponse>(
+        `/projects/${projectId}/conversation/messages`,
+        {
+          content,
+        },
+      );
       setMessages((current) => [...current, result.user_message]);
       const source = new EventSource(
         eventUrl(
@@ -122,9 +125,7 @@ export function AgentChat({
                 A
               </span>
               <div className="chat-bubble">
-                <span className="chat-meta">
-                  {message.agent?.replace("_", " ") || "AGENT"}
-                </span>
+                <span className="chat-meta">{message.agent?.replace("_", " ") || "AGENT"}</span>
                 <Markdown>{message.content}</Markdown>
                 <div className="message-feedback">
                   <button

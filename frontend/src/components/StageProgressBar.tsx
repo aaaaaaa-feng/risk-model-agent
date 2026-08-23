@@ -12,7 +12,14 @@ export function StageProgressBar({ run }: { run: Run | null }) {
     <nav className="stage-progress" aria-label="业务流程阶段">
       <ol>
         {BUSINESS_STAGES.map((group, index) => {
-          const state = current < 0 ? "todo" : index < current ? "done" : index === current ? "current" : "todo";
+          const state =
+            current < 0
+              ? "todo"
+              : index < current
+                ? "done"
+                : index === current
+                  ? "current"
+                  : "todo";
           const subTip = group.substages.map(stageLabel).join(" / ");
           return (
             <li

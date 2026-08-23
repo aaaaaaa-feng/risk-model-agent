@@ -673,7 +673,13 @@ interface NotebookExecuteResponse {
   };
 }
 
-function NotebookEditor({ notebook, document, setDocument, onRefresh, notify }: NotebookEditorProps) {
+function NotebookEditor({
+  notebook,
+  document,
+  setDocument,
+  onRefresh,
+  notify,
+}: NotebookEditorProps) {
   const [busy, setBusy] = useState("");
   const [output, setOutput] = useState("joined_output.csv");
   const [label, setLabel] = useState("Notebook 关联结果");
@@ -692,9 +698,12 @@ function NotebookEditor({ notebook, document, setDocument, onRefresh, notify }: 
     setBusy(`cell-${index}`);
     try {
       await save();
-      const result = await api.post<NotebookExecuteResponse>(`/notebooks/${notebook.id}/execute-cell`, {
-        cell_index: index,
-      });
+      const result = await api.post<NotebookExecuteResponse>(
+        `/notebooks/${notebook.id}/execute-cell`,
+        {
+          cell_index: index,
+        },
+      );
       const copy = structuredClone(document);
       copy.cells[index].outputs = result.execution.outputs;
       copy.cells[index].execution_count = result.execution.execution_count;
@@ -758,7 +767,12 @@ function NotebookEditor({ notebook, document, setDocument, onRefresh, notify }: 
               {cell.outputs && cell.outputs.length > 0 && (
                 <pre className="cell-output">
                   {cell.outputs
-                    .map((item) => (item as NotebookOutput).text || (item as NotebookOutput).evalue || JSON.stringify((item as NotebookOutput).data || {}))
+                    .map(
+                      (item) =>
+                        (item as NotebookOutput).text ||
+                        (item as NotebookOutput).evalue ||
+                        JSON.stringify((item as NotebookOutput).data || {}),
+                    )
                     .join("\n")}
                 </pre>
               )}

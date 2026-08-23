@@ -16,12 +16,13 @@
   transition:
     background 0.2s ease,
     box-shadow 0.2s ease,
-    border-color 0.2s ease;
+    border-color 0.2s ease,
+    transform 0.15s ease;
 }
 
 .button:hover:not(:disabled) {
-  background: #f4f4f5;
-  border-color: #c7d2fe;
+  background: #f0eee8;
+  border-color: var(--line-blue);
   box-shadow: var(--shadow-md);
 }
 
@@ -34,6 +35,12 @@
 
 .button.primary:hover:not(:disabled) {
   background: var(--blue-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 9px 18px rgba(43, 63, 214, 0.26);
+}
+
+.button.primary:active:not(:disabled) {
+  transform: translateY(0);
 }
 
 .button.secondary {
@@ -144,7 +151,7 @@
 }
 
 .tag.ok {
-  border-color: #bbf7d0;
+  border-color: #bfe6cc;
   background: var(--green-soft);
   color: var(--green-text);
 }
@@ -294,7 +301,7 @@ td {
 }
 
 th {
-  background: #f4f4f5;
+  background: #f0eee8;
   color: #52525b;
   font-size: 10px;
   font-weight: 800;
@@ -308,7 +315,7 @@ tbody tr {
 }
 
 tbody tr:hover {
-  background: #f8fbff;
+  background: var(--blue-soft);
 }
 
 tbody tr:last-child td {
@@ -481,7 +488,7 @@ tbody tr:last-child td {
   line-height: 1.5;
   padding: 10px 12px;
   background: var(--amber-soft);
-  border-left: 4px solid #f59e0b;
+  border-left: 4px solid var(--amber);
   border-radius: var(--radius-lg);
   color: #6b5310;
   margin: 10px 0;

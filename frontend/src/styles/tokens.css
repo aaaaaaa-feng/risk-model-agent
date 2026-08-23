@@ -3,48 +3,55 @@
   font-synthesis: none;
   line-break: strict;
 
+  /*
+   * 设计方向：暖纸 × 墨黑 × 钴蓝的「编辑级精密工作台」。
+   * 暖调中性色承载长时间阅读，单一钴蓝作为唯一动作色，
+   * 琥珀只留给「等待确认」，避免多色竞争注意力。
+   */
+
   /* Canvas & surfaces */
-  --paper: #ffffff;
-  --ground: #f3f4f6;
-  --panel: rgba(255, 255, 255, 0.76);
+  --paper: #fdfcf9;
+  --ground: #f4f2ed;
+  --panel: rgba(253, 252, 249, 0.78);
 
   /* Text */
-  --ink: #18181b;
-  --muted: #71717a;
-  --quiet: #a1a1aa;
+  --ink: #1b1a16;
+  --muted: #6d6a61;
+  --quiet: #a3a099;
 
   /* Borders */
-  --line: #e4e4e7;
-  --line-strong: #d4d4d8;
-  --line-blue: #bfdbfe;
+  --line: #e5e2da;
+  --line-strong: #d3cfc5;
+  --line-blue: #c3c9f2;
 
   /* Brand */
-  --black: #18181b;
-  --blue: #1a56db;
-  --blue-hover: #1648b8;
-  --blue-soft: #eff6ff;
-  --blue-text: #1d4ed8;
-  --blue-subtle: #dbeafe;
+  --black: #1b1a16;
+  --blue: #2b3fd6;
+  --blue-hover: #2133b4;
+  --blue-soft: #eef0fc;
+  --blue-text: #2b3fd6;
+  --blue-subtle: #d9ddf7;
 
   /* Status */
-  --green: #16a34a;
-  --green-soft: #ecfdf3;
-  --green-text: #15803d;
+  --green: #15803d;
+  --green-soft: #ecf7ef;
+  --green-text: #14652f;
   --amber: #b45309;
-  --amber-soft: #fff7ed;
-  --amber-text: #9a3412;
-  --amber-border: #fed7aa;
-  --red: #dc2626;
-  --red-soft: #fef2f2;
-  --red-text: #b91c1c;
-  --red-border: #fca5a5;
+  --amber-soft: #fdf3e7;
+  --amber-text: #92400e;
+  --amber-border: #f0d3ae;
+  --red: #c62f21;
+  --red-soft: #fdf0ee;
+  --red-text: #a3271b;
+  --red-border: #f0b3ab;
 
   /* Focus */
-  --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.55);
-  --focus-color: #2563eb;
+  --focus-ring: 0 0 0 3px rgba(43, 63, 214, 0.5);
+  --focus-color: #2b3fd6;
 
   /* Typography */
-  --body: "Plus Jakarta Sans", "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --body: "Plus Jakarta Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --display: "Fraunces", "Songti SC", "SimSun", serif;
   --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
 
   /* Spacing scale */
@@ -64,13 +71,13 @@
   --radius-2xl: 20px;
   --radius-full: 999px;
 
-  /* Shadows */
-  --shadow-xs: 0 2px 6px rgba(24, 24, 27, 0.03);
-  --shadow-sm: 0 4px 12px rgba(24, 24, 27, 0.04);
-  --shadow-md: 0 8px 22px rgba(24, 24, 27, 0.05);
-  --shadow-lg: 0 12px 30px rgba(24, 24, 27, 0.06);
-  --shadow-xl: 0 20px 60px rgba(24, 24, 27, 0.12);
-  --shadow-blue: 0 7px 15px rgba(26, 86, 219, 0.2);
+  /* Shadows（暖调投影，与纸面底色协调） */
+  --shadow-xs: 0 1px 4px rgba(60, 54, 40, 0.05);
+  --shadow-sm: 0 3px 10px rgba(60, 54, 40, 0.06);
+  --shadow-md: 0 7px 20px rgba(60, 54, 40, 0.07);
+  --shadow-lg: 0 12px 28px rgba(60, 54, 40, 0.08);
+  --shadow-xl: 0 20px 56px rgba(60, 54, 40, 0.14);
+  --shadow-blue: 0 6px 14px rgba(43, 63, 214, 0.22);
 
   /* Z-index scale */
   --z-modal-backdrop: 50;

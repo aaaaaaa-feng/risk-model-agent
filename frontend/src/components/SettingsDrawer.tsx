@@ -105,7 +105,8 @@ export function SettingsDrawer({
 
   if (!open || !settings) return null;
   const profiles = settings.profiles || [];
-  const change = (key: string, value: unknown) => setForm((current) => ({ ...current, [key]: value }));
+  const change = (key: string, value: unknown) =>
+    setForm((current) => ({ ...current, [key]: value }));
   const selectProfile = (profile: ProviderProfile) => {
     setForm((current) => ({ ...current, ...profile, profile_id: profile.id }));
     setApiKey("");
@@ -361,9 +362,7 @@ export function SettingsDrawer({
                       if (event.target.value) setClearKey(false);
                     }}
                     disabled={form.secret_storage === "environment"}
-                    placeholder={
-                      form.api_key_configured ? "已配置；留空表示保持不变" : "输入密钥"
-                    }
+                    placeholder={form.api_key_configured ? "已配置；留空表示保持不变" : "输入密钥"}
                   />
                 </label>
                 {form.secret_storage === "environment" ? (
@@ -442,7 +441,9 @@ export function SettingsDrawer({
                       min={1}
                       max={16}
                       value={(form.max_parallel_models as number) || 1}
-                      onChange={(event) => change("max_parallel_models", Number(event.target.value))}
+                      onChange={(event) =>
+                        change("max_parallel_models", Number(event.target.value))
+                      }
                     />
                   </label>
                 </div>
@@ -494,7 +495,9 @@ export function SettingsDrawer({
                       type="number"
                       min={0}
                       value={(form.monthly_token_budget as number) || 0}
-                      onChange={(event) => change("monthly_token_budget", Number(event.target.value))}
+                      onChange={(event) =>
+                        change("monthly_token_budget", Number(event.target.value))
+                      }
                     />
                   </label>
                 </div>

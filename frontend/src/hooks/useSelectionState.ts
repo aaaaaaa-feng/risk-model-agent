@@ -4,8 +4,8 @@ import type { Project } from "../types";
 export type View = "workbench" | "report" | "history";
 
 export function useSelectionState(projects: Project[]) {
-  const [selectedId, setSelectedId] = useState<string | null>(
-    () => localStorage.getItem("risk-agent-project"),
+  const [selectedId, setSelectedId] = useState<string | null>(() =>
+    localStorage.getItem("risk-agent-project"),
   );
   const [runId, setRunId] = useState<string | null>(null);
   const [view, setView] = useState<View>("workbench");
