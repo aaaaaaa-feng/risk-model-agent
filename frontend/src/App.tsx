@@ -126,7 +126,6 @@ export function App() {
       setSelectedId(value.project.id);
       setCreateOpen(false);
       setDataMode(true);
-      notify("项目已创建；可开始导入本地数据");
     } catch (error) {
       notify(errorMessage(error), true);
     } finally {
@@ -146,7 +145,6 @@ export function App() {
       setSelectedId(value.project.id);
       setCreateOpen(false);
       setDataMode(true);
-      notify("合成多表项目已就绪；三个 Y 可分别排队建模");
     } catch (error) {
       notify(errorMessage(error), true);
     } finally {
@@ -165,7 +163,6 @@ export function App() {
       runRef.current = value.run.id;
       setRunId(value.run.id);
       setView("workbench");
-      notify("新 Run 已进入队列");
     } catch (error) {
       notify(errorMessage(error), true);
     }

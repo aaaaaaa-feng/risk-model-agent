@@ -198,7 +198,6 @@ export function SettingsDrawer({
       await api.post("/backups");
       const result = await api.get<BackupsResponse>("/backups");
       setBackups(result.backups);
-      notify("本地数据库备份已创建");
     } catch (error) {
       notify(errorMessage(error), true);
     } finally {
@@ -209,7 +208,6 @@ export function SettingsDrawer({
   const reset = async () => {
     if (!window.confirm("恢复默认设置？项目和数据不会被删除，API Key 默认保留。")) return;
     await api.post("/system/reset-settings", { confirm: true, clear_api_key: false });
-    notify("已恢复默认设置");
     onChanged();
   };
 

@@ -68,7 +68,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         form.append("kind", uploadKind);
         await api.upload(`/projects/${detail.project.id}/data-assets`, form);
       }
-      notify(`${files.length} 个文件已保存在本机`);
       await onRefresh();
     } catch (error) {
       notify(errorMessage(error), true);
@@ -89,7 +88,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
     setBusy(assetId);
     try {
       await api.post(`/data-assets/${assetId}/materialize`);
-      notify("已生成不可变数据版本");
       await onRefresh();
       setSection("target");
     } catch (error) {
@@ -157,7 +155,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         target_columns: [],
         customer_key: null,
       });
-      notify("关联完成；粒度、重复、膨胀和血缘检查已通过");
       await onRefresh();
       setSection("target");
     } catch (error) {
@@ -197,7 +194,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         dataset_version_id: datasetId,
         target_columns: targets,
       });
-      notify("多个 Y 已建立独立顺序任务");
       setTargets([]);
       await onRefresh();
     } catch (error) {
@@ -218,7 +214,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         });
         first ||= result.run.id;
       }
-      notify(`${selectedTasks.length} 个 Y 已进入本地顺序队列`);
       await onRefresh();
       if (first) onRunsStarted(first);
     } catch (error) {
@@ -686,7 +681,6 @@ function NotebookEditor({
     setBusy("save");
     try {
       await api.put(`/notebooks/${notebook.id}`, { notebook: document });
-      notify("Notebook 已保存");
     } catch (e) {
       notify(errorMessage(e), true);
     } finally {
@@ -707,10 +701,9 @@ function NotebookEditor({
       copy.cells[index].outputs = result.execution.outputs;
       copy.cells[index].execution_count = result.execution.execution_count;
       setDocument(copy);
-      notify(
-        result.execution.status === "succeeded" ? "单元格执行完成" : "单元格执行失败",
-        result.execution.status !== "succeeded",
-      );
+      if (result.execution.status !== "succeeded") {
+        notify("单元格执行失败", true);
+      }
     } catch (e) {
       notify(errorMessage(e), true);
     } finally {
@@ -726,7 +719,6 @@ function NotebookEditor({
         parent_dataset_version_id: notebook.dataset_version_id || null,
         expected_grain: "same_or_fewer_rows",
       });
-      notify("Notebook 输出已通过校验并生成数据版本");
       await onRefresh();
     } catch (e) {
       notify(errorMessage(e), true);

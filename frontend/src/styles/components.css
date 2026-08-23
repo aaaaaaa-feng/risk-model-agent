@@ -448,12 +448,12 @@ tbody tr:last-child td {
   justify-content: flex-end;
 }
 
-/* Toast */
+/* Toast — 贴视口右上角,不再绑死对话栏宽度 */
 .toast {
   position: fixed;
   z-index: var(--z-toast);
   top: 22px;
-  right: 310px;
+  right: var(--space-5);
   max-width: 420px;
   background: var(--green);
   color: var(--paper);

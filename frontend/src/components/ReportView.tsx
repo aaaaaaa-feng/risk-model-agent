@@ -71,7 +71,6 @@ export function ReportView({ project, run, notify }: Props) {
         input_asset_id: uploaded.asset.id,
       });
       setScoreJob(result.score_job);
-      notify(`已为 ${result.score_job.rows.toLocaleString()} 条样本打分`);
     } catch (error) {
       notify(errorMessage(error), true);
     } finally {

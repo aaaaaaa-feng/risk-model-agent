@@ -48,7 +48,6 @@ export function WorkspaceSetup({ workspace, onSelected, onClose, notify }: Props
         path: path.trim(),
       });
       onSelected(result.workspace);
-      notify("工作文件夹已设置；后续项目会按项目目录保存");
     } catch (error) {
       notify(error instanceof Error ? error.message : "工作文件夹设置失败", true);
     } finally {

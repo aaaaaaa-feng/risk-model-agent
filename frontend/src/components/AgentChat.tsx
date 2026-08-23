@@ -95,7 +95,6 @@ export function AgentChat({
     try {
       await api.post(`/conversation-messages/${messageId}/feedback`, { rating });
       setPressed((current) => ({ ...current, [messageId]: rating }));
-      notify(rating === "up" ? "已记录有帮助" : "已记录需要改进");
     } catch (error) {
       notify(errorMessage(error), true);
     }

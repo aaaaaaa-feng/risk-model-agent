@@ -1134,7 +1134,7 @@ body.col-resizing .chat-rail {
 
 .chat-form {
   display: grid;
-  grid-template-columns: 1fr 74px;
+  grid-template-columns: 1fr auto;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   overflow: hidden;
@@ -1158,6 +1158,7 @@ body.col-resizing .chat-rail {
   color: var(--paper);
   font-weight: 800;
   cursor: pointer;
+  padding: 0 var(--space-4);
 }
 
 .chat-form button:disabled {

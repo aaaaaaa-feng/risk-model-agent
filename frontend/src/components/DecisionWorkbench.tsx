@@ -79,7 +79,6 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
         payloadEdits.manual_specs = { [manualColumn]: JSON.parse(manualSpec) };
       }
       await api.post(`/runs/${run.id}/decisions/${decision.id}`, { approved, edits: payloadEdits });
-      notify(approved ? "已确认；将从当前 checkpoint 继续" : "Run 已按你的决定安全停止");
       onResolved();
     } catch (error) {
       notify(error instanceof Error ? error.message : "提交失败", true);
