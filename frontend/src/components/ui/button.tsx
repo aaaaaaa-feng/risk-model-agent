@@ -4,26 +4,33 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
+/*
+ * 视觉对齐"冷峻座舱":控件圆角 4px、字重 600、默认高 42px / 紧凑 34px;
+ * 主按钮墨色行动层(hover --black-hover),禁用态走 --disabled-* token。
+ */
 const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium transition-colors outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring/70 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold transition-colors outline-none disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground shadow-sm shadow-black/5 hover:bg-primary/90",
+        default:
+          "border border-primary bg-primary text-primary-foreground hover:bg-[var(--black-hover)] hover:border-[var(--black-hover)] disabled:bg-[var(--disabled-bg)] disabled:border-[var(--disabled-bg)] disabled:text-[var(--disabled-text)]",
         destructive:
-          "bg-destructive text-destructive-foreground shadow-sm shadow-black/5 hover:bg-destructive/90",
+          "border border-destructive bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:bg-[var(--disabled-bg)] disabled:border-[var(--disabled-bg)] disabled:text-[var(--disabled-text)]",
         outline:
-          "border border-input bg-background shadow-sm shadow-black/5 hover:bg-accent hover:text-accent-foreground",
+          "border border-[var(--line)] bg-background text-foreground hover:bg-[var(--ground-hover)] hover:border-[var(--line-blue)] disabled:bg-[var(--disabled-bg)] disabled:border-[var(--disabled-bg)] disabled:text-[var(--disabled-text)]",
         secondary:
-          "bg-secondary text-secondary-foreground shadow-sm shadow-black/5 hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+          "border border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80 disabled:bg-[var(--disabled-bg)] disabled:text-[var(--disabled-text)]",
+        ghost: "hover:bg-accent hover:text-accent-foreground disabled:opacity-50",
+        link: "text-[var(--blue)] font-bold underline-offset-4 hover:underline disabled:text-[var(--quiet)]",
+        destructiveOutline:
+          "border border-[var(--red-border)] bg-background text-[var(--red-text)] hover:bg-[var(--red-soft)] disabled:opacity-50",
       },
       size: {
-        default: "h-9 px-4 py-2",
-        sm: "h-8 rounded-lg px-3 text-xs",
-        lg: "h-10 rounded-lg px-8",
-        icon: "h-9 w-9",
+        default: "h-[42px] px-[15px]",
+        sm: "h-[34px] px-3 text-[11px]",
+        lg: "h-10 px-8",
+        icon: "h-10 w-10 rounded-sm",
       },
     },
     defaultVariants: {

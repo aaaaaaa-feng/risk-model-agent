@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { Button } from "@/components/ui/button";
 import type { WorkspaceStatus } from "../types";
 
 interface Props {
@@ -87,17 +88,12 @@ export function WorkspaceSetup({ workspace, onSelected, onClose, notify }: Props
             />
           </label>
           <div className="workspace-setup-actions">
-            <button
-              type="button"
-              className="button secondary"
-              onClick={pick}
-              disabled={busy !== ""}
-            >
+            <Button type="button" variant="outline" onClick={pick} disabled={busy !== ""}>
               {busy === "pick" ? "正在打开…" : "打开系统选择器"}
-            </button>
-            <button type="button" className="button primary" onClick={save} disabled={busy !== ""}>
+            </Button>
+            <Button type="button" onClick={save} disabled={busy !== ""}>
               {busy === "save" ? "保存中…" : "使用这个文件夹"}
-            </button>
+            </Button>
           </div>
           {workspace.synced_path_warning && (
             <p className="inline-warning">
@@ -108,9 +104,14 @@ export function WorkspaceSetup({ workspace, onSelected, onClose, notify }: Props
             应用只在系统应用目录保留一个工作区指针，用于下次启动找到这里；项目数据本身不会上传到云端。
           </p>
           {!mandatory && onClose && (
-            <button type="button" className="text-button workspace-later" onClick={onClose}>
+            <Button
+              type="button"
+              variant="link"
+              className="workspace-later"
+              onClick={onClose}
+            >
               暂不更换，继续使用当前目录
-            </button>
+            </Button>
           )}
         </div>
       </section>

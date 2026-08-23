@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { formatMetric, formatNumber, formatPercent } from "../lib/format";
 import { confirmLabel, decisionStageName, monotonicLabel, reviewLabel } from "../lib/labels";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import type { Decision, Run } from "../types";
 
 interface Props {
@@ -181,16 +183,12 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
         <pre>{JSON.stringify(review.evidence || {}, null, 2)}</pre>
       </details>
       <div className="decision-actions">
-        <button
-          className="button secondary danger-outline"
-          disabled={busy}
-          onClick={() => confirm(false)}
-        >
+        <Button variant="destructiveOutline" disabled={busy} onClick={() => confirm(false)}>
           不批准并停止本 Run
-        </button>
-        <button className="button primary" disabled={busy} onClick={() => confirm(true)}>
+        </Button>
+        <Button disabled={busy} onClick={() => confirm(true)}>
           {busy ? "提交中…" : confirmLabel[decision.kind] || "确认并继续"}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -508,9 +506,9 @@ function BinningDecision({
                   <h3>{manualColumn} · 分箱结果</h3>
                   <p>当前表格是已生成的分箱逻辑；如需调整，在下方编辑边界/类别组后确认。</p>
                 </div>
-                <span className={`status ${sample.monotonic ? "succeeded" : "blocked"}`}>
+                <Badge variant={sample.monotonic ? "ok" : "attention"} className="mt-[3px]">
                   {monotonicLabel(stats.rates, sample.monotonic)}
-                </span>
+                </Badge>
               </div>
               <div className="summary-grid five bin-metric-grid">
                 <Metric label="箱数" value={formatNumber(stats.rows.length)} />
@@ -687,14 +685,14 @@ function ModelDecision({
           <h3>候选模型执行矩阵</h3>
           <p>资源预算只顺序运行推荐组合，不会默认全部跑。</p>
         </div>
-        <button
-          className="text-button"
+        <Button
+          variant="link"
           onClick={() =>
             setEdits({ ...edits, models: plan.models, search_budget: plan.search_budget ?? 0 })
           }
         >
           恢复 Agent 推荐
-        </button>
+        </Button>
       </div>
       <div className="model-grid head">
         <span>运行</span>

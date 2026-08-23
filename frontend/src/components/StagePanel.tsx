@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { reviewLabel, statusLabel } from "../lib/labels";
+import { Badge, statusVariant } from "@/components/ui/badge";
 import {
   BUSINESS_STAGES,
   businessStageIndex,
@@ -37,7 +38,7 @@ export function StagePanel({
       <section className="stage-panel idle" aria-label="当前运行阶段">
         <div className="panel-status">
           <span className="panel-label">RUN STATUS</span>
-          <b className="rail-status idle">未启动</b>
+          <Badge variant="muted">未启动</Badge>
         </div>
         <p className="panel-hint">
           导入本地表、完成关联并创建 Y 任务后，这里会持续显示 Agent、工具与 Reviewer 状态。
@@ -59,7 +60,7 @@ export function StagePanel({
       <div className="panel-main">
         <div className="panel-status">
           <span className="panel-label">RUN STATUS</span>
-          <b className={`rail-status ${run.status}`}>{statusLabel(run.status)}</b>
+          <Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge>
         </div>
         <div className="panel-stage">
           <span className="panel-label">当前阶段</span>

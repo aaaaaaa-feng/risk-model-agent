@@ -1,4 +1,6 @@
 import { runStageLabel } from "../lib/labels";
+import { Badge, statusVariant } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import type { Run, TargetTask } from "../types";
 
 export function HistoryView({
@@ -51,15 +53,15 @@ export function HistoryView({
                   </td>
                   <td>{target.get(run.target_task_id) || "—"}</td>
                   <td>
-                    <span className={`status ${run.status}`}>{run.status}</span>
+                    <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
                   </td>
                   <td>{runStageLabel[run.stage]}</td>
                   <td>{Math.round((run.progress || 0) * 100)}%</td>
                   <td>{new Date(run.updated_at).toLocaleString()}</td>
                   <td>
-                    <button className="text-button" onClick={() => onSelect(run.id)}>
+                    <Button variant="link" size="sm" onClick={() => onSelect(run.id)}>
                       查看
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}

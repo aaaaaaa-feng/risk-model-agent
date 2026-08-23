@@ -1,5 +1,6 @@
 import { FormEvent, useRef, useState } from "react";
 import { Dialog } from "./ui/Dialog";
+import { Button } from "@/components/ui/button";
 
 interface Props {
   open: boolean;
@@ -35,9 +36,15 @@ export function NewProjectDialog({ open, busy, onClose, onCreate, onCreateDemo }
         <div>
           <h2 id="new-project-title">创建建模项目</h2>
         </div>
-        <button className="icon-button" onClick={onClose} aria-label="关闭">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-[var(--paper)] hover:bg-[var(--on-blue-fill)] hover:text-[var(--paper)]"
+          onClick={onClose}
+          aria-label="关闭"
+        >
           ×
-        </button>
+        </Button>
       </div>
       <form onSubmit={submit} className="form-stack">
         <label>
@@ -76,21 +83,21 @@ export function NewProjectDialog({ open, busy, onClose, onCreate, onCreateDemo }
           />
         </label>
         <p className="boundary-note">项目创建不会调用 LLM；原始数据只会写入本机应用数据目录。</p>
-        <button
+        <Button
           type="button"
-          className="button demo-button"
+          className="w-full"
           disabled={busy}
           onClick={() => onCreateDemo(mode)}
         >
           用固定种子合成多表体验完整流程
-        </button>
+        </Button>
         <div className="modal-actions">
-          <button type="button" className="button secondary" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={onClose}>
             取消
-          </button>
-          <button className="button primary" disabled={busy || !name.trim()}>
+          </Button>
+          <Button disabled={busy || !name.trim()}>
             {busy ? "创建中…" : "创建项目"}
-          </button>
+          </Button>
         </div>
       </form>
     </Dialog>

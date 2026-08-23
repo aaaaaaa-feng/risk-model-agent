@@ -1,5 +1,8 @@
 import { formatMetric } from "../lib/format";
 import { runStageLabel } from "../lib/labels";
+import { Badge, statusVariant } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import type { ModelResult } from "../types/model";
 import type { Run, RunEvent } from "../types";
 
@@ -28,11 +31,7 @@ export function RunWorkbench({
           <p>其他 Y 任务不受影响；错误码和最后证据保留在事件记录中。</p>
           <strong>{run.error || "USER_REJECTED"}</strong>
           <p>{events.at(-1)?.summary}</p>
-          {onRetry && (
-            <button className="button primary" onClick={onRetry}>
-              基于同一 Y 新建 Run
-            </button>
-          )}
+          {onRetry && <Button onClick={onRetry}>基于同一 Y 新建 Run</Button>}
         </div>
       </div>
     );
@@ -53,7 +52,10 @@ export function RunWorkbench({
           <span>整体进度</span>
           <b>{Math.round((run.progress || 0) * 100)}%</b>
         </div>
-        <progress max={1} value={run.progress || 0} />
+        <Progress
+          className="mt-[5px] h-[9px] rounded-full bg-[var(--blue-subtle)]"
+          value={Math.round((run.progress || 0) * 100)}
+        />
       </div>
       {champion ? (
         <>
@@ -88,7 +90,7 @@ export function RunWorkbench({
                       <strong>{item.candidate}</strong>
                     </td>
                     <td>
-                      <span className={`status ${item.status}`}>{item.status}</span>
+                      <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
                     </td>
                     <td>{item.calibration || "—"}</td>
                     <td>{formatMetric(item.test_metrics?.roc_auc)}</td>

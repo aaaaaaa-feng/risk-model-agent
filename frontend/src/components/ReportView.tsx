@@ -1,6 +1,8 @@
 import { ChangeEvent, useEffect, useState } from "react";
 import { api } from "../api";
 import { errorMessage, formatMetric, formatPercent } from "../lib/format";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { Project, Run } from "../types";
 
 interface Props {
@@ -111,17 +113,18 @@ export function ReportView({ project, run, notify }: Props) {
           <p>管理摘要与专业详情来自同一份事实数据 · Schema {report.schema_version}。</p>
         </div>
         <div className="report-actions">
-          <a className="button secondary" href={`/api/v1/reports/${run.id}/excel`}>
-            导出 Excel
-          </a>
-          <a
-            className="button secondary"
-            target="_blank"
-            rel="noreferrer"
-            href={`/api/v1/reports/${run.id}/html`}
-          >
-            打开单页 HTML
-          </a>
+          <Button variant="outline" asChild>
+            <a href={`/api/v1/reports/${run.id}/excel`}>导出 Excel</a>
+          </Button>
+          <Button variant="outline" asChild>
+            <a
+              target="_blank"
+              rel="noreferrer"
+              href={`/api/v1/reports/${run.id}/html`}
+            >
+              打开单页 HTML
+            </a>
+          </Button>
         </div>
       </div>
       <div className="summary-grid five">
@@ -301,7 +304,13 @@ export function ReportView({ project, run, notify }: Props) {
             ))}
           </select>
         </label>
-        <label className={`button primary file-button ${busy || !modelId ? "disabled" : ""}`}>
+        <label
+          className={cn(
+            buttonVariants(),
+            "file-button",
+            (busy || !modelId) && "pointer-events-none opacity-50",
+          )}
+        >
           {busy ? "评分中…" : "选择 CSV / Excel 并评分"}
           <input
             type="file"
@@ -311,9 +320,11 @@ export function ReportView({ project, run, notify }: Props) {
           />
         </label>
         {scoreJob && (
-          <a className="button secondary" href={`/api/v1/score-jobs/${scoreJob.id}/download`}>
-            下载 {scoreJob.rows.toLocaleString()} 行评分结果
-          </a>
+          <Button variant="outline" asChild>
+            <a href={`/api/v1/score-jobs/${scoreJob.id}/download`}>
+              下载 {scoreJob.rows.toLocaleString()} 行评分结果
+            </a>
+          </Button>
         )}
       </section>
     </div>

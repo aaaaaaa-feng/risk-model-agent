@@ -16,6 +16,8 @@ import { errorMessage } from "./lib/format";
 import type { ProjectCreatedResponse, RunCreatedResponse, WorkspaceStatus } from "./types";
 import { AppStateContext } from "./stores/AppStateContext";
 import { AgentChat } from "./components/AgentChat";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { DataWorkbench } from "./components/DataWorkbench";
 import { DecisionWorkbench } from "./components/DecisionWorkbench";
 import { HistoryView } from "./components/HistoryView";
@@ -233,27 +235,31 @@ export function App() {
               <h1>{selectedProject?.name || "风控建模 Agent"}</h1>
             </div>
             <div className="head-actions">
-              <span
-                className={`tag ${settings?.llm_enabled && settings?.api_key_configured ? "ok" : ""}`}
+              <Badge
+                variant={settings?.llm_enabled && settings?.api_key_configured ? "ok" : "neutral"}
+                className="max-[1100px]:hidden"
               >
                 {providerStatus}
-              </span>
-              <span className="tag network">
+              </Badge>
+              <Badge variant="network" className="max-[1350px]:hidden">
                 Notebook {settings?.notebook_network === false ? "关闭偏好" : "网络开启"}
-              </span>
+              </Badge>
               {selectedProject && (
-                <button
-                  className="button secondary compact"
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => {
                     setDataMode(true);
                     setView("workbench");
                   }}
                 >
                   数据 / 新 Y
-                </button>
+                </Button>
               )}
               {decision && view === "workbench" && !dataMode && (
-                <span className="tag attention">等待你的确认</span>
+                <Badge variant="attention" className="max-[1100px]:hidden">
+                  等待你的确认
+                </Badge>
               )}
             </div>
           </header>
@@ -424,9 +430,9 @@ function Welcome({ onCreate }: { onCreate: () => void }) {
           <span>同一报告数据导出 Web、Excel、HTML 与模型包。</span>
         </div>
       </div>
-      <button className="button primary" onClick={onCreate}>
+      <Button className="h-[38px] px-[18px]" onClick={onCreate}>
         创建第一个项目
-      </button>
+      </Button>
     </div>
   );
 }

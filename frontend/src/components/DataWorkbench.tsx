@@ -2,6 +2,9 @@ import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { errorMessage } from "../lib/format";
 import { Tabs } from "./ui/Tabs";
+import { Badge, statusVariant } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { DataAsset, ProjectDetail, RunCreatedResponse } from "../types";
 
 interface Props {
@@ -267,7 +270,11 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                 <option value="score_input">待评分样本</option>
               </select>
               <label
-                className={`button primary file-button ${busy === "upload" ? "disabled" : ""}`}
+                className={cn(
+                  buttonVariants(),
+                  "file-button",
+                  busy === "upload" && "pointer-events-none opacity-50",
+                )}
               >
                 {busy === "upload" ? "导入中…" : "选择本地文件"}
                 <input
@@ -300,9 +307,9 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
               <h3>四级关联工作流</h3>
               <p>Agent 推荐 → 可视化编辑 → Agent Notebook → 用户手写 Notebook。</p>
             </div>
-            <button className="button secondary" onClick={addStep} disabled={assets.length < 2}>
+            <Button variant="outline" onClick={addStep} disabled={assets.length < 2}>
               ＋ 添加特征表
-            </button>
+            </Button>
           </div>
           <label className="field-inline">
             基准表
@@ -377,20 +384,22 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                     placeholder="customer_id"
                   />
                 </label>
-                <button
-                  className="button secondary"
+                <Button
+                  variant="outline"
+                  className="join-step-recommend"
                   onClick={() => recommend(step)}
                   disabled={busy === `recommend-${step.id}`}
                 >
                   {busy === `recommend-${step.id}` ? "分析中…" : "Agent 推荐"}
-                </button>
-                <button
-                  className="icon-button"
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   aria-label="删除步骤"
                   onClick={() => setSteps((current) => current.filter((v) => v.id !== step.id))}
                 >
                   ×
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -487,13 +496,12 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                   <p>该版本没有识别到同时包含 0/1 的候选 Y。</p>
                 )}
               </div>
-              <button
-                className="button primary"
+              <Button
                 disabled={!targets.length || busy === "targets"}
                 onClick={createTargets}
               >
                 {busy === "targets" ? "创建中…" : `创建 ${targets.length || ""} 个 Y 任务`}
-              </button>
+              </Button>
             </>
           )}
           {detail.target_tasks.length > 0 && (
@@ -520,16 +528,15 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                   />
                   <strong>{task.target_column}</strong>
                   <span>{task.valid_sample_count.toLocaleString()} 有效样本</span>
-                  <em className={`status ${task.status}`}>{task.status}</em>
+                  <Badge variant={statusVariant(task.status)}>{task.status}</Badge>
                 </label>
               ))}
-              <button
-                className="button primary"
+              <Button
                 disabled={!selectedTasks.length || busy === "runs"}
                 onClick={startRuns}
               >
                 {busy === "runs" ? "入队中…" : `启动 ${selectedTasks.length} 个 Run`}
-              </button>
+              </Button>
             </div>
           )}
         </section>
@@ -556,9 +563,9 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                 用上一步的“Agent 生成 Notebook”或“用户手写
                 Notebook”创建。代码可访问本机与网络，因此不是安全沙箱。
               </p>
-              <button className="button secondary" onClick={() => createNotebook(false)}>
+              <Button variant="outline" onClick={() => createNotebook(false)}>
                 创建空白 Notebook
-              </button>
+              </Button>
             </div>
           )}
         </section>
@@ -616,19 +623,20 @@ function AssetTable({
                     ))}
                   </select>
                 ) : (
-                  <span className="status ready">ready</span>
+                  <Badge variant="ok">ready</Badge>
                 )}
               </td>
               <td>
-                <button
-                  className="text-button"
+                <Button
+                  variant="link"
+                  size="sm"
                   disabled={
                     asset.status !== "ready" || busy === asset.id || asset.kind === "dictionary"
                   }
                   onClick={() => onMaterialize(asset.id)}
                 >
                   {busy === asset.id ? "生成中…" : "生成数据版本"}
-                </button>
+                </Button>
               </td>
             </tr>
           ))}
@@ -733,9 +741,9 @@ function NotebookEditor({
           <h3>{notebook.name}</h3>
           <p>网络默认开启 · 用户代码不在安全沙箱中 · 产品不会主动外发原始数据</p>
         </div>
-        <button className="button secondary" onClick={save}>
+        <Button variant="outline" onClick={save}>
           {busy === "save" ? "保存中…" : "保存 Notebook"}
-        </button>
+        </Button>
       </div>
       {document.cells.map((cell, index) => (
         <div className={`nb-cell ${cell.cell_type}`} key={index}>
@@ -788,9 +796,9 @@ function NotebookEditor({
           数据版本名称
           <input value={label} onChange={(e) => setLabel(e.target.value)} />
         </label>
-        <button className="button primary" onClick={importOutput} disabled={busy === "import"}>
+        <Button onClick={importOutput} disabled={busy === "import"}>
           {busy === "import" ? "校验中…" : "校验并生成数据版本"}
-        </button>
+        </Button>
       </div>
     </div>
   );

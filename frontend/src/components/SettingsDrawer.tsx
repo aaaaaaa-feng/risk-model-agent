@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { Drawer } from "./ui/Drawer";
 import { errorMessage } from "../lib/format";
+import { Button } from "@/components/ui/button";
 import type {
   BackupsResponse,
   ProviderProfile,
@@ -217,15 +218,17 @@ export function SettingsDrawer({
         <div>
           <h2 id="settings-title">设置中心</h2>
         </div>
-        <button
+        <Button
           ref={closeRef}
           type="button"
-          className="icon-button inverse"
+          variant="ghost"
+          size="icon"
+          className="text-[var(--paper)] hover:bg-[var(--on-blue-fill)] hover:text-[var(--paper)]"
           onClick={onClose}
           aria-label="关闭设置"
         >
           ×
-        </button>
+        </Button>
       </div>
       <form onSubmit={save} className="settings-body">
         <div className="settings-layout">
@@ -380,14 +383,14 @@ export function SettingsDrawer({
                   </label>
                 )}
                 <div className="inline-actions">
-                  <button
+                  <Button
                     type="button"
-                    className="button secondary"
+                    variant="outline"
                     onClick={test}
                     disabled={busy === "test"}
                   >
                     {busy === "test" ? "测试中…" : "测试当前配置连接"}
-                  </button>
+                  </Button>
                   <span className="test-result" role="status">
                     {testResult}
                   </span>
@@ -522,13 +525,14 @@ export function SettingsDrawer({
               >
                 <div className="workspace-setting">
                   <code>{workspace.path}</code>
-                  <button
+                  <Button
                     type="button"
-                    className="button secondary compact"
+                    variant="outline"
+                    size="sm"
                     onClick={onChangeWorkspace}
                   >
                     更换文件夹
-                  </button>
+                  </Button>
                 </div>
                 <p className="workspace-setting-note">
                   项目文件夹：{workspace.project_storage}。已有项目运行时不能切换，避免把 Run 和
@@ -548,17 +552,22 @@ export function SettingsDrawer({
                   <p className="inline-warning">当前目录疑似位于同步盘，请迁移到本机专属目录。</p>
                 )}
                 <div className="inline-actions">
-                  <button
+                  <Button
                     type="button"
-                    className="button secondary"
+                    variant="outline"
                     onClick={createBackup}
                     disabled={busy === "backup"}
                   >
                     创建数据库备份
-                  </button>
-                  <button type="button" className="text-danger" onClick={reset}>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="text-[var(--red)]"
+                    onClick={reset}
+                  >
                     恢复默认设置
-                  </button>
+                  </Button>
                 </div>
                 <div className="backup-list">
                   {backups.slice(0, 4).map((item) => (
@@ -573,9 +582,9 @@ export function SettingsDrawer({
           </div>
         </div>
         <div className="drawer-save">
-          <button className="button primary" disabled={busy === "save"}>
+          <Button disabled={busy === "save"}>
             {busy === "save" ? "保存中…" : "保存全部设置"}
-          </button>
+          </Button>
         </div>
       </form>
     </Drawer>

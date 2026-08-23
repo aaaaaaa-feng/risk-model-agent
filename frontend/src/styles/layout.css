@@ -648,31 +648,7 @@ body.col-resizing .chat-rail {
   color: var(--muted);
 }
 
-.rail-status {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 4px 9px;
-  border-radius: var(--radius-full);
-  background: var(--ground);
-  width: fit-content;
-}
-
-.rail-status.awaiting_decision {
-  color: var(--amber-text);
-  background: var(--amber-soft);
-}
-
-.rail-status.running,
-.rail-status.succeeded {
-  color: var(--green-text);
-  background: var(--green-soft);
-}
-
-.rail-status.failed,
-.rail-status.blocked {
-  color: var(--red-text);
-  background: var(--red-soft);
-}
+/* .rail-status 已由 ui/badge.tsx 的 Badge 组件取代 */
 
 .stage-substeps {
   list-style: none;
@@ -1182,10 +1158,6 @@ body.col-resizing .chat-rail {
     font-size: 28px;
   }
 
-  .tag.network {
-    display: none;
-  }
-
   .toast {
     right: var(--space-3);
   }
@@ -1194,10 +1166,6 @@ body.col-resizing .chat-rail {
 @media (max-width: 1100px) {
   /* 只保留当前业务阶段文案，其余只显示序号，防止换行 */
   .stage-step:not(.current) .step-label {
-    display: none;
-  }
-
-  .head-actions .tag {
     display: none;
   }
 
