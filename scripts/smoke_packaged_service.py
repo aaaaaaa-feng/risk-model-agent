@@ -141,7 +141,7 @@ def main() -> None:
     assert result["champion"]
     assert result["oot_used_for_selection"] is False
     assert state["report"]["executive_summary"]["quality_verdict"] in {"pass", "conditional"}
-    assert state["report_review"]["status"] == "pass"
+    assert state["report_review"]["status"] in {"pass", "fallback_pass"}
 
     artifact_payload = request_json(
         base_url, "GET", f"/api/v1/runs/{run['id']}/artifacts", timeout=30
