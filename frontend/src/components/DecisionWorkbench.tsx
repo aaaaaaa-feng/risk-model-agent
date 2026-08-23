@@ -4,6 +4,16 @@ import { formatMetric, formatNumber, formatPercent } from "../lib/format";
 import { confirmLabel, decisionStageName, monotonicLabel, reviewLabel } from "../lib/labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import type { Decision, Run } from "../types";
 
 interface Props {
@@ -236,15 +246,14 @@ function DataDecision({
         {(summary.actions || []).length ? (
           (summary.actions || []).map((action) => (
             <label key={action.id}>
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={accepted.includes(action.id)}
-                onChange={(e) =>
+                onCheckedChange={(checked) =>
                   setEdits((current) => {
                     const currentAccepted = (current.accepted_action_ids as string[]) || [];
                     return {
                       ...current,
-                      accepted_action_ids: e.target.checked
+                      accepted_action_ids: checked === true
                         ? [...currentAccepted, action.id]
                         : currentAccepted.filter((id) => id !== action.id),
                     };
@@ -288,17 +297,22 @@ function SplitDecision({
       <div className="form-grid">
         <label>
           切分方法
-          <select
+          <Select
             value={(edits.method as string | undefined) || plan.method || "time_holdout"}
-            onChange={(e) => change("method", e.target.value)}
+            onValueChange={(value) => change("method", value)}
           >
-            <option value="time_holdout">时间 Train/Test/OOT</option>
-            <option value="random_stratified">随机分层 Train/Test</option>
-          </select>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="time_holdout">时间 Train/Test/OOT</SelectItem>
+              <SelectItem value="random_stratified">随机分层 Train/Test</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <label>
           时间字段
-          <input
+          <Input
             value={(edits.time_column as string | undefined) || ""}
             onChange={(e) => change("time_column", e.target.value || null)}
             disabled={edits.method !== "time_holdout"}
@@ -306,14 +320,14 @@ function SplitDecision({
         </label>
         <label>
           客户主键
-          <input
+          <Input
             value={(edits.customer_key as string | undefined) || ""}
             onChange={(e) => change("customer_key", e.target.value || null)}
           />
         </label>
         <label>
           Test 比例
-          <input
+          <Input
             type="number"
             step="0.05"
             min="0.1"
@@ -324,7 +338,7 @@ function SplitDecision({
         </label>
         <label>
           OOT 比例
-          <input
+          <Input
             type="number"
             step="0.05"
             min="0.1"
@@ -395,12 +409,11 @@ function ScreeningDecision({
             {recoverable.slice(0, 200).map((item) => (
               <tr key={item.column}>
                 <td>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selected.has(item.column)}
                     disabled={(reasons[item.column] || "").trim().length < 8}
                     title="请先填写至少 8 个字符的业务理由"
-                    onChange={(e) => toggle(item, e.target.checked)}
+                    onCheckedChange={(checked) => toggle(item, checked === true)}
                   />
                 </td>
                 <td>{item.column}</td>
@@ -408,7 +421,7 @@ function ScreeningDecision({
                 <td>{formatPercent(item.missing_rate)}</td>
                 <td>{formatMetric(item.iv)}</td>
                 <td>
-                  <input
+                  <Input
                     value={reasons[item.column] || ""}
                     onChange={(e) => {
                       const value = e.target.value;
@@ -585,7 +598,7 @@ function BinningDecision({
                 <div>
                   <h3>人工分箱规则</h3>
                   <p>保存后会生成新分箱版本，并使训练、质检和报告失效重跑。</p>
-                  <textarea
+                  <Textarea
                     value={manualSpec}
                     onChange={(e) => setManualSpec(e.target.value)}
                     spellCheck={false}
@@ -703,10 +716,9 @@ function ModelDecision({
       {modelCatalog.map(([id, name, purpose]) => (
         <label className="model-grid row" key={id}>
           <span>
-            <input
-              type="checkbox"
+            <Checkbox
               checked={selected.includes(id)}
-              onChange={(e) => toggle(id, e.target.checked)}
+              onCheckedChange={(checked) => toggle(id, checked === true)}
             />
           </span>
           <span>
@@ -725,7 +737,7 @@ function ModelDecision({
       <div className="form-grid score-fields">
         <label>
           最低分
-          <input
+          <Input
             type="number"
             value={score.minimum ?? 300}
             onChange={(e) => scoreChange("minimum", Number(e.target.value))}
@@ -733,7 +745,7 @@ function ModelDecision({
         </label>
         <label>
           最高分
-          <input
+          <Input
             type="number"
             value={score.maximum ?? 900}
             onChange={(e) => scoreChange("maximum", Number(e.target.value))}
@@ -741,7 +753,7 @@ function ModelDecision({
         </label>
         <label>
           基准分
-          <input
+          <Input
             type="number"
             value={score.base_score ?? 600}
             onChange={(e) => scoreChange("base_score", Number(e.target.value))}
@@ -749,7 +761,7 @@ function ModelDecision({
         </label>
         <label>
           基准好坏比
-          <input
+          <Input
             type="number"
             value={score.base_odds ?? 20}
             onChange={(e) => scoreChange("base_odds", Number(e.target.value))}
@@ -757,7 +769,7 @@ function ModelDecision({
         </label>
         <label>
           PDO
-          <input
+          <Input
             type="number"
             value={score.pdo ?? 50}
             onChange={(e) => scoreChange("pdo", Number(e.target.value))}
@@ -765,7 +777,7 @@ function ModelDecision({
         </label>
         <label>
           调参试验数
-          <input
+          <Input
             type="number"
             min="0"
             max="12"

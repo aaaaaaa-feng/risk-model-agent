@@ -1,6 +1,15 @@
 import { FormEvent, useRef, useState } from "react";
 import { Dialog } from "./ui/Dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface Props {
   open: boolean;
@@ -49,7 +58,7 @@ export function NewProjectDialog({ open, busy, onClose, onCreate, onCreateDemo }
       <form onSubmit={submit} className="form-stack">
         <label>
           项目名称
-          <input
+          <Input
             ref={inputRef}
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -60,7 +69,7 @@ export function NewProjectDialog({ open, busy, onClose, onCreate, onCreateDemo }
         </label>
         <label>
           项目说明（可选）
-          <textarea
+          <Textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
@@ -69,14 +78,19 @@ export function NewProjectDialog({ open, busy, onClose, onCreate, onCreateDemo }
         </label>
         <label>
           协作模式
-          <select value={mode} onChange={(e) => setMode(e.target.value)}>
-            <option value="semi_trusted">半信任：每个关键阶段确认</option>
-            <option value="fully_trusted">完全信任：Reviewer 通过后自动继续</option>
-          </select>
+          <Select value={mode} onValueChange={setMode}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="semi_trusted">半信任：每个关键阶段确认</SelectItem>
+              <SelectItem value="fully_trusted">完全信任：Reviewer 通过后自动继续</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <label>
           机构 / 产品（可选）
-          <input
+          <Input
             value={organization}
             onChange={(e) => setOrganization(e.target.value)}
             placeholder="不阻碍项目创建"

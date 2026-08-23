@@ -2,6 +2,13 @@ import { ChangeEvent, useEffect, useState } from "react";
 import { api } from "../api";
 import { errorMessage, formatMetric, formatPercent } from "../lib/format";
 import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { Project, Run } from "../types";
 
@@ -296,13 +303,18 @@ export function ReportView({ project, run, notify }: Props) {
         </div>
         <label>
           模型版本
-          <select value={modelId} onChange={(e) => setModelId(e.target.value)}>
-            {models.map((model) => (
-              <option value={model.id} key={model.id}>
-                {model.name}
-              </option>
-            ))}
-          </select>
+          <Select value={modelId} onValueChange={setModelId}>
+            <SelectTrigger>
+              <SelectValue placeholder="选择模型" />
+            </SelectTrigger>
+            <SelectContent>
+              {models.map((model) => (
+                <SelectItem value={model.id} key={model.id}>
+                  {model.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
         <label
           className={cn(

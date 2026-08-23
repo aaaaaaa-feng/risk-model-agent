@@ -1353,13 +1353,6 @@
   background: var(--blue-soft);
 }
 
-.provider-profile input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--blue);
-  flex: none;
-}
-
 .provider-profile-copy {
   min-width: 0;
   flex: 1;
@@ -1412,7 +1405,7 @@
   gap: 4px;
 }
 
-.model-checks label {
+.model-check {
   display: flex;
   align-items: center;
   gap: 7px;

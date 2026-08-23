@@ -4,6 +4,16 @@ import { errorMessage } from "../lib/format";
 import { Tabs } from "./ui/Tabs";
 import { Badge, statusVariant } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { DataAsset, ProjectDetail, RunCreatedResponse } from "../types";
 
@@ -259,16 +269,17 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
               <p>可一次选择多张表；Excel 多 Sheet 会先要求选择 Sheet。</p>
             </div>
             <div className="upload-actions">
-              <select
-                aria-label="文件用途"
-                value={uploadKind}
-                onChange={(e) => setUploadKind(e.target.value)}
-              >
-                <option value="base">基准样本表</option>
-                <option value="feature">特征表</option>
-                <option value="dictionary">数据字典</option>
-                <option value="score_input">待评分样本</option>
-              </select>
+              <Select value={uploadKind} onValueChange={setUploadKind}>
+                <SelectTrigger className="w-[150px]" aria-label="文件用途">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="base">基准样本表</SelectItem>
+                  <SelectItem value="feature">特征表</SelectItem>
+                  <SelectItem value="dictionary">数据字典</SelectItem>
+                  <SelectItem value="score_input">待评分样本</SelectItem>
+                </SelectContent>
+              </Select>
               <label
                 className={cn(
                   buttonVariants(),
@@ -313,22 +324,26 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
           </div>
           <label className="field-inline">
             基准表
-            <select
+            <Select
               value={baseId}
-              onChange={(e) => {
-                setBaseId(e.target.value);
+              onValueChange={(value) => {
+                setBaseId(value);
                 setSteps([]);
               }}
             >
-              <option value="">选择基准表</option>
-              {assets
-                .filter((a) => a.kind !== "dictionary")
-                .map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-            </select>
+              <SelectTrigger>
+                <SelectValue placeholder="选择基准表" />
+              </SelectTrigger>
+              <SelectContent>
+                {assets
+                  .filter((a) => a.kind !== "dictionary")
+                  .map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
           </label>
           <div className="join-steps">
             {steps.map((step, index) => (
@@ -336,29 +351,33 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                 <div className="join-step-index">{String(index + 1).padStart(2, "0")}</div>
                 <label>
                   右表
-                  <select
+                  <Select
                     value={step.right_asset_id}
-                    onChange={(e) =>
+                    onValueChange={(value) =>
                       setSteps((current) =>
                         current.map((v) =>
-                          v.id === step.id ? { ...v, right_asset_id: e.target.value } : v,
+                          v.id === step.id ? { ...v, right_asset_id: value } : v,
                         ),
                       )
                     }
                   >
-                    <option value="">选择特征表</option>
-                    {assets
-                      .filter((a) => a.id !== baseId && a.kind !== "dictionary")
-                      .map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                        </option>
-                      ))}
-                  </select>
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择特征表" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assets
+                        .filter((a) => a.id !== baseId && a.kind !== "dictionary")
+                        .map((a) => (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
                 </label>
                 <label>
                   左键（逗号分隔）
-                  <input
+                  <Input
                     value={step.leftKeys}
                     onChange={(e) =>
                       setSteps((current) =>
@@ -372,7 +391,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                 </label>
                 <label>
                   右键（逗号分隔）
-                  <input
+                  <Input
                     value={step.rightKeys}
                     onChange={(e) =>
                       setSteps((current) =>
@@ -459,31 +478,34 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
             <>
               <label>
                 建模数据版本
-                <select
+                <Select
                   value={datasetId}
-                  onChange={(e) => {
-                    setDatasetId(e.target.value);
+                  onValueChange={(value) => {
+                    setDatasetId(value);
                     setTargets([]);
                   }}
                 >
-                  <option value="">选择版本</option>
-                  {detail.dataset_versions.map((item) => (
-                    <option value={item.id} key={item.id}>
-                      {item.label} · {item.rows.toLocaleString()}×{item.columns}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择版本" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {detail.dataset_versions.map((item) => (
+                      <SelectItem value={item.id} key={item.id}>
+                        {item.label} · {item.rows.toLocaleString()}×{item.columns}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
               <div className="target-candidates">
                 {binaryCandidates.length ? (
                   binaryCandidates.map((column) => (
                     <label key={column}>
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={targets.includes(column)}
-                        onChange={(e) =>
+                        onCheckedChange={(checked) =>
                           setTargets((current) =>
-                            e.target.checked
+                            checked === true
                               ? [...current, column]
                               : current.filter((v) => v !== column),
                           )
@@ -514,13 +536,12 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
               </div>
               {detail.target_tasks.map((task) => (
                 <label className="task-row" key={task.id}>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     disabled={!["queued", "failed", "blocked"].includes(task.status)}
                     checked={selectedTasks.includes(task.id)}
-                    onChange={(e) =>
+                    onCheckedChange={(checked) =>
                       setSelectedTasks((current) =>
-                        e.target.checked
+                        checked === true
                           ? [...current, task.id]
                           : current.filter((v) => v !== task.id),
                       )
@@ -614,14 +635,18 @@ function AssetTable({
               </td>
               <td>
                 {asset.status === "sheet_selection_required" ? (
-                  <select defaultValue="" onChange={(e) => onSheet(asset, e.target.value)}>
-                    <option value="" disabled>
-                      选择 Sheet
-                    </option>
-                    {asset.metadata?.sheets?.map((sheet) => (
-                      <option key={sheet}>{sheet}</option>
-                    ))}
-                  </select>
+                  <Select onValueChange={(value) => onSheet(asset, value)}>
+                    <SelectTrigger className="h-[34px]">
+                      <SelectValue placeholder="选择 Sheet" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {asset.metadata?.sheets?.map((sheet) => (
+                        <SelectItem key={sheet} value={sheet}>
+                          {sheet}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 ) : (
                   <Badge variant="ok">ready</Badge>
                 )}
@@ -750,7 +775,7 @@ function NotebookEditor({
           <div className="nb-gutter">[{cell.execution_count ?? " "}]</div>
           {cell.cell_type === "code" ? (
             <>
-              <textarea
+              <Textarea
                 value={cell.source}
                 onChange={(e) => {
                   const copy = structuredClone(document);
@@ -776,7 +801,7 @@ function NotebookEditor({
               )}
             </>
           ) : (
-            <textarea
+            <Textarea
               value={cell.source}
               onChange={(e) => {
                 const copy = structuredClone(document);
@@ -790,11 +815,11 @@ function NotebookEditor({
       <div className="import-output">
         <label>
           输出文件
-          <input value={output} onChange={(e) => setOutput(e.target.value)} />
+          <Input value={output} onChange={(e) => setOutput(e.target.value)} />
         </label>
         <label>
           数据版本名称
-          <input value={label} onChange={(e) => setLabel(e.target.value)} />
+          <Input value={label} onChange={(e) => setLabel(e.target.value)} />
         </label>
         <Button onClick={importOutput} disabled={busy === "import"}>
           {busy === "import" ? "校验中…" : "校验并生成数据版本"}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { WorkspaceStatus } from "../types";
 
 interface Props {
@@ -81,7 +82,7 @@ export function WorkspaceSetup({ workspace, onSelected, onClose, notify }: Props
           )}
           <label>
             工作文件夹路径
-            <input
+            <Input
               value={path}
               onChange={(event) => setPath(event.target.value)}
               placeholder="例如：D:\\RiskModelAgent 或 /Users/你的名字/RiskModelAgent"

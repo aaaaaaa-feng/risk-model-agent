@@ -12,38 +12,21 @@
   cursor: pointer;
 }
 
-/* Forms */
-label {
+/* Forms — 控件本体已迁入 shadcn(ui/input、select、checkbox、radio-group、textarea),
+ * 这里只保留 label 文案与表单布局 */
+label,
+.field-label {
   font-size: 12px;
   color: var(--muted);
 }
 
+/* 包裹式 label 与控件之间的间距(Radix 触发器/输入框均为块级弹性盒) */
 label > input:not([type="checkbox"]):not([type="radio"]),
-label > select,
 label > textarea,
-.form-stack input,
-.form-stack select,
-.form-stack textarea {
+label > button[role="combobox"] {
   display: block;
   width: 100%;
   margin-top: 5px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: var(--paper);
-  min-height: 40px;
-  padding: 8px 10px;
-  outline: none;
-  transition: border-color var(--dur-short) var(--ease-out);
-}
-
-label > input:focus,
-label > select:focus,
-label > textarea:focus,
-.form-stack input:focus,
-.form-stack select:focus,
-.form-stack textarea:focus {
-  border-color: var(--focus-color);
-  box-shadow: var(--focus-ring);
 }
 
 .form-stack {
@@ -84,13 +67,6 @@ label > textarea:focus,
   align-items: center;
   gap: var(--space-2);
   min-height: 34px;
-}
-
-.check-row input,
-.switch-row input {
-  width: 17px;
-  height: 17px;
-  accent-color: var(--blue);
 }
 
 /* Tables */

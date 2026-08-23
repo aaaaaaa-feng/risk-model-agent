@@ -3,6 +3,16 @@ import { api } from "../api";
 import { Drawer } from "./ui/Drawer";
 import { errorMessage } from "../lib/format";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type {
   BackupsResponse,
   ProviderProfile,
@@ -258,32 +268,40 @@ export function SettingsDrawer({
                     <span>选择后编辑并保存</span>
                   </div>
                   {profiles.length ? (
-                    profiles.map((profile) => (
-                      <label
-                        className={`provider-profile ${form.profile_id === profile.id ? "active" : ""}`}
-                        key={profile.id}
-                      >
-                        <input
-                          type="radio"
-                          name="provider-profile"
-                          checked={form.profile_id === profile.id}
-                          onChange={() => selectProfile(profile)}
-                        />
-                        <span className="provider-profile-copy">
-                          <strong>{profile.label}</strong>
-                          <small>{profile.model || "未填写模型"}</small>
-                        </span>
-                        <span
-                          className={`provider-profile-state ${profile.llm_enabled && profile.api_key_configured ? "on" : ""}`}
+                    <RadioGroup
+                      value={(form.profile_id as string) || ""}
+                      onValueChange={(id) => {
+                        const target = profiles.find((item) => item.id === id);
+                        if (target) selectProfile(target);
+                      }}
+                    >
+                      {profiles.map((profile) => (
+                        <div
+                          className={`provider-profile ${form.profile_id === profile.id ? "active" : ""}`}
+                          key={profile.id}
+                          onClick={() => selectProfile(profile)}
                         >
-                          {profile.llm_enabled
-                            ? profile.api_key_configured
-                              ? "已启用"
-                              : "待配置密钥"
-                            : "已停用"}
-                        </span>
-                      </label>
-                    ))
+                          <RadioGroupItem
+                            value={profile.id}
+                            aria-label={profile.label}
+                            onClick={(event) => event.stopPropagation()}
+                          />
+                          <span className="provider-profile-copy">
+                            <strong>{profile.label}</strong>
+                            <small>{profile.model || "未填写模型"}</small>
+                          </span>
+                          <span
+                            className={`provider-profile-state ${profile.llm_enabled && profile.api_key_configured ? "on" : ""}`}
+                          >
+                            {profile.llm_enabled
+                              ? profile.api_key_configured
+                                ? "已启用"
+                                : "待配置密钥"
+                              : "已停用"}
+                          </span>
+                        </div>
+                      ))}
+                    </RadioGroup>
                   ) : (
                     <p className="empty-hint">
                       还没有保存的 Provider，选择下方 Provider 并保存即可创建。
@@ -292,44 +310,54 @@ export function SettingsDrawer({
                 </div>
                 <label>
                   Provider
-                  <select
+                  <Select
                     value={(form.provider as string) || "deepseek"}
-                    onChange={(event) => selectProvider(event.target.value)}
+                    onValueChange={selectProvider}
                   >
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="kimi">Kimi 开放平台</option>
-                    <option value="kimi-code">Kimi Code</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="anthropic">Anthropic</option>
-                    <option value="custom">自定义</option>
-                  </select>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="deepseek">DeepSeek</SelectItem>
+                      <SelectItem value="kimi">Kimi 开放平台</SelectItem>
+                      <SelectItem value="kimi-code">Kimi Code</SelectItem>
+                      <SelectItem value="openai">OpenAI</SelectItem>
+                      <SelectItem value="anthropic">Anthropic</SelectItem>
+                      <SelectItem value="custom">自定义</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </label>
                 <div className="form-two">
                   <label>
                     API 格式
-                    <select
+                    <Select
                       value={(form.api_format as string) || "openai"}
-                      onChange={(event) => change("api_format", event.target.value)}
+                      onValueChange={(value) => change("api_format", value)}
                     >
-                      <option value="openai">OpenAI Chat Completions</option>
-                      <option value="anthropic">Anthropic Messages</option>
-                    </select>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="openai">OpenAI Chat Completions</SelectItem>
+                        <SelectItem value="anthropic">Anthropic Messages</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </label>
-                  <label>
-                    启用 LLM
+                  <div>
+                    <span className="field-label">启用 LLM</span>
                     <span className="switch-row">
-                      <input
-                        type="checkbox"
+                      <Checkbox
+                        id="llm-enabled"
                         checked={Boolean(form.llm_enabled)}
-                        onChange={(event) => change("llm_enabled", event.target.checked)}
+                        onCheckedChange={(checked) => change("llm_enabled", checked === true)}
                       />
-                      允许聚合证据出站
+                      <label htmlFor="llm-enabled">允许聚合证据出站</label>
                     </span>
-                  </label>
+                  </div>
                 </div>
                 <label>
                   Base URL
-                  <input
+                  <Input
                     value={(form.base_url as string) || ""}
                     onChange={(event) => change("base_url", event.target.value)}
                   />
@@ -337,14 +365,14 @@ export function SettingsDrawer({
                 <div className="form-two">
                   <label>
                     主模型
-                    <input
+                    <Input
                       value={(form.model as string) || ""}
                       onChange={(event) => change("model", event.target.value)}
                     />
                   </label>
                   <label>
                     Reviewer 模型
-                    <input
+                    <Input
                       value={(form.reviewer_model as string) || ""}
                       onChange={(event) => change("reviewer_model", event.target.value)}
                       placeholder="留空则同主模型"
@@ -353,7 +381,7 @@ export function SettingsDrawer({
                 </div>
                 <label>
                   API Key
-                  <input
+                  <Input
                     type="password"
                     autoComplete="new-password"
                     value={apiKey}
@@ -370,17 +398,17 @@ export function SettingsDrawer({
                     密钥来自环境变量，请在系统环境中移除；页面不能伪装成已清除。
                   </p>
                 ) : (
-                  <label className="check-row">
-                    <input
-                      type="checkbox"
+                  <div className="check-row">
+                    <Checkbox
+                      id="clear-key"
                       checked={clearKey}
-                      onChange={(event) => {
-                        setClearKey(event.target.checked);
-                        if (event.target.checked) setApiKey("");
+                      onCheckedChange={(checked) => {
+                        setClearKey(checked === true);
+                        if (checked === true) setApiKey("");
                       }}
                     />
-                    保存时清除当前配置的 API Key
-                  </label>
+                    <label htmlFor="clear-key">保存时清除当前配置的 API Key</label>
+                  </div>
                 )}
                 <div className="inline-actions">
                   <Button
@@ -405,14 +433,14 @@ export function SettingsDrawer({
               >
                 <div className="model-checks">
                   {models.map((model) => (
-                    <label key={model}>
-                      <input
-                        type="checkbox"
+                    <div key={model} className="model-check">
+                      <Checkbox
+                        id={`default-model-${model}`}
                         checked={((form.default_models as string[]) || []).includes(model)}
-                        onChange={(event) =>
+                        onCheckedChange={(checked) =>
                           change(
                             "default_models",
-                            event.target.checked
+                            checked === true
                               ? [...((form.default_models as string[]) || []), model]
                               : ((form.default_models as string[]) || []).filter(
                                   (value) => value !== model,
@@ -420,14 +448,14 @@ export function SettingsDrawer({
                           )
                         }
                       />
-                      {model}
-                    </label>
+                      <label htmlFor={`default-model-${model}`}>{model}</label>
+                    </div>
                   ))}
                 </div>
                 <div className="form-two">
                   <label>
                     内存预算 MB
-                    <input
+                    <Input
                       type="number"
                       min={256}
                       value={(form.memory_budget_mb as number) || 1536}
@@ -436,7 +464,7 @@ export function SettingsDrawer({
                   </label>
                   <label>
                     模型并发上限
-                    <input
+                    <Input
                       type="number"
                       min={1}
                       max={16}
@@ -455,34 +483,34 @@ export function SettingsDrawer({
                 title="网络、更新与遥测"
                 description="Notebook 不是安全沙箱；关闭偏好不能替代操作系统隔离。"
               >
-                <label className="check-row">
-                  <input
-                    type="checkbox"
+                <div className="check-row">
+                  <Checkbox
+                    id="notebook-network"
                     checked={Boolean(form.notebook_network)}
-                    onChange={(event) => change("notebook_network", event.target.checked)}
+                    onCheckedChange={(checked) => change("notebook_network", checked === true)}
                   />
-                  Notebook 网络偏好开启
-                </label>
-                <label className="check-row">
-                  <input
-                    type="checkbox"
+                  <label htmlFor="notebook-network">Notebook 网络偏好开启</label>
+                </div>
+                <div className="check-row">
+                  <Checkbox
+                    id="auto-update"
                     checked={Boolean(form.auto_update)}
-                    onChange={(event) => change("auto_update", event.target.checked)}
+                    onCheckedChange={(checked) => change("auto_update", checked === true)}
                   />
-                  自动检查应用更新
-                </label>
-                <label className="check-row">
-                  <input
-                    type="checkbox"
+                  <label htmlFor="auto-update">自动检查应用更新</label>
+                </div>
+                <div className="check-row">
+                  <Checkbox
+                    id="telemetry"
                     checked={Boolean(form.telemetry)}
-                    onChange={(event) => change("telemetry", event.target.checked)}
+                    onCheckedChange={(checked) => change("telemetry", checked === true)}
                   />
-                  匿名遥测（默认关闭）
-                </label>
+                  <label htmlFor="telemetry">匿名遥测（默认关闭）</label>
+                </div>
                 <div className="form-two">
                   <label>
                     单 Run Token 预算
-                    <input
+                    <Input
                       type="number"
                       min={0}
                       value={(form.run_token_budget as number) || 0}
@@ -491,7 +519,7 @@ export function SettingsDrawer({
                   </label>
                   <label>
                     月度 Token 预算
-                    <input
+                    <Input
                       type="number"
                       min={0}
                       value={(form.monthly_token_budget as number) || 0}
@@ -503,14 +531,14 @@ export function SettingsDrawer({
                 </div>
                 <label>
                   代理（可选）
-                  <input
+                  <Input
                     value={(form.proxy as string) || ""}
                     onChange={(event) => change("proxy", event.target.value)}
                   />
                 </label>
                 <label>
                   自定义 CA 证书路径（可选）
-                  <input
+                  <Input
                     value={(form.ca_cert as string) || ""}
                     onChange={(event) => change("ca_cert", event.target.value)}
                   />
