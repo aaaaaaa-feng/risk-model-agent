@@ -28,7 +28,7 @@ import { RunWorkbench } from "./components/RunWorkbench";
 import { SettingsDrawer } from "./components/SettingsDrawer";
 import { StagePanel } from "./components/StagePanel";
 import { StageProgressBar } from "./components/StageProgressBar";
-import { Tabs } from "./components/ui/Tabs";
+import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { WorkspaceSetup } from "./components/WorkspaceSetup";
 
 export function App() {
@@ -264,15 +264,22 @@ export function App() {
             </div>
           </header>
           <Tabs
-            aria-label="项目主视图"
-            items={[
-              { id: "workbench", label: "当前工作台" },
-              { id: "report", label: "产物报告" },
-              { id: "history", label: "历史 Run" },
-            ]}
             value={view}
-            onChange={(id) => setView(id as View)}
-          />
+            onValueChange={(id) => setView(id as View)}
+            className="contents"
+          >
+            <TabsList className="primary-tabs" aria-label="项目主视图">
+              <TabsTrigger value="workbench" id="tab-workbench">
+                当前工作台
+              </TabsTrigger>
+              <TabsTrigger value="report" id="tab-report">
+                产物报告
+              </TabsTrigger>
+              <TabsTrigger value="history" id="tab-history">
+                历史 Run
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
           <StagePanel run={run} decision={decision} events={events} />
           <section
             id="main-workspace"

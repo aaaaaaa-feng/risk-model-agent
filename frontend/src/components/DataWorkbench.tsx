@@ -1,7 +1,7 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { errorMessage } from "../lib/format";
-import { Tabs } from "./ui/Tabs";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { Badge, statusVariant } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -250,12 +250,18 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         </div>
       </div>
       <Tabs
-        aria-label="数据准备步骤"
-        className="subnav"
-        items={dataSections.map(([id, label]) => ({ id, label }))}
         value={section}
-        onChange={(id) => setSection(id as DataSection)}
-      />
+        onValueChange={(id) => setSection(id as DataSection)}
+        className="contents"
+      >
+        <TabsList className="subnav" aria-label="数据准备步骤">
+          {dataSections.map(([id, label]) => (
+            <TabsTrigger key={id} value={id} id={`tab-${id}`}>
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
       {section === "upload" && (
         <section
           id="data-panel-upload"
