@@ -1364,6 +1364,11 @@ body.col-resizing .chat-rail {
   .welcome-grid > div {
     border-right: 0;
     border-bottom: 1px solid var(--line);
+    padding: 14px 0;
+  }
+
+  .welcome-grid > div + div {
+    padding-left: 0;
   }
 
   .welcome-grid > div:last-child {
