@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import { useGlobalPolling } from "./hooks/useGlobalPolling";
 import { useProjectData } from "./hooks/useProjectData";
@@ -28,9 +28,8 @@ export function App() {
   const { toast, notify } = useToast();
   const { projects, loadProjects } = useProjects(notify);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const { workspace, setWorkspace, loadWorkspace } = useWorkspace(notify, () =>
-    setWorkspaceOpen(true),
-  );
+  const openWorkspaceSetup = useCallback(() => setWorkspaceOpen(true), []);
+  const { workspace, setWorkspace, loadWorkspace } = useWorkspace(notify, openWorkspaceSetup);
   const { settings, loadSettings } = useSettings(notify);
   const {
     selectedId,
