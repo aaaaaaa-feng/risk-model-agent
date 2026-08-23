@@ -770,7 +770,8 @@ body.col-resizing .chat-rail {
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  grid-template-rows: 40px minmax(0, 1fr) 48px;
+  /* 输入区自适应高度:ChatInput 含 textarea + 工具行,不再固定 48px */
+  grid-template-rows: 40px minmax(0, 1fr) auto;
 }
 
 .audit-list {
@@ -1363,7 +1364,7 @@ body.col-resizing .chat-rail {
   }
 
   .agent-chat {
-    grid-template-rows: 30px minmax(0, 1fr) 39px;
+    grid-template-rows: 30px minmax(0, 1fr) auto;
   }
 
   .workspace {

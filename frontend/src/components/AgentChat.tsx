@@ -249,7 +249,7 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
         <ChatInputTextArea
           aria-label="给 Agent 发送消息"
           disabled={!projectId || busy}
-          placeholder={projectId ? "补充业务要求，或询问当前阶段…" : "请先选择项目"}
+          placeholder={projectId ? "补充要求或询问阶段…" : "请先选择项目"}
         />
         <div className="flex w-full items-center justify-between gap-2">
           {settings?.llm_enabled && modelLabel ? (
