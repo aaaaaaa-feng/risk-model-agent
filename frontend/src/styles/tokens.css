@@ -23,7 +23,31 @@
   /* Borders */
   --line: #e2e8f0;
   --line-strong: #cbd5e1;
+  --line-soft: #f0f0f2;
   --line-blue: #bfdbfe;
+  --green-border: #bfe6cc;
+  --amber-warm: #fdba74;
+
+  /* Derived surfaces & text */
+  --ground-hover: #eef2f7;
+  --blue-hover-tint: #f0f6ff;
+  --panel-solid: rgba(255, 255, 255, 0.82);
+  --track: #e9edf4;
+  --code-bg: #f4f4f4;
+  --output-text: #e4e4e7;
+  --th-text: #52525b;
+  --disabled-bg: #c6c6c6;
+  --disabled-text: #6f6f6f;
+  --amber-deep: #6b5310;
+  --amber-missing: #fff9e6;
+  --black-hover: #1e293b;
+  --blue-on-dark: #93c5fd;
+  --ink-inverse-soft: #d4d4d8;
+  --on-blue-border: rgba(255, 255, 255, 0.55);
+  --on-blue-fill: rgba(255, 255, 255, 0.16);
+  --scrim: rgba(24, 24, 27, 0.42);
+  --scrim-strong: rgba(17, 17, 27, 0.73);
+  --pulse-glow: rgba(30, 64, 175, 0.35);
 
   /* Brand */
   --black: #0f172a;
@@ -79,6 +103,19 @@
   --shadow-lg: 0 12px 28px rgba(15, 23, 42, 0.08);
   --shadow-xl: 0 20px 56px rgba(15, 23, 42, 0.14);
   --shadow-blue: 0 6px 14px rgba(30, 64, 175, 0.22);
+  --shadow-blue-hover: 0 8px 18px rgba(30, 64, 175, 0.24);
+  --shadow-blue-strong: 0 9px 18px rgba(30, 64, 175, 0.26);
+  --shadow-blue-soft: 0 5px 12px rgba(30, 64, 175, 0.2);
+  --shadow-modal: 0 24px 70px rgba(24, 24, 27, 0.22);
+  --shadow-toast: 0 12px 28px rgba(24, 24, 27, 0.16);
+  --shadow-panel-dark: 0 10px 20px rgba(24, 24, 27, 0.12);
+
+  /* Motion — 命名缓动与时长,禁止浏览器默认 ease */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.32, 0, 0.67, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-short: 150ms;
+  --dur-med: 250ms;
 
   /* Z-index scale */
   --z-modal-backdrop: 50;

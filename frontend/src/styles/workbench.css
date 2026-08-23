@@ -159,7 +159,7 @@
   border-right: 1px solid var(--line);
   background: var(--paper);
   min-width: 0;
-  transition: background 0.2s ease;
+  transition: background var(--dur-short) var(--ease-out);
 }
 
 .summary-cell:hover {
@@ -220,12 +220,12 @@
   color: var(--muted);
   font-weight: 600;
   transition:
-    background 0.2s ease,
-    color 0.2s ease;
+    background var(--dur-short) var(--ease-out),
+    color var(--dur-short) var(--ease-out);
 }
 
 .subnav button:hover {
-  background: #eef2f7;
+  background: var(--ground-hover);
 }
 
 .subnav button[aria-selected="true"] {
@@ -250,7 +250,7 @@
 
 .review-banner.revise,
 .review-banner.conditional_pass {
-  border-color: #fdba74;
+  border-color: var(--amber-warm);
   background: var(--amber-soft);
 }
 
@@ -373,8 +373,8 @@
   cursor: pointer;
   box-shadow: var(--shadow-xs);
   transition:
-    background 0.2s ease,
-    border-color 0.2s ease;
+    background var(--dur-short) var(--ease-out),
+    border-color var(--dur-short) var(--ease-out);
 }
 
 .action-list label:hover {
@@ -411,7 +411,7 @@
   color: var(--ink);
   cursor: pointer;
   box-shadow: var(--shadow-xs);
-  transition: border-color 0.2s ease;
+  transition: border-color var(--dur-short) var(--ease-out);
 }
 
 .target-candidates label:hover {
@@ -435,8 +435,8 @@
   cursor: pointer;
   box-shadow: var(--shadow-xs);
   transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
+    border-color var(--dur-short) var(--ease-out),
+    box-shadow var(--dur-short) var(--ease-out);
 }
 
 .fallback-card:hover {
@@ -582,7 +582,7 @@
 .cell-output {
   grid-column: 2;
   margin: 6px 0 0;
-  background: #f4f4f4;
+  background: var(--code-bg);
   border-left: 3px solid var(--green);
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   padding: 8px;
@@ -630,11 +630,11 @@
   text-align: left;
   padding: 11px;
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: background var(--dur-short) var(--ease-out);
 }
 
 .bin-list button:hover {
-  background: #f0f6ff;
+  background: var(--blue-hover-tint);
 }
 
 .bin-list button.active {
@@ -737,12 +737,12 @@
 .bin-table th {
   position: sticky;
   top: 0;
-  background: #eef2f7;
+  background: var(--ground-hover);
   z-index: 1;
 }
 
 .bin-table .bin-missing {
-  background: #fff9e6;
+  background: var(--amber-missing);
 }
 
 .bin-rate-cell {
@@ -756,7 +756,7 @@
   display: block;
   width: 62px;
   height: 7px;
-  background: #e9edf4;
+  background: var(--track);
   overflow: hidden;
   border-radius: var(--radius-full);
 }
@@ -821,7 +821,7 @@
 
 .model-grid.head {
   min-height: 36px;
-  background: #eef2f7;
+  background: var(--ground-hover);
   border-top: 1px solid var(--line);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   font-weight: 600;
@@ -914,7 +914,7 @@
 .candidate-bars i {
   height: 10px;
   display: block;
-  background: #d4d4d8;
+  background: var(--ink-inverse-soft);
   max-width: 100%;
   border-radius: var(--radius-full);
 }
@@ -971,7 +971,7 @@
   grid-template-columns: minmax(220px, 1fr) 220px auto;
   gap: var(--space-3);
   align-items: end;
-  box-shadow: 0 10px 20px rgba(24, 24, 27, 0.12);
+  box-shadow: var(--shadow-panel-dark);
 }
 
 .score-panel > div {
@@ -979,7 +979,7 @@
 }
 
 .score-panel .eyebrow {
-  color: #93c5fd;
+  color: var(--blue-on-dark);
 }
 
 .score-panel h3 {
@@ -989,7 +989,7 @@
 .score-panel p {
   margin: 0;
   font-size: 11px;
-  color: #d4d4d8;
+  color: var(--ink-inverse-soft);
 }
 
 .score-panel select {
@@ -1025,7 +1025,7 @@
   height: 14px;
   border-radius: 50%;
   background: var(--blue);
-  box-shadow: 0 0 0 0 rgba(26, 86, 219, 0.35);
+  box-shadow: 0 0 0 0 var(--pulse-glow);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -1036,7 +1036,7 @@
 
 @keyframes pulse {
   70% {
-    box-shadow: 0 0 0 12px rgba(15, 98, 254, 0);
+    box-shadow: 0 0 0 12px transparent;
   }
 }
 
@@ -1207,7 +1207,7 @@
   position: fixed;
   inset: 0;
   z-index: var(--z-workspace-setup);
-  background: rgba(17, 17, 27, 0.73);
+  background: var(--scrim-strong);
   display: grid;
   place-items: center;
   padding: var(--space-5);
@@ -1219,7 +1219,7 @@
   overflow: auto;
   background: var(--paper);
   border-radius: var(--radius-2xl);
-  box-shadow: 0 24px 70px rgba(24, 24, 27, 0.22);
+  box-shadow: var(--shadow-modal);
 }
 
 .workspace-setup-head {
@@ -1229,7 +1229,7 @@
 }
 
 .workspace-setup-head .eyebrow {
-  color: #93c5fd;
+  color: var(--blue-on-dark);
 }
 
 .workspace-setup-head h2 {
@@ -1331,7 +1331,7 @@
   cursor: pointer;
   color: var(--muted);
   margin-bottom: 4px;
-  transition: background 0.2s ease;
+  transition: background var(--dur-short) var(--ease-out);
 }
 
 .settings-nav-item strong,
@@ -1351,7 +1351,7 @@
 }
 
 .settings-nav-item:hover {
-  background: #f0f4ff;
+  background: var(--blue-hover-tint);
 }
 
 .settings-nav-item.active {
@@ -1406,8 +1406,8 @@
   margin-top: 6px;
   cursor: pointer;
   transition:
-    background 0.2s ease,
-    border-color 0.2s ease;
+    background var(--dur-short) var(--ease-out),
+    border-color var(--dur-short) var(--ease-out);
 }
 
 .provider-profile:hover {
@@ -1507,11 +1507,11 @@
   .stage-progress,
   .stage-panel,
   .chat-rail {
-    animation: surface-in 0.45s ease-out both;
+    animation: surface-in var(--dur-med) var(--ease-out) both;
   }
 
   .workspace > * {
-    animation: surface-in 0.5s ease-out both;
+    animation: surface-in var(--dur-med) var(--ease-out) both;
   }
 
   .workspace > *:nth-child(2) {

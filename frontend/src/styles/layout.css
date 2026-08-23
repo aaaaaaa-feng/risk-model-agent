@@ -39,7 +39,7 @@
   height: 64px;
   border-radius: var(--radius-full);
   background: transparent;
-  transition: background 0.15s ease;
+  transition: background var(--dur-short) var(--ease-out);
 }
 
 .col-resizer:hover::before,
@@ -76,7 +76,7 @@ body.col-resizing .chat-rail {
   padding: var(--space-3);
   overflow: hidden;
   min-width: 0;
-  transition: width 0.25s ease;
+  transition: width var(--dur-med) var(--ease-out);
 }
 
 .sidebar.collapsed {
@@ -123,7 +123,7 @@ body.col-resizing .chat-rail {
   cursor: pointer;
   display: grid;
   place-items: center;
-  transition: border-color 0.2s ease;
+  transition: border-color var(--dur-short) var(--ease-out);
 }
 
 .sidebar-toggle:hover {
@@ -194,14 +194,14 @@ body.col-resizing .chat-rail {
   cursor: pointer;
   box-shadow: var(--shadow-blue);
   transition:
-    background 0.2s ease,
-    box-shadow 0.2s ease;
+    background var(--dur-short) var(--ease-out),
+    box-shadow var(--dur-short) var(--ease-out);
 }
 
 .new-project:hover,
 .settings-open:hover {
   background: var(--blue-hover);
-  box-shadow: 0 8px 18px rgba(30, 64, 175, 0.24);
+  box-shadow: var(--shadow-blue-hover);
 }
 
 .settings-open {
@@ -210,7 +210,7 @@ body.col-resizing .chat-rail {
 }
 
 .settings-open:hover {
-  background: #1e293b;
+  background: var(--black-hover);
 }
 
 .project-list {
@@ -225,15 +225,15 @@ body.col-resizing .chat-rail {
   border: 1px solid var(--line);
   border-left: 3px solid transparent;
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--panel-solid);
   color: var(--ink);
   text-align: left;
   padding: 10px 11px;
   cursor: pointer;
   box-shadow: var(--shadow-xs);
   transition:
-    background 0.2s ease,
-    border-color 0.2s ease;
+    background var(--dur-short) var(--ease-out),
+    border-color var(--dur-short) var(--ease-out);
 }
 
 .project-item:hover {
@@ -399,7 +399,7 @@ body.col-resizing .chat-rail {
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--panel);
   box-shadow: var(--shadow-sm);
 }
 
@@ -413,19 +413,19 @@ body.col-resizing .chat-rail {
   font-weight: 700;
   cursor: pointer;
   transition:
-    background 0.2s ease,
-    color 0.2s ease;
+    background var(--dur-short) var(--ease-out),
+    color var(--dur-short) var(--ease-out);
 }
 
 .primary-tabs button:hover {
-  background: #eef2f7;
+  background: var(--ground-hover);
   color: var(--ink);
 }
 
 .primary-tabs button[aria-selected="true"] {
   background: var(--blue);
   color: var(--paper);
-  box-shadow: 0 5px 12px rgba(30, 64, 175, 0.2);
+  box-shadow: var(--shadow-blue-soft);
 }
 
 .workspace {
@@ -496,7 +496,7 @@ body.col-resizing .chat-rail {
 }
 
 .stage-step.done .step-index {
-  border-color: #bfe6cc;
+  border-color: var(--green-border);
   background: var(--green-soft);
 }
 
@@ -507,8 +507,8 @@ body.col-resizing .chat-rail {
 }
 
 .stage-step.current .step-index {
-  border-color: rgba(255, 255, 255, 0.55);
-  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--on-blue-border);
+  background: var(--on-blue-fill);
   color: var(--paper);
 }
 
@@ -627,7 +627,7 @@ body.col-resizing .chat-rail {
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
-  transition: border-color 0.2s ease;
+  transition: border-color var(--dur-short) var(--ease-out);
 }
 
 .panel-toggle:hover {
@@ -723,7 +723,7 @@ body.col-resizing .chat-rail {
 }
 
 .stage-substeps li.done i {
-  border-color: #bfe6cc;
+  border-color: var(--green-border);
   background: var(--green-soft);
 }
 
@@ -746,7 +746,7 @@ body.col-resizing .chat-rail {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
-  transition: width 0.25s ease;
+  transition: width var(--dur-med) var(--ease-out);
 }
 
 .chat-rail.narrow {
@@ -795,7 +795,7 @@ body.col-resizing .chat-rail {
   cursor: pointer;
   display: grid;
   place-items: center;
-  transition: border-color 0.2s ease;
+  transition: border-color var(--dur-short) var(--ease-out);
 }
 
 .chat-collapse:hover,
@@ -829,7 +829,7 @@ body.col-resizing .chat-rail {
   gap: 7px;
   min-height: 42px;
   align-items: center;
-  border-bottom: 1px solid #f0f0f2;
+  border-bottom: 1px solid var(--line-soft);
   padding: 0 11px;
   font-size: 10px;
 }
@@ -858,7 +858,7 @@ body.col-resizing .chat-rail {
 .audit-list.compact li {
   min-height: 34px;
   border-bottom: 0;
-  border-right: 1px solid #f0f0f2;
+  border-right: 1px solid var(--line-soft);
 }
 
 .audit-list.compact li:last-child {
@@ -1053,7 +1053,7 @@ body.col-resizing .chat-rail {
   background: transparent;
   border: 0;
   padding: 0;
-  color: #e4e4e7;
+  color: var(--output-text);
   font-size: 11px;
   line-height: 1.55;
 }

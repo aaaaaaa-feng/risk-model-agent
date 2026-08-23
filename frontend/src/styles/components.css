@@ -14,14 +14,14 @@
   white-space: nowrap;
   box-shadow: var(--shadow-sm);
   transition:
-    background 0.2s ease,
-    box-shadow 0.2s ease,
-    border-color 0.2s ease,
-    transform 0.15s ease;
+    background var(--dur-short) var(--ease-out),
+    box-shadow var(--dur-short) var(--ease-out),
+    border-color var(--dur-short) var(--ease-out),
+    transform var(--dur-short) var(--ease-out);
 }
 
 .button:hover:not(:disabled) {
-  background: #eef2f7;
+  background: var(--ground-hover);
   border-color: var(--line-blue);
   box-shadow: var(--shadow-md);
 }
@@ -36,7 +36,7 @@
 .button.primary:hover:not(:disabled) {
   background: var(--blue-hover);
   transform: translateY(-1px);
-  box-shadow: 0 9px 18px rgba(30, 64, 175, 0.26);
+  box-shadow: var(--shadow-blue-strong);
 }
 
 .button.primary:active:not(:disabled) {
@@ -62,9 +62,9 @@
 
 .button:disabled,
 .button.disabled {
-  background: #c6c6c6;
-  border-color: #c6c6c6;
-  color: #6f6f6f;
+  background: var(--disabled-bg);
+  border-color: var(--disabled-bg);
+  color: var(--disabled-text);
   cursor: not-allowed;
   box-shadow: none;
 }
@@ -151,13 +151,13 @@
 }
 
 .tag.ok {
-  border-color: #bfe6cc;
+  border-color: var(--green-border);
   background: var(--green-soft);
   color: var(--green-text);
 }
 
 .tag.attention {
-  border-color: #fecaca;
+  border-color: var(--red-border);
   background: var(--red-soft);
   color: var(--red-text);
 }
@@ -215,8 +215,8 @@ label > textarea,
   padding: 8px 10px;
   outline: none;
   transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
+    border-color var(--dur-short) var(--ease-out),
+    box-shadow var(--dur-short) var(--ease-out);
 }
 
 label > input:focus,
@@ -296,13 +296,13 @@ table {
 th,
 td {
   padding: 11px 12px;
-  border-bottom: 1px solid #f0f0f2;
+  border-bottom: 1px solid var(--line-soft);
   text-align: left;
 }
 
 th {
-  background: #eef2f7;
-  color: #52525b;
+  background: var(--ground-hover);
+  color: var(--th-text);
   font-size: 10px;
   font-weight: 800;
   position: sticky;
@@ -311,7 +311,7 @@ th {
 }
 
 tbody tr {
-  transition: background 0.2s ease;
+  transition: background var(--dur-short) var(--ease-out);
 }
 
 tbody tr:hover {
@@ -361,7 +361,7 @@ tbody tr:last-child td {
 .drawer-scrim {
   position: fixed;
   inset: 0;
-  background: rgba(24, 24, 27, 0.42);
+  background: var(--scrim);
   backdrop-filter: blur(3px);
   z-index: var(--z-modal-backdrop);
 }
@@ -376,7 +376,7 @@ tbody tr:last-child td {
   overflow: auto;
   background: var(--paper);
   border-radius: var(--radius-2xl);
-  box-shadow: 0 24px 70px rgba(24, 24, 27, 0.22);
+  box-shadow: var(--shadow-modal);
 }
 
 .modal-head,
@@ -466,7 +466,7 @@ tbody tr:last-child td {
   padding: 10px 13px;
   font-size: 11px;
   border-radius: var(--radius-lg);
-  box-shadow: 0 12px 28px rgba(24, 24, 27, 0.16);
+  box-shadow: var(--shadow-toast);
 }
 
 .toast.error {
@@ -490,7 +490,7 @@ tbody tr:last-child td {
   background: var(--amber-soft);
   border-left: 4px solid var(--amber);
   border-radius: var(--radius-lg);
-  color: #6b5310;
+  color: var(--amber-deep);
   margin: 10px 0;
 }
 
