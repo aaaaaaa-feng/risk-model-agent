@@ -40,7 +40,7 @@
   line-height: 1.55;
 }
 
-/* Stage line / hero */
+/* Stage line / hero — 墨色面板,钴蓝只做点缀 */
 .stage-line {
   min-height: 158px;
   display: flex;
@@ -49,9 +49,8 @@
   align-items: flex-end;
   padding: 25px 26px;
   border-radius: var(--radius-xl);
-  background: var(--blue);
+  background: var(--black);
   color: var(--paper);
-  box-shadow: var(--shadow-blue);
 }
 
 .stage-line h2 {
@@ -66,16 +65,16 @@
 
 .stage-line p {
   font-size: 12px;
-  color: var(--blue-subtle);
+  color: var(--ink-inverse-soft);
   margin: 0;
 }
 
 .stage-line .eyebrow {
-  color: var(--blue-subtle);
+  color: var(--blue-on-dark);
 }
 
 .stage-line .run-meta {
-  color: var(--blue-subtle);
+  color: var(--ink-inverse-soft);
 }
 
 .stage-line .run-meta b {
@@ -180,8 +179,8 @@
 
 .summary-cell strong {
   display: block;
-  font-family: var(--display);
-  font-size: 20px;
+  font-family: var(--mono);
+  font-size: 19px;
   font-weight: 600;
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
@@ -1174,7 +1173,7 @@
 }
 
 .welcome .button.primary:hover {
-  background: var(--blue-hover);
+  background: var(--black-hover);
 }
 
 /* Workspace setup */
@@ -1198,7 +1197,7 @@
 }
 
 .workspace-setup-head {
-  background: var(--blue);
+  background: var(--black);
   color: var(--paper);
   padding: 22px var(--space-5);
 }
@@ -1331,7 +1330,7 @@
 }
 
 .settings-nav-item.active strong {
-  color: var(--blue-hover);
+  color: var(--blue-text);
 }
 
 .settings-panel {

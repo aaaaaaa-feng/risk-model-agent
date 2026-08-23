@@ -184,26 +184,21 @@ body.col-resizing .chat-rail {
   border: 0;
   border-radius: var(--radius-md);
   padding: 0 13px;
-  background: var(--blue);
+  background: var(--black);
   color: var(--paper);
   font-weight: 700;
   text-align: left;
   cursor: pointer;
-  box-shadow: var(--shadow-blue);
-  transition:
-    background var(--dur-short) var(--ease-out),
-    box-shadow var(--dur-short) var(--ease-out);
+  transition: background var(--dur-short) var(--ease-out);
 }
 
 .new-project:hover,
 .settings-open:hover {
-  background: var(--blue-hover);
-  box-shadow: var(--shadow-blue-hover);
+  background: var(--black-hover);
 }
 
 .settings-open {
   background: var(--black);
-  box-shadow: none;
 }
 
 .settings-open:hover {
@@ -414,9 +409,8 @@ body.col-resizing .chat-rail {
 }
 
 .primary-tabs button[aria-selected="true"] {
-  background: var(--blue);
+  background: var(--black);
   color: var(--paper);
-  box-shadow: var(--shadow-blue-soft);
 }
 
 .workspace {
@@ -493,7 +487,7 @@ body.col-resizing .chat-rail {
 
 .stage-step.current {
   color: var(--paper);
-  background: var(--blue);
+  background: var(--black);
   overflow: hidden;
 }
 
@@ -725,8 +719,8 @@ body.col-resizing .chat-rail {
 }
 
 .stage-substeps li.active i {
-  background: var(--blue);
-  border-color: var(--blue);
+  background: var(--black);
+  border-color: var(--black);
   color: var(--paper);
 }
 

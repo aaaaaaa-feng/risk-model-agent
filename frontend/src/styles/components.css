@@ -24,15 +24,13 @@
 }
 
 .button.primary {
-  border-color: var(--blue);
-  background: var(--blue);
+  border-color: var(--black);
+  background: var(--black);
   color: var(--paper);
-  box-shadow: var(--shadow-blue);
 }
 
 .button.primary:hover:not(:disabled) {
-  background: var(--blue-hover);
-  box-shadow: var(--shadow-blue-strong);
+  background: var(--black-hover);
 }
 
 .button.primary:active:not(:disabled) {
@@ -376,7 +374,7 @@ tbody tr:last-child td {
 .modal-head,
 .drawer-head {
   height: 76px;
-  background: var(--blue);
+  background: var(--black);
   color: var(--paper);
   display: flex;
   align-items: center;
