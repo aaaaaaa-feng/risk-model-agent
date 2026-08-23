@@ -149,15 +149,8 @@ tbody tr:last-child td {
   color: var(--muted);
 }
 
-/* Modal & drawer — 模态遮罩已由 ui/dialog.tsx 接管,抽屉遮罩待 Sheet 迁移后移除 */
-.drawer-scrim {
-  position: fixed;
-  inset: 0;
-  background: var(--scrim);
-  backdrop-filter: blur(3px);
-  z-index: var(--z-modal-backdrop);
-}
-
+/* Modal & drawer — 遮罩与骨架已由 ui/dialog.tsx、ui/sheet.tsx(Radix)接管,
+ * 保留头部与内容区皮肤 */
 .modal {
   position: absolute;
   left: 50%;
@@ -198,22 +191,6 @@ tbody tr:last-child td {
   justify-content: flex-end;
   gap: var(--space-2);
   padding-top: 3px;
-}
-
-.settings-drawer {
-  position: fixed;
-  z-index: var(--z-drawer);
-  top: var(--space-3);
-  right: var(--space-3);
-  bottom: var(--space-3);
-  width: min(500px, calc(100dvw - 30px));
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-2xl);
-  box-shadow: var(--shadow-xl);
-  overflow: hidden;
-  display: grid;
-  grid-template-rows: 76px minmax(0, 1fr);
 }
 
 .settings-body {
@@ -341,9 +318,5 @@ tbody tr:last-child td {
 
   .settings-nav-item span {
     display: none;
-  }
-
-  .settings-drawer {
-    width: calc(100dvw - 16px);
   }
 }
