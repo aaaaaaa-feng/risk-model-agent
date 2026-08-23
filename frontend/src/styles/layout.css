@@ -648,8 +648,6 @@ body.col-resizing .chat-rail {
   color: var(--muted);
 }
 
-/* .rail-status 已由 ui/badge.tsx 的 Badge 组件取代 */
-
 .stage-substeps {
   list-style: none;
   margin: var(--space-2) 0;

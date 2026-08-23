@@ -115,6 +115,5 @@
   /* Z-index scale */
   --z-modal-backdrop: 50;
   --z-drawer: 60;
-  --z-toast: 80;
   --z-workspace-setup: 90;
 }
