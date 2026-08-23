@@ -24,9 +24,14 @@ label,
 label > input:not([type="checkbox"]):not([type="radio"]),
 label > textarea,
 label > button[role="combobox"] {
-  display: block;
+  /* 只加间距与宽度:display 必须保留控件自身布局(flex 等) */
   width: 100%;
   margin-top: 5px;
+}
+
+label > input:not([type="checkbox"]):not([type="radio"]),
+label > textarea {
+  display: block;
 }
 
 .form-stack {
@@ -207,12 +212,6 @@ label > button[role="combobox"] {
   font-size: 14px;
 }
 
-.settings-section > p {
-  font-size: 10px;
-  color: var(--muted);
-  margin: 0 0 11px;
-}
-
 .drawer-save {
   position: sticky;
   bottom: 0;
@@ -242,6 +241,72 @@ label > button[role="combobox"] {
 /* Utility text colors */
 .ok {
   color: var(--green-text);
+}
+
+/* Hint — 问号说明:hover 展示,点击锁定 */
+.hint {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.hint-trigger {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--quiet);
+  cursor: help;
+  padding: 0;
+  transition:
+    color var(--dur-short) var(--ease-out),
+    background var(--dur-short) var(--ease-out);
+}
+
+.hint-trigger svg {
+  width: 14px;
+  height: 14px;
+}
+
+.hint-trigger:hover,
+.hint-trigger[aria-expanded="true"] {
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.hint-bubble {
+  position: absolute;
+  z-index: var(--z-workspace-setup);
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 260px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+  box-shadow: var(--shadow-xl);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.55;
+  white-space: normal;
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--dur-short) var(--ease-out),
+    visibility var(--dur-short);
+}
+
+.hint:hover .hint-bubble,
+.hint-bubble.open {
+  opacity: 1;
+  visibility: visible;
 }
 
 .danger {
@@ -311,9 +376,5 @@ label > button[role="combobox"] {
 
   .settings-nav-item {
     padding-inline: 7px;
-  }
-
-  .settings-nav-item span {
-    display: none;
   }
 }

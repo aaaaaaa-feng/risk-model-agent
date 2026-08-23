@@ -319,13 +319,6 @@ body.col-resizing .chat-rail {
   font-size: 10px;
 }
 
-.network-note p {
-  font-size: 10px;
-  line-height: 1.5;
-  color: var(--muted);
-  margin: 4px 0 11px;
-}
-
 /* Main column */
 .main-column {
   flex: 1;
@@ -880,11 +873,6 @@ body.col-resizing .chat-rail {
   font-weight: 800;
 }
 
-.chat-head span {
-  font: 10px var(--mono);
-  color: var(--quiet);
-}
-
 .chat-messages {
   overflow: auto;
   padding: var(--space-2) 0;
@@ -1373,11 +1361,7 @@ body.col-resizing .chat-rail {
     padding-top: var(--space-3);
   }
 
-  .side-footer .network-note p {
-    display: none;
-  }
-
-  .network-note b {
+  .side-footer .network-note b {
     margin-bottom: 9px;
   }
 }

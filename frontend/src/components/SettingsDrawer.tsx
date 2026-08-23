@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { notify } from "@/lib/notify";
+import { Hint } from "@/components/ui/hint";
 import type {
   BackupsResponse,
   ProviderProfile,
@@ -33,12 +34,12 @@ interface Props {
 
 type SectionId = "providers" | "modeling" | "network" | "workspace" | "backup";
 
-const sections: Array<{ id: SectionId; label: string; hint: string }> = [
-  { id: "providers", label: "模型与 API", hint: "Provider、密钥、Reviewer" },
-  { id: "modeling", label: "建模默认值", hint: "算法与资源预算" },
-  { id: "network", label: "网络与更新", hint: "Notebook、代理、遥测" },
-  { id: "workspace", label: "工作文件夹", hint: "本地数据目录" },
-  { id: "backup", label: "备份与重置", hint: "恢复与数据保护" },
+const sections: Array<{ id: SectionId; label: string }> = [
+  { id: "providers", label: "模型与 API" },
+  { id: "modeling", label: "建模默认值" },
+  { id: "network", label: "网络与更新" },
+  { id: "workspace", label: "工作文件夹" },
+  { id: "backup", label: "备份与重置" },
 ];
 
 const models = [
@@ -256,8 +257,7 @@ export function SettingsDrawer({
                   aria-current={section === item.id ? "page" : undefined}
                   onClick={() => setSection(item.id)}
                 >
-                  <strong>{item.label}</strong>
-                  <span>{item.hint}</span>
+                  {item.label}
                 </button>
               ))}
             </nav>
@@ -265,12 +265,11 @@ export function SettingsDrawer({
               {section === "providers" && (
                 <SettingsSection
                   title="模型与 API"
-                  description="配置可持久化保存；只有 SafeEvidence 可以发送到外部 API。"
+                  hint="配置可持久化保存；只有 SafeEvidence 可以发送到外部 API。"
                 >
                   <div className="provider-profiles">
                     <div className="provider-profiles-head">
                       <strong>已保存的 Provider 配置</strong>
-                      <span>选择后编辑并保存</span>
                     </div>
                     {profiles.length ? (
                       <RadioGroup
@@ -436,7 +435,7 @@ export function SettingsDrawer({
               {section === "modeling" && (
                 <SettingsSection
                   title="建模默认值"
-                  description="这里只定义默认推荐；每个 Run 的确认节点仍可修改。"
+                  hint="这里只定义默认推荐；每个 Run 的确认节点仍可修改。"
                 >
                   <div className="model-checks">
                     {models.map((model) => (
@@ -488,7 +487,7 @@ export function SettingsDrawer({
               {section === "network" && (
                 <SettingsSection
                   title="网络、更新与遥测"
-                  description="Notebook 不是安全沙箱；关闭偏好不能替代操作系统隔离。"
+                  hint="Notebook 不是安全沙箱；关闭偏好不能替代操作系统隔离。"
                 >
                   <div className="check-row">
                     <Checkbox
@@ -556,7 +555,7 @@ export function SettingsDrawer({
               {section === "workspace" && workspace && (
                 <SettingsSection
                   title="工作文件夹"
-                  description="首次启动选择后，后续项目级数据都保存在这里。"
+                  hint="首次启动选择后，后续项目级数据都保存在这里。"
                 >
                   <div className="workspace-setting">
                     <code>{workspace.path}</code>
@@ -571,13 +570,13 @@ export function SettingsDrawer({
                 </SettingsSection>
               )}
               {section === "workspace" && !workspace && (
-                <SettingsSection title="工作文件夹" description="当前还没有读取到工作文件夹状态。">
+                <SettingsSection title="工作文件夹">
                   <p className="empty-hint">请稍后重试。</p>
                 </SettingsSection>
               )}
 
               {section === "backup" && (
-                <SettingsSection title="备份与重置" description={`数据目录：${settings.data_dir}`}>
+                <SettingsSection title="备份与重置" hint={`数据目录：${settings.data_dir}`}>
                   {settings.synced_path_warning && (
                     <p className="inline-warning">当前目录疑似位于同步盘，请迁移到本机专属目录。</p>
                   )}
@@ -624,17 +623,19 @@ export function SettingsDrawer({
 
 function SettingsSection({
   title,
-  description,
+  hint,
   children,
 }: {
   title: string;
-  description: string;
+  hint?: string;
   children: ReactNode;
 }) {
   return (
     <section className="settings-section">
-      <h3>{title}</h3>
-      <p>{description}</p>
+      <h3>
+        {title}
+        {hint ? <Hint text={hint} /> : null}
+      </h3>
       <div className="form-stack compact">{children}</div>
     </section>
   );

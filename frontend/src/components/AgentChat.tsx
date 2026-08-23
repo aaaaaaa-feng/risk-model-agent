@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { notify } from "@/lib/notify";
+import { Hint } from "@/components/ui/hint";
 import { RefreshCw } from "lucide-react";
 import type { Message, Settings } from "../types";
 
@@ -183,8 +184,10 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
   return (
     <section className="agent-chat" aria-label="项目 Agent 对话">
       <div className="chat-head">
-        <strong>项目 Agent 对话</strong>
-        <span>多轮持久化 · 流式执行摘要 · 不展示隐藏思维链</span>
+        <strong>
+          项目 Agent 对话
+          <Hint text="多轮对话持久化保存；流式展示执行摘要；不展示隐藏思维链。" />
+        </strong>
       </div>
       <div className="chat-messages" ref={scrollRef}>
         {!projectId && <p className="chat-placeholder">创建或选择项目后开始对话。</p>}
@@ -290,7 +293,7 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
               <Select value={`m:${modelLabel}`} onValueChange={onModelSelect} disabled={switching}>
                 <SelectTrigger
                   aria-label="切换模型"
-                  className="h-[30px] w-auto gap-1.5 px-2 font-mono text-[10px]"
+                  className="h-[30px] w-auto gap-1.5 rounded-full px-3 font-mono text-[10px]"
                 >
                   <SelectValue />
                 </SelectTrigger>

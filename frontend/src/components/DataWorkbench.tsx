@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { notify } from "@/lib/notify";
+import { Hint } from "@/components/ui/hint";
 import { cn } from "@/lib/utils";
 import {
   Table,
@@ -248,8 +249,10 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
     <div className="data-workbench">
       <div className="stage-line">
         <div>
-          <h2>准备本地建模数据</h2>
-          <p>支持直接建模、多表关联和 Notebook 兜底；每个结果都会重新校验。</p>
+          <h2>
+            准备本地建模数据
+            <Hint text="支持直接建模、多表关联和 Notebook 兜底；每个结果都会重新校验。" />
+          </h2>
         </div>
         <div className="run-meta">
           PROJECT <b>{detail.project.id.slice(-8)}</b>
@@ -279,8 +282,10 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
         >
           <div className="section-heading">
             <div>
-              <h3>导入 CSV / Excel</h3>
-              <p>可一次选择多张表；Excel 多 Sheet 会先要求选择 Sheet。</p>
+              <h3>
+                导入 CSV / Excel
+                <Hint text="可一次选择多张表；Excel 多 Sheet 会先要求选择 Sheet。" />
+              </h3>
             </div>
             <div className="upload-actions">
               <Select value={uploadKind} onValueChange={setUploadKind}>
@@ -329,8 +334,10 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
         >
           <div className="section-heading">
             <div>
-              <h3>四级关联工作流</h3>
-              <p>Agent 推荐 → 可视化编辑 → Agent Notebook → 用户手写 Notebook。</p>
+              <h3>
+                四级关联工作流
+                <Hint text="Agent 推荐 → 可视化编辑 → Agent Notebook → 用户手写 Notebook。" />
+              </h3>
             </div>
             <Button variant="outline" onClick={addStep} disabled={assets.length < 2}>
               ＋ 添加特征表
@@ -482,8 +489,10 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
         >
           <div className="section-heading">
             <div>
-              <h3>创建多个 Y 任务</h3>
-              <p>-1 和空值会按每个 Y 独立排除；一个 Y 阻断不影响其他任务。</p>
+              <h3>
+                创建多个 Y 任务
+                <Hint text="-1 和空值会按每个 Y 独立排除；一个 Y 阻断不影响其他任务。" />
+              </h3>
             </div>
           </div>
           {detail.dataset_versions.length === 0 ? (
@@ -541,8 +550,10 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
             <div className="task-queue">
               <div className="section-heading">
                 <div>
-                  <h3>Y 任务队列</h3>
-                  <p>可一次启动多个任务，本地 Worker 按顺序执行。</p>
+                  <h3>
+                    Y 任务队列
+                    <Hint text="可一次启动多个任务，本地 Worker 按顺序执行。" />
+                  </h3>
                 </div>
               </div>
               {detail.target_tasks.map((task) => (
@@ -771,8 +782,10 @@ function NotebookEditor({
     <div className="notebook-editor">
       <div className="section-heading">
         <div>
-          <h3>{notebook.name}</h3>
-          <p>网络默认开启 · 用户代码不在安全沙箱中 · 产品不会主动外发原始数据</p>
+          <h3>
+            {notebook.name}
+            <Hint text="网络默认开启 · 用户代码不在安全沙箱中 · 产品不会主动外发原始数据" />
+          </h3>
         </div>
         <Button variant="outline" onClick={save}>
           {busy === "save" ? "保存中…" : "保存 Notebook"}

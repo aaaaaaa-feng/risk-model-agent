@@ -32,7 +32,6 @@
   margin: 0 0 3px;
 }
 
-.section-heading p,
 .section-copy {
   font-size: 11px;
   color: var(--muted);
@@ -61,12 +60,6 @@
   font-weight: 600;
   letter-spacing: -0.015em;
   margin: 6px 0 8px;
-}
-
-.stage-line p {
-  font-size: 12px;
-  color: var(--ink-inverse-soft);
-  margin: 0;
 }
 
 .stage-line .eyebrow {
@@ -1268,27 +1261,13 @@
   border-radius: var(--radius-md);
   background: transparent;
   text-align: left;
-  padding: 10px 9px;
+  padding: 10px 12px;
   cursor: pointer;
-  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
   margin-bottom: 4px;
   transition: background var(--dur-short) var(--ease-out);
-}
-
-.settings-nav-item strong,
-.settings-nav-item span {
-  display: block;
-}
-
-.settings-nav-item strong {
-  font-size: 11px;
-  color: var(--ink);
-}
-
-.settings-nav-item span {
-  font-size: 10px;
-  margin-top: 3px;
-  line-height: 1.35;
 }
 
 .settings-nav-item:hover {
@@ -1298,9 +1277,6 @@
 .settings-nav-item.active {
   background: var(--blue-soft);
   box-shadow: inset 0 0 0 1px var(--line-blue);
-}
-
-.settings-nav-item.active strong {
   color: var(--blue-text);
 }
 
@@ -1324,11 +1300,6 @@
   gap: var(--space-2);
   align-items: center;
   padding: 0 0 7px;
-  font-size: 10px;
-}
-
-.provider-profiles-head span {
-  color: var(--muted);
   font-size: 10px;
 }
 

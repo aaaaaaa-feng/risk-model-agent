@@ -15,11 +15,9 @@ const badgeVariants = cva(
       variant: {
         neutral: "border-[var(--line)] bg-background font-normal text-foreground",
         muted: "border-transparent bg-[var(--ground)] text-foreground",
-        network:
-          "border-[var(--amber-border)] bg-[var(--amber-soft)] text-[var(--amber-text)]",
+        network: "border-[var(--amber-border)] bg-[var(--amber-soft)] text-[var(--amber-text)]",
         ok: "border-[var(--green-border)] bg-[var(--green-soft)] text-[var(--green-text)]",
-        attention:
-          "border-[var(--red-border)] bg-[var(--red-soft)] text-[var(--red-text)]",
+        attention: "border-[var(--red-border)] bg-[var(--red-soft)] text-[var(--red-text)]",
       },
     },
     defaultVariants: {
@@ -39,8 +37,7 @@ export function statusVariant(status: string): BadgeVariant {
 }
 
 export interface BadgeProps
-  extends React.HTMLAttributes<HTMLSpanElement>,
-    VariantProps<typeof badgeVariants> {}
+  extends React.HTMLAttributes<HTMLSpanElement>, VariantProps<typeof badgeVariants> {}
 
 /* 用 span 而非 div:徽章常出现在表格单元格与行文内,保持 phrasing content 合法 */
 function Badge({ className, variant, ...props }: BadgeProps) {

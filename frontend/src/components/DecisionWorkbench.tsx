@@ -23,6 +23,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { notify } from "@/lib/notify";
+import { Hint } from "@/components/ui/hint";
 import type { Decision, Run } from "../types";
 
 interface Props {
@@ -112,8 +113,10 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
       <div className="stage-line">
         <div>
           <span className="eyebrow">HUMAN IN THE LOOP · {decision.stage}</span>
-          <h2>{details.title || decisionStageName[decision.stage] || decision.stage}</h2>
-          <p>Reviewer 已先完成审核；你只需确认业务选择，不需要阅读长代码。</p>
+          <h2>
+            {details.title || decisionStageName[decision.stage] || decision.stage}
+            <Hint text="Reviewer 已先完成审核；你只需确认业务选择，不需要阅读长代码。" />
+          </h2>
         </div>
         <div className="run-meta">
           RUN <b>{run.id.slice(-8)}</b>
@@ -525,8 +528,10 @@ function BinningDecision({
             <>
               <div className="section-heading bin-detail-head">
                 <div>
-                  <h3>{manualColumn} · 分箱结果</h3>
-                  <p>当前表格是已生成的分箱逻辑；如需调整，在下方编辑边界/类别组后确认。</p>
+                  <h3>
+                    {manualColumn} · 分箱结果
+                    <Hint text="当前表格是已生成的分箱逻辑；如需调整，在下方编辑边界/类别组后确认。" />
+                  </h3>
                 </div>
                 <Badge variant={sample.monotonic ? "ok" : "attention"} className="mt-[3px]">
                   {monotonicLabel(stats.rates, sample.monotonic)}
@@ -605,8 +610,10 @@ function BinningDecision({
               </div>
               <div className="bin-editor-grid">
                 <div>
-                  <h3>人工分箱规则</h3>
-                  <p>保存后会生成新分箱版本，并使训练、质检和报告失效重跑。</p>
+                  <h3>
+                    人工分箱规则
+                    <Hint text="保存后会生成新分箱版本，并使训练、质检和报告失效重跑。" />
+                  </h3>
                   <Textarea
                     value={manualSpec}
                     onChange={(e) => setManualSpec(e.target.value)}
@@ -704,8 +711,10 @@ function ModelDecision({
     <section className="decision-section">
       <div className="section-heading">
         <div>
-          <h3>候选模型执行矩阵</h3>
-          <p>资源预算只顺序运行推荐组合，不会默认全部跑。</p>
+          <h3>
+            候选模型执行矩阵
+            <Hint text="资源预算只顺序运行推荐组合，不会默认全部跑。" />
+          </h3>
         </div>
         <Button
           variant="link"

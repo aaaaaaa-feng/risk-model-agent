@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { notify } from "@/lib/notify";
+import { Hint } from "@/components/ui/hint";
 import { cn } from "@/lib/utils";
 import {
   Table,
@@ -101,8 +102,10 @@ export function ReportView({ project, run }: Props) {
       <div className="report-empty">
         <div className="stage-line">
           <div>
-            <h2>产物将在最终质检后生成</h2>
-            <p>Web、Excel、单文件 HTML 和模型包共享同一结构化报告数据。</p>
+            <h2>
+              产物将在最终质检后生成
+              <Hint text="Web、Excel、单文件 HTML 和模型包共享同一结构化报告数据。" />
+            </h2>
           </div>
         </div>
         <div className="empty-state">
@@ -125,7 +128,7 @@ export function ReportView({ project, run }: Props) {
           <h2>
             {report.project.name} · {report.target.column}
           </h2>
-          <p>管理摘要与专业详情来自同一份事实数据 · Schema {report.schema_version}。</p>
+          <Hint text={`管理摘要与专业详情来自同一份事实数据 · Schema ${report.schema_version}。`} />
         </div>
         <div className="report-actions">
           <Button variant="outline" asChild>
@@ -160,8 +163,10 @@ export function ReportView({ project, run }: Props) {
       <section className="report-section">
         <div className="section-heading">
           <div>
-            <h3>Train / Test / OOT 整体效果</h3>
-            <p>样本量、好坏占比、AUC、KS、PR-AUC 与 PSI。</p>
+            <h3>
+              Train / Test / OOT 整体效果
+              <Hint text="样本量、好坏占比、AUC、KS、PR-AUC 与 PSI。" />
+            </h3>
           </div>
         </div>
         <div className="table-wrap">
@@ -211,8 +216,10 @@ export function ReportView({ project, run }: Props) {
       <section className="report-section">
         <div className="section-heading">
           <div>
-            <h3>候选模型对比</h3>
-            <p>Test 选择，OOT 不参与候选排序。</p>
+            <h3>
+              候选模型对比
+              <Hint text="Test 选择，OOT 不参与候选排序。" />
+            </h3>
           </div>
         </div>
         <div className="candidate-bars">
@@ -243,8 +250,10 @@ export function ReportView({ project, run }: Props) {
       <section className="report-section">
         <div className="section-heading">
           <div>
-            <h3>Champion 等频分箱</h3>
-            <p>坏占比、Lift、累计捕获与绝对排序。</p>
+            <h3>
+              Champion 等频分箱
+              <Hint text="坏占比、Lift、累计捕获与绝对排序。" />
+            </h3>
           </div>
         </div>
         <div className="table-wrap">
@@ -284,8 +293,10 @@ export function ReportView({ project, run }: Props) {
       <section className="report-section">
         <div className="section-heading">
           <div>
-            <h3>最终入模变量</h3>
-            <p>报告只展示最终入模变量；完整排除原因保留在 Run 证据中。</p>
+            <h3>
+              最终入模变量
+              <Hint text="报告只展示最终入模变量；完整排除原因保留在 Run 证据中。" />
+            </h3>
           </div>
           <span className="count-badge">{report.feature_selection?.selected?.length || 0}</span>
         </div>
@@ -302,8 +313,10 @@ export function ReportView({ project, run }: Props) {
       </section>
       <section className="score-panel">
         <div>
-          <h3>给新样本批量打分</h3>
-          <p>输出列使用模型名称命名，并同时保留原始分、坏概率与封顶/封底证据。</p>
+          <h3>
+            给新样本批量打分
+            <Hint text="输出列使用模型名称命名，并同时保留原始分、坏概率与封顶/封底证据。" />
+          </h3>
         </div>
         <label>
           模型版本

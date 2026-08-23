@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import type { Project, Settings } from "../types";
+import { Hint } from "@/components/ui/hint";
 
 interface Props {
   projects: Project[];
@@ -104,8 +105,10 @@ export function ProjectSidebar({
       {open && (
         <div className="side-footer">
           <div className="network-note">
-            <b>Notebook 网络：{settings?.notebook_network === false ? "关闭偏好" : "开启"}</b>
-            <p>产品与 LLM 不主动上传原始数据；用户代码和第三方包并非安全沙箱。</p>
+            <b>
+              Notebook 网络：{settings?.notebook_network === false ? "关闭偏好" : "开启"}
+              <Hint text="产品与 LLM 不主动上传原始数据；用户代码和第三方包并非安全沙箱。" />
+            </b>
           </div>
           <button className="settings-open" type="button" onClick={onSettings}>
             设置中心

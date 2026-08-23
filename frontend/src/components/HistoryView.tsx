@@ -1,6 +1,7 @@
 import { runStageLabel } from "../lib/labels";
 import { Badge, statusVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Hint } from "@/components/ui/hint";
 import {
   Table,
   TableBody,
@@ -27,8 +28,10 @@ export function HistoryView({
     <div className="history-view">
       <div className="stage-line">
         <div>
-          <h2>历史 Run 与只读证据</h2>
-          <p>新 Run 不覆盖旧记录；失败和阻断同样保留。</p>
+          <h2>
+            历史 Run 与只读证据
+            <Hint text="新 Run 不覆盖旧记录；失败和阻断同样保留。" />
+          </h2>
         </div>
         <div className="run-meta">
           TOTAL <b>{runs.length}</b>

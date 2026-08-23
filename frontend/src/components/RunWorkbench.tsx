@@ -1,6 +1,7 @@
 import { formatMetric } from "../lib/format";
 import { runStageLabel } from "../lib/labels";
 import { Badge, statusVariant } from "@/components/ui/badge";
+import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -75,8 +76,10 @@ export function RunWorkbench({
           </div>
           <div className="section-heading">
             <div>
-              <h3>候选模型执行矩阵</h3>
-              <p>OOT 只在 Champion 冻结后进入最终报告。</p>
+              <h3>
+                候选模型执行矩阵
+                <Hint text="OOT 只在 Champion 冻结后进入最终报告。" />
+              </h3>
             </div>
           </div>
           <div className="table-wrap">
@@ -114,8 +117,10 @@ export function RunWorkbench({
         <div className="live-node">
           <div className="pulse" />
           <div>
-            <strong>{runStageLabel[run.stage] || run.stage}</strong>
-            <p>页面关闭不会停止任务。所有拟合、统计与报告均在本机执行。</p>
+            <strong>
+              {runStageLabel[run.stage] || run.stage}
+              <Hint text="页面关闭不会停止任务。所有拟合、统计与报告均在本机执行。" />
+            </strong>
           </div>
         </div>
       )}
