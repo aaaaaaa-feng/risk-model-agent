@@ -201,7 +201,7 @@ body.col-resizing .chat-rail {
 .new-project:hover,
 .settings-open:hover {
   background: var(--blue-hover);
-  box-shadow: 0 8px 18px rgba(43, 63, 214, 0.24);
+  box-shadow: 0 8px 18px rgba(30, 64, 175, 0.24);
 }
 
 .settings-open {
@@ -210,7 +210,7 @@ body.col-resizing .chat-rail {
 }
 
 .settings-open:hover {
-  background: #2e2b25;
+  background: #1e293b;
 }
 
 .project-list {
@@ -225,7 +225,7 @@ body.col-resizing .chat-rail {
   border: 1px solid var(--line);
   border-left: 3px solid transparent;
   border-radius: var(--radius-lg);
-  background: rgba(253, 252, 249, 0.82);
+  background: rgba(255, 255, 255, 0.82);
   color: var(--ink);
   text-align: left;
   padding: 10px 11px;
@@ -399,7 +399,7 @@ body.col-resizing .chat-rail {
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
-  background: rgba(253, 252, 249, 0.78);
+  background: rgba(255, 255, 255, 0.78);
   box-shadow: var(--shadow-sm);
 }
 
@@ -418,14 +418,14 @@ body.col-resizing .chat-rail {
 }
 
 .primary-tabs button:hover {
-  background: #f0eee8;
+  background: #eef2f7;
   color: var(--ink);
 }
 
 .primary-tabs button[aria-selected="true"] {
   background: var(--blue);
   color: var(--paper);
-  box-shadow: 0 5px 12px rgba(43, 63, 214, 0.2);
+  box-shadow: 0 5px 12px rgba(30, 64, 175, 0.2);
 }
 
 .workspace {

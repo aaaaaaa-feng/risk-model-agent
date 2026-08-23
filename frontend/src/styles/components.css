@@ -21,7 +21,7 @@
 }
 
 .button:hover:not(:disabled) {
-  background: #f0eee8;
+  background: #eef2f7;
   border-color: var(--line-blue);
   box-shadow: var(--shadow-md);
 }
@@ -36,7 +36,7 @@
 .button.primary:hover:not(:disabled) {
   background: var(--blue-hover);
   transform: translateY(-1px);
-  box-shadow: 0 9px 18px rgba(43, 63, 214, 0.26);
+  box-shadow: 0 9px 18px rgba(30, 64, 175, 0.26);
 }
 
 .button.primary:active:not(:disabled) {
@@ -301,7 +301,7 @@ td {
 }
 
 th {
-  background: #f0eee8;
+  background: #eef2f7;
   color: #52525b;
   font-size: 10px;
   font-weight: 800;

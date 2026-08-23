@@ -225,7 +225,7 @@
 }
 
 .subnav button:hover {
-  background: #f0eee8;
+  background: #eef2f7;
 }
 
 .subnav button[aria-selected="true"] {
@@ -737,7 +737,7 @@
 .bin-table th {
   position: sticky;
   top: 0;
-  background: #f0eee8;
+  background: #eef2f7;
   z-index: 1;
 }
 
@@ -821,7 +821,7 @@
 
 .model-grid.head {
   min-height: 36px;
-  background: #f0eee8;
+  background: #eef2f7;
   border-top: 1px solid var(--line);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   font-weight: 600;
@@ -1129,7 +1129,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-2xl);
   background:
-    radial-gradient(120% 160% at 8% -20%, rgba(43, 63, 214, 0.1), transparent 46%),
+    radial-gradient(120% 160% at 8% -20%, rgba(30, 64, 175, 0.1), transparent 46%),
     radial-gradient(90% 130% at 96% 8%, rgba(180, 83, 9, 0.07), transparent 42%), var(--paper);
   color: var(--ink);
   box-shadow: var(--shadow-lg);

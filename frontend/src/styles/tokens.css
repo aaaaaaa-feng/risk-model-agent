@@ -4,54 +4,55 @@
   line-break: strict;
 
   /*
-   * 设计方向：暖纸 × 墨黑 × 钴蓝的「编辑级精密工作台」。
-   * 暖调中性色承载长时间阅读，单一钴蓝作为唯一动作色，
-   * 琥珀只留给「等待确认」，避免多色竞争注意力。
+   * 设计系统来源：ui-ux-pro-max（design-system/risk-modeling-agent/MASTER.md）
+   * 风格：Minimalism & Swiss Style（数据密集型分析师工作台）
+   * 色板：Blue data + amber highlights（浅色系）
+   * 字体：IBM Plex 超级家族（financial / trustworthy / precise）
    */
 
   /* Canvas & surfaces */
-  --paper: #fdfcf9;
-  --ground: #f4f2ed;
-  --panel: rgba(253, 252, 249, 0.78);
+  --paper: #ffffff;
+  --ground: #f1f5f9;
+  --panel: rgba(255, 255, 255, 0.78);
 
   /* Text */
-  --ink: #1b1a16;
-  --muted: #6d6a61;
-  --quiet: #a3a099;
+  --ink: #1e293b;
+  --muted: #475569;
+  --quiet: #94a3b8;
 
   /* Borders */
-  --line: #e5e2da;
-  --line-strong: #d3cfc5;
-  --line-blue: #c3c9f2;
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+  --line-blue: #bfdbfe;
 
   /* Brand */
-  --black: #1b1a16;
-  --blue: #2b3fd6;
-  --blue-hover: #2133b4;
-  --blue-soft: #eef0fc;
-  --blue-text: #2b3fd6;
-  --blue-subtle: #d9ddf7;
+  --black: #0f172a;
+  --blue: #1e40af;
+  --blue-hover: #1e3a8a;
+  --blue-soft: #eff6ff;
+  --blue-text: #1d4ed8;
+  --blue-subtle: #dbeafe;
 
   /* Status */
-  --green: #15803d;
-  --green-soft: #ecf7ef;
-  --green-text: #14652f;
-  --amber: #b45309;
-  --amber-soft: #fdf3e7;
+  --green: #16a34a;
+  --green-soft: #ecfdf3;
+  --green-text: #15803d;
+  --amber: #d97706;
+  --amber-soft: #fffbeb;
   --amber-text: #92400e;
-  --amber-border: #f0d3ae;
-  --red: #c62f21;
-  --red-soft: #fdf0ee;
-  --red-text: #a3271b;
-  --red-border: #f0b3ab;
+  --amber-border: #fcd34d;
+  --red: #dc2626;
+  --red-soft: #fef2f2;
+  --red-text: #b91c1c;
+  --red-border: #fecaca;
 
   /* Focus */
-  --focus-ring: 0 0 0 3px rgba(43, 63, 214, 0.5);
-  --focus-color: #2b3fd6;
+  --focus-ring: 0 0 0 3px rgba(30, 64, 175, 0.5);
+  --focus-color: #1e40af;
 
   /* Typography */
-  --body: "Plus Jakarta Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --display: "Fraunces", "Songti SC", "SimSun", serif;
+  --body: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --display: "IBM Plex Serif", "Songti SC", "SimSun", serif;
   --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
 
   /* Spacing scale */
@@ -71,13 +72,13 @@
   --radius-2xl: 20px;
   --radius-full: 999px;
 
-  /* Shadows（暖调投影，与纸面底色协调） */
-  --shadow-xs: 0 1px 4px rgba(60, 54, 40, 0.05);
-  --shadow-sm: 0 3px 10px rgba(60, 54, 40, 0.06);
-  --shadow-md: 0 7px 20px rgba(60, 54, 40, 0.07);
-  --shadow-lg: 0 12px 28px rgba(60, 54, 40, 0.08);
-  --shadow-xl: 0 20px 56px rgba(60, 54, 40, 0.14);
-  --shadow-blue: 0 6px 14px rgba(43, 63, 214, 0.22);
+  /* Shadows */
+  --shadow-xs: 0 1px 4px rgba(15, 23, 42, 0.05);
+  --shadow-sm: 0 3px 10px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 7px 20px rgba(15, 23, 42, 0.07);
+  --shadow-lg: 0 12px 28px rgba(15, 23, 42, 0.08);
+  --shadow-xl: 0 20px 56px rgba(15, 23, 42, 0.14);
+  --shadow-blue: 0 6px 14px rgba(30, 64, 175, 0.22);
 
   /* Z-index scale */
   --z-modal-backdrop: 50;
