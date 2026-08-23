@@ -3,6 +3,14 @@ import { runStageLabel } from "../lib/labels";
 import { Badge, statusVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import type { ModelResult } from "../types/model";
 import type { Run, RunEvent } from "../types";
 
@@ -72,34 +80,34 @@ export function RunWorkbench({
             </div>
           </div>
           <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>模型</th>
-                  <th>状态</th>
-                  <th>校准</th>
-                  <th>Test AUC</th>
-                  <th>Test KS</th>
-                  <th>PSI</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>模型</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>校准</TableHead>
+                  <TableHead>Test AUC</TableHead>
+                  <TableHead>Test KS</TableHead>
+                  <TableHead>PSI</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {candidates.map((item) => (
-                  <tr key={item.candidate}>
-                    <td>
+                  <TableRow key={item.candidate}>
+                    <TableCell>
                       <strong>{item.candidate}</strong>
-                    </td>
-                    <td>
+                    </TableCell>
+                    <TableCell>
                       <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
-                    </td>
-                    <td>{item.calibration || "—"}</td>
-                    <td>{formatMetric(item.test_metrics?.roc_auc)}</td>
-                    <td>{formatMetric(item.test_metrics?.ks)}</td>
-                    <td>{formatMetric(item.train_test_score_psi)}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell>{item.calibration || "—"}</TableCell>
+                    <TableCell>{formatMetric(item.test_metrics?.roc_auc)}</TableCell>
+                    <TableCell>{formatMetric(item.test_metrics?.ks)}</TableCell>
+                    <TableCell>{formatMetric(item.train_test_score_psi)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </>
       ) : (

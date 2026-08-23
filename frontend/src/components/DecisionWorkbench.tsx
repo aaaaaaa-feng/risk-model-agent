@@ -14,6 +14,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import type { Decision, Run } from "../types";
 
 interface Props {
@@ -253,9 +261,10 @@ function DataDecision({
                     const currentAccepted = (current.accepted_action_ids as string[]) || [];
                     return {
                       ...current,
-                      accepted_action_ids: checked === true
-                        ? [...currentAccepted, action.id]
-                        : currentAccepted.filter((id) => id !== action.id),
+                      accepted_action_ids:
+                        checked === true
+                          ? [...currentAccepted, action.id]
+                          : currentAccepted.filter((id) => id !== action.id),
                     };
                   })
                 }
@@ -394,33 +403,33 @@ function ScreeningDecision({
         个字符的业务理由，再勾选恢复。
       </p>
       <div className="table-wrap compact-table">
-        <table>
-          <thead>
-            <tr>
-              <th>恢复</th>
-              <th>变量</th>
-              <th>原因</th>
-              <th>缺失率</th>
-              <th>IV</th>
-              <th>业务理由</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>恢复</TableHead>
+              <TableHead>变量</TableHead>
+              <TableHead>原因</TableHead>
+              <TableHead>缺失率</TableHead>
+              <TableHead>IV</TableHead>
+              <TableHead>业务理由</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {recoverable.slice(0, 200).map((item) => (
-              <tr key={item.column}>
-                <td>
+              <TableRow key={item.column}>
+                <TableCell>
                   <Checkbox
                     checked={selected.has(item.column)}
                     disabled={(reasons[item.column] || "").trim().length < 8}
                     title="请先填写至少 8 个字符的业务理由"
                     onCheckedChange={(checked) => toggle(item, checked === true)}
                   />
-                </td>
-                <td>{item.column}</td>
-                <td>{item.reason}</td>
-                <td>{formatPercent(item.missing_rate)}</td>
-                <td>{formatMetric(item.iv)}</td>
-                <td>
+                </TableCell>
+                <TableCell>{item.column}</TableCell>
+                <TableCell>{item.reason}</TableCell>
+                <TableCell>{formatPercent(item.missing_rate)}</TableCell>
+                <TableCell>{formatMetric(item.iv)}</TableCell>
+                <TableCell>
                   <Input
                     value={reasons[item.column] || ""}
                     onChange={(e) => {
@@ -441,11 +450,11 @@ function ScreeningDecision({
                     }}
                     placeholder="至少 8 个字符"
                   />
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
       {recoverable.length === 0 && <p className="success-line">没有可恢复的排除变量。</p>}
     </section>
@@ -539,21 +548,21 @@ function BinningDecision({
                 <small>不把缺失箱参与趋势判断；缺失箱仍单独展示。</small>
               </div>
               <div className="table-wrap bin-table-wrap">
-                <table className="bin-table">
-                  <thead>
-                    <tr>
-                      <th>分箱</th>
-                      <th>样本数</th>
-                      <th>占比</th>
-                      <th>好</th>
-                      <th>坏</th>
-                      <th>坏率 / 趋势</th>
-                      <th>Lift</th>
-                      <th>WOE</th>
-                      <th>IV</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table className="bin-table">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>分箱</TableHead>
+                      <TableHead>样本数</TableHead>
+                      <TableHead>占比</TableHead>
+                      <TableHead>好</TableHead>
+                      <TableHead>坏</TableHead>
+                      <TableHead>坏率 / 趋势</TableHead>
+                      <TableHead>Lift</TableHead>
+                      <TableHead>WOE</TableHead>
+                      <TableHead>IV</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {stats.rows.map((row, index) => {
                       const rate = Number(row.bad_rate);
                       const width = Number.isFinite(rate)
@@ -564,35 +573,35 @@ function BinningDecision({
                         : 0;
                       const lift = stats.overallRate ? rate / stats.overallRate : null;
                       return (
-                        <tr
+                        <TableRow
                           key={`${row.bin}-${index}`}
                           className={row.bin === "<MISSING>" ? "bin-missing" : ""}
                         >
-                          <td>
+                          <TableCell>
                             <strong>{row.bin}</strong>
-                          </td>
-                          <td>{formatNumber(row.count)}</td>
-                          <td>
+                          </TableCell>
+                          <TableCell>{formatNumber(row.count)}</TableCell>
+                          <TableCell>
                             {formatPercent(stats.count ? Number(row.count) / stats.count : null)}
-                          </td>
-                          <td>{formatNumber(row.good)}</td>
-                          <td>{formatNumber(row.bad)}</td>
-                          <td>
+                          </TableCell>
+                          <TableCell>{formatNumber(row.good)}</TableCell>
+                          <TableCell>{formatNumber(row.bad)}</TableCell>
+                          <TableCell>
                             <div className="bin-rate-cell">
                               <span className="bin-rate-track">
                                 <i style={{ width: `${width}%` }} />
                               </span>
                               <b>{formatPercent(row.bad_rate)}</b>
                             </div>
-                          </td>
-                          <td>{formatMetric(lift)}</td>
-                          <td>{formatMetric(row.woe)}</td>
-                          <td>{formatMetric(row.iv)}</td>
-                        </tr>
+                          </TableCell>
+                          <TableCell>{formatMetric(lift)}</TableCell>
+                          <TableCell>{formatMetric(row.woe)}</TableCell>
+                          <TableCell>{formatMetric(row.iv)}</TableCell>
+                        </TableRow>
                       );
                     })}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
               <div className="bin-editor-grid">
                 <div>

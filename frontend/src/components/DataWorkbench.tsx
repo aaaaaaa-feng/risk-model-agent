@@ -15,6 +15,14 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import type { DataAsset, ProjectDetail, RunCreatedResponse } from "../types";
 
 interface Props {
@@ -524,10 +532,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                   <p>该版本没有识别到同时包含 0/1 的候选 Y。</p>
                 )}
               </div>
-              <Button
-                disabled={!targets.length || busy === "targets"}
-                onClick={createTargets}
-              >
+              <Button disabled={!targets.length || busy === "targets"} onClick={createTargets}>
                 {busy === "targets" ? "创建中…" : `创建 ${targets.length || ""} 个 Y 任务`}
               </Button>
             </>
@@ -558,10 +563,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                   <Badge variant={statusVariant(task.status)}>{task.status}</Badge>
                 </label>
               ))}
-              <Button
-                disabled={!selectedTasks.length || busy === "runs"}
-                onClick={startRuns}
-              >
+              <Button disabled={!selectedTasks.length || busy === "runs"} onClick={startRuns}>
                 {busy === "runs" ? "入队中…" : `启动 ${selectedTasks.length} 个 Run`}
               </Button>
             </div>
@@ -615,31 +617,31 @@ function AssetTable({
   if (!assets.length) return <Empty text="尚未导入文件。原始文件不会上传到云端。" />;
   return (
     <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>用途</th>
-            <th>文件</th>
-            <th>格式</th>
-            <th>规模</th>
-            <th>状态 / Sheet</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>用途</TableHead>
+            <TableHead>文件</TableHead>
+            <TableHead>格式</TableHead>
+            <TableHead>规模</TableHead>
+            <TableHead>状态 / Sheet</TableHead>
+            <TableHead>操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {assets.map((asset) => (
-            <tr key={asset.id}>
-              <td>{asset.kind}</td>
-              <td>
+            <TableRow key={asset.id}>
+              <TableCell>{asset.kind}</TableCell>
+              <TableCell>
                 <strong>{asset.name}</strong>
-              </td>
-              <td>{asset.format.toUpperCase()}</td>
-              <td>
+              </TableCell>
+              <TableCell>{asset.format.toUpperCase()}</TableCell>
+              <TableCell>
                 {asset.rows == null
                   ? "待选择"
                   : `${asset.rows.toLocaleString()} × ${asset.columns}`}
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 {asset.status === "sheet_selection_required" ? (
                   <Select onValueChange={(value) => onSheet(asset, value)}>
                     <SelectTrigger className="h-[34px]">
@@ -656,8 +658,8 @@ function AssetTable({
                 ) : (
                   <Badge variant="ok">ready</Badge>
                 )}
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 <Button
                   variant="link"
                   size="sm"
@@ -668,11 +670,11 @@ function AssetTable({
                 >
                   {busy === asset.id ? "生成中…" : "生成数据版本"}
                 </Button>
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }

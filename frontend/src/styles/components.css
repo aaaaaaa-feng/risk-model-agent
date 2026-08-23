@@ -69,7 +69,7 @@ label > button[role="combobox"] {
   min-height: 34px;
 }
 
-/* Tables */
+/* Tables(选择器收敛到 .data-table,由 ui/table.tsx 默认挂载) */
 .table-wrap {
   width: 100%;
   overflow: auto;
@@ -78,7 +78,7 @@ label > button[role="combobox"] {
   background: var(--paper);
 }
 
-table {
+.data-table {
   width: 100%;
   border-collapse: collapse;
   white-space: nowrap;
@@ -86,14 +86,14 @@ table {
   font-variant-numeric: tabular-nums;
 }
 
-th,
-td {
+.data-table th,
+.data-table td {
   padding: 11px 12px;
   border-bottom: 1px solid var(--line-soft);
   text-align: left;
 }
 
-th {
+.data-table th {
   background: var(--ground-hover);
   color: var(--th-text);
   font-size: 10px;
@@ -103,15 +103,15 @@ th {
   z-index: 1;
 }
 
-tbody tr {
+.data-table tbody tr {
   transition: background var(--dur-short) var(--ease-out);
 }
 
-tbody tr:hover {
+.data-table tbody tr:hover {
   background: var(--blue-soft);
 }
 
-tbody tr:last-child td {
+.data-table tbody tr:last-child td {
   border-bottom: 0;
 }
 

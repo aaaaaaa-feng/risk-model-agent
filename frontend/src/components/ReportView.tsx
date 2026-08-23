@@ -10,6 +10,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import type { Project, Run } from "../types";
 
 interface Props {
@@ -124,11 +132,7 @@ export function ReportView({ project, run, notify }: Props) {
             <a href={`/api/v1/reports/${run.id}/excel`}>导出 Excel</a>
           </Button>
           <Button variant="outline" asChild>
-            <a
-              target="_blank"
-              rel="noreferrer"
-              href={`/api/v1/reports/${run.id}/html`}
-            >
+            <a target="_blank" rel="noreferrer" href={`/api/v1/reports/${run.id}/html`}>
               打开单页 HTML
             </a>
           </Button>
@@ -161,34 +165,34 @@ export function ReportView({ project, run, notify }: Props) {
           </div>
         </div>
         <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>数据集</th>
-                <th>样本量</th>
-                <th>坏样本</th>
-                <th>坏占比</th>
-                <th>AUC</th>
-                <th>KS</th>
-                <th>PR-AUC</th>
-                <th>PSI</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>数据集</TableHead>
+                <TableHead>样本量</TableHead>
+                <TableHead>坏样本</TableHead>
+                <TableHead>坏占比</TableHead>
+                <TableHead>AUC</TableHead>
+                <TableHead>KS</TableHead>
+                <TableHead>PR-AUC</TableHead>
+                <TableHead>PSI</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {Object.entries(report.sample_overview || {}).map(([name, value]) => {
                 const overview = value as Record<string, unknown>;
                 return (
-                  <tr key={name}>
-                    <td>
+                  <TableRow key={name}>
+                    <TableCell>
                       <strong>{name.toUpperCase()}</strong>
-                    </td>
-                    <td>{Number(overview.rows).toLocaleString()}</td>
-                    <td>{Number(overview.positive_count).toLocaleString()}</td>
-                    <td>{formatPercent(overview.bad_rate)}</td>
-                    <td>{formatMetric(championMetrics(name).roc_auc)}</td>
-                    <td>{formatMetric(championMetrics(name).ks)}</td>
-                    <td>{formatMetric(championMetrics(name).pr_auc)}</td>
-                    <td>
+                    </TableCell>
+                    <TableCell>{Number(overview.rows).toLocaleString()}</TableCell>
+                    <TableCell>{Number(overview.positive_count).toLocaleString()}</TableCell>
+                    <TableCell>{formatPercent(overview.bad_rate)}</TableCell>
+                    <TableCell>{formatMetric(championMetrics(name).roc_auc)}</TableCell>
+                    <TableCell>{formatMetric(championMetrics(name).ks)}</TableCell>
+                    <TableCell>{formatMetric(championMetrics(name).pr_auc)}</TableCell>
+                    <TableCell>
                       {formatMetric(
                         name === "test"
                           ? champion.train_test_score_psi
@@ -196,12 +200,12 @@ export function ReportView({ project, run, notify }: Props) {
                             ? champion.test_oot_score_psi
                             : null,
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </section>
       <section className="report-section">
@@ -244,37 +248,37 @@ export function ReportView({ project, run, notify }: Props) {
           </div>
         </div>
         <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>数据集</th>
-                <th>箱</th>
-                <th>样本量</th>
-                <th>坏占比</th>
-                <th>Lift</th>
-                <th>累计捕获</th>
-                <th>坏概率区间</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>数据集</TableHead>
+                <TableHead>箱</TableHead>
+                <TableHead>样本量</TableHead>
+                <TableHead>坏占比</TableHead>
+                <TableHead>Lift</TableHead>
+                <TableHead>累计捕获</TableHead>
+                <TableHead>坏概率区间</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {Object.entries((champion.lift as Record<string, unknown>) || {}).flatMap(
                 ([name, rows]) =>
                   ((rows as Array<Record<string, unknown>>) || []).map((row) => (
-                    <tr key={`${name}-${row.bucket}`}>
-                      <td>{name.toUpperCase()}</td>
-                      <td>{String(row.bucket)}</td>
-                      <td>{Number(row.count).toLocaleString()}</td>
-                      <td>{formatPercent(row.bad_rate)}</td>
-                      <td>{formatMetric(row.lift)}</td>
-                      <td>{formatPercent(row.cumulative_capture)}</td>
-                      <td>
+                    <TableRow key={`${name}-${row.bucket}`}>
+                      <TableCell>{name.toUpperCase()}</TableCell>
+                      <TableCell>{String(row.bucket)}</TableCell>
+                      <TableCell>{Number(row.count).toLocaleString()}</TableCell>
+                      <TableCell>{formatPercent(row.bad_rate)}</TableCell>
+                      <TableCell>{formatMetric(row.lift)}</TableCell>
+                      <TableCell>{formatPercent(row.cumulative_capture)}</TableCell>
+                      <TableCell>
                         {formatMetric(row.min_probability)}-{formatMetric(row.max_probability)}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   )),
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </section>
       <section className="report-section">
