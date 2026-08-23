@@ -47,7 +47,7 @@ p {
   margin-top: 0;
 }
 
-/* Tofu 风格细滚动条 */
+/* Tofu 风格细滚动条(颜色走令牌,深色模式自动切换) */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -58,12 +58,12 @@ p {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c8c8c4;
+  background: var(--scroll-thumb);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #9a9a96;
+  background: var(--scroll-thumb-hover);
 }
 
 /* Reduced motion preferences are applied at the component level via media queries. */

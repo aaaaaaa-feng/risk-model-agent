@@ -173,7 +173,7 @@ label > textarea {
 .drawer-head {
   height: 76px;
   background: var(--black);
-  color: var(--paper);
+  color: var(--output-text);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -226,7 +226,7 @@ label > textarea {
 .app-toast {
   max-width: 420px;
   background: var(--green);
-  color: var(--paper);
+  color: var(--output-text);
   padding: 10px 13px;
   font-size: 11px;
   border-radius: var(--radius-lg);

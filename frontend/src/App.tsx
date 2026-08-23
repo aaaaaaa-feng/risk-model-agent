@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
+import { Moon, Sun } from "lucide-react";
 import { api } from "./api";
 import { useGlobalPolling } from "./hooks/useGlobalPolling";
 import { useProjectData } from "./hooks/useProjectData";
@@ -10,6 +11,7 @@ import { useSettings } from "./hooks/useSettings";
 import { useChatRailState } from "./hooks/useChatRailState";
 import { useColumnWidth } from "./hooks/useColumnWidth";
 import { useSidebarState } from "./hooks/useSidebarState";
+import { useTheme } from "./hooks/useTheme";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { errorMessage } from "./lib/format";
 import { notify } from "@/lib/notify";
@@ -34,6 +36,7 @@ import { WorkspaceSetup } from "./components/WorkspaceSetup";
 
 export function App() {
   const { projects, loadProjects } = useProjects();
+  const { theme, toggle: toggleTheme } = useTheme();
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   // 该回调必须保持稳定，否则工作区 Hook 会把每次渲染都当成一次初始化。
   const openWorkspaceSetup = useCallback(() => setWorkspaceOpen(true), []);
@@ -259,6 +262,15 @@ export function App() {
                   等待你的确认
                 </Badge>
               )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleTheme}
+                aria-label={theme === "dark" ? "切换到白天模式" : "切换到黑夜模式"}
+                title={theme === "dark" ? "切换到白天模式" : "切换到黑夜模式"}
+              >
+                {theme === "dark" ? <Sun /> : <Moon />}
+              </Button>
             </div>
           </header>
           <Tabs value={view} onValueChange={(id) => setView(id as View)} className="contents">

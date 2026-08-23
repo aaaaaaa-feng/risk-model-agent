@@ -49,12 +49,12 @@
   padding: 25px 26px;
   border-radius: var(--radius-xl);
   background: var(--black);
-  color: var(--paper);
+  color: var(--output-text);
 }
 
 .stage-line h2 {
   max-width: 760px;
-  color: var(--paper);
+  color: var(--output-text);
   font-family: var(--display);
   font-size: clamp(24px, 3vw, 40px);
   font-weight: 600;
@@ -71,7 +71,7 @@
 }
 
 .stage-line .run-meta b {
-  color: var(--paper);
+  color: var(--output-text);
 }
 
 .run-meta {
@@ -474,7 +474,7 @@
   display: grid;
   place-items: center;
   background: var(--black);
-  color: var(--paper);
+  color: var(--output-text);
   font: 10px var(--mono);
   border-radius: var(--radius-sm);
 }
@@ -910,7 +910,7 @@
 
 .count-badge {
   background: var(--black);
-  color: var(--paper);
+  color: var(--output-text);
   padding: 5px 8px;
   font: 10px var(--mono);
   border-radius: var(--radius-full);
@@ -921,7 +921,7 @@
   border: 0;
   border-radius: var(--radius-xl);
   background: var(--black);
-  color: var(--paper);
+  color: var(--output-text);
   padding: var(--space-4);
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 220px auto;
@@ -1162,7 +1162,7 @@
 
 .workspace-setup-head {
   background: var(--black);
-  color: var(--paper);
+  color: var(--output-text);
   padding: 22px var(--space-5);
 }
 
@@ -1476,4 +1476,13 @@
   .summary-cell:nth-child(2n) {
     border-right: 0;
   }
+}
+
+/* 深色模式:纯黑面板(舞台 hero / 记分卡)在深灰画布上补一道细边保持轮廓 */
+[data-theme="dark"] .stage-line,
+[data-theme="dark"] .score-panel,
+[data-theme="dark"] .workspace-setup-head,
+[data-theme="dark"] .modal-head,
+[data-theme="dark"] .drawer-head {
+  box-shadow: inset 0 0 0 1px var(--line);
 }

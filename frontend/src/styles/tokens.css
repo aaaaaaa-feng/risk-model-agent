@@ -59,6 +59,15 @@
   --blue-text: #4f52e8;
   --blue-subtle: #dcdff9;
 
+  /* Action — 主按钮等 CTA(深色模式下反转为浅色,--black 装饰面板不反转) */
+  --action-bg: var(--black);
+  --action-text: var(--paper);
+  --action-hover: var(--black-hover);
+
+  /* Scrollbar */
+  --scroll-thumb: #c8c8c4;
+  --scroll-thumb-hover: #9a9a96;
+
   /* Tofu 三俏色 — 装饰与状态共用 */
   --tofu-green: #00c65e;
   --tofu-purple: #5c5fef;
@@ -122,4 +131,84 @@
   --z-modal-backdrop: 50;
   --z-drawer: 60;
   --z-workspace-setup: 90;
+}
+
+/*
+ * 深色模式(2026-08-24)— 同结构令牌整体覆写:
+ * 画布/面板反转为深灰;--black 装饰面板(舞台/弹窗头/代码块)保持黑;
+ * --action-* CTA 反转为浅色保证可读;状态色提亮,投影加深。
+ */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Canvas & surfaces */
+  --paper: #232327;
+  --ground: #17171a;
+  --panel: #232327;
+
+  /* Text */
+  --ink: #f2f2f0;
+  --muted: #a6a6ad;
+  --quiet: #6f6f77;
+
+  /* Borders */
+  --line: #35353b;
+  --line-strong: #4a4a52;
+  --line-soft: #2b2b30;
+  --line-blue: #3d3f70;
+  --green-border: #1d5c3c;
+
+  /* Derived surfaces & text */
+  --ground-hover: #2e2e34;
+  --blue-hover-tint: #23233d;
+  --panel-solid: #28282d;
+  --track: #35353b;
+  --code-bg: #1d1d21;
+  --th-text: #a6a6ad;
+  --disabled-bg: #3a3a41;
+  --disabled-text: #7c7c84;
+  --amber-deep: #ffb38a;
+  --amber-missing: #2e1a08;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --scrim-strong: rgba(0, 0, 0, 0.85);
+  --pulse-glow: rgba(131, 133, 247, 0.4);
+
+  /* Accent — 深色下提亮 */
+  --blue: #8385f7;
+  --blue-hover: #9b9df9;
+  --blue-soft: #26274a;
+  --blue-text: #a7a9fa;
+  --blue-subtle: #34366b;
+
+  /* Action — CTA 反转为浅色 */
+  --action-bg: #f2f2f0;
+  --action-text: #17171a;
+  --action-hover: #d9d9d5;
+
+  /* Status — 深色下提亮文字,底色转深 */
+  --green-soft: #0e2c1d;
+  --green-text: #4fe08f;
+  --amber-soft: #2e1a0c;
+  --amber-text: #ff9a5c;
+  --amber-border: #6b3410;
+  --red: #ef4444;
+  --red-soft: #311414;
+  --red-text: #f87171;
+  --red-border: #7f1d1d;
+
+  /* Focus */
+  --focus-ring: 0 0 0 3px rgba(131, 133, 247, 0.5);
+  --focus-color: #8385f7;
+
+  /* Shadows — 深色下投影加深 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --shadow-modal: 0 24px 70px rgba(0, 0, 0, 0.65);
+  --shadow-toast: 0 12px 28px rgba(0, 0, 0, 0.55);
+  --shadow-panel-dark: 0 10px 20px rgba(0, 0, 0, 0.4);
+
+  /* Scrollbar */
+  --scroll-thumb: #4a4a52;
+  --scroll-thumb-hover: #5f5f68;
 }

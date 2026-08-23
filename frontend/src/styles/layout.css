@@ -137,7 +137,7 @@ body.col-resizing .chat-rail {
   height: 34px;
   border-radius: var(--radius-md);
   background: var(--black);
-  color: var(--paper);
+  color: var(--output-text);
   display: grid;
   place-items: center;
   font: 700 10px var(--mono);
@@ -184,8 +184,8 @@ body.col-resizing .chat-rail {
   border: 0;
   border-radius: var(--radius-md);
   padding: 0 13px;
-  background: var(--black);
-  color: var(--paper);
+  background: var(--action-bg);
+  color: var(--action-text);
   font-weight: 700;
   text-align: left;
   cursor: pointer;
@@ -194,15 +194,15 @@ body.col-resizing .chat-rail {
 
 .new-project:hover,
 .settings-open:hover {
-  background: var(--black-hover);
+  background: var(--action-hover);
 }
 
 .settings-open {
-  background: var(--black);
+  background: var(--action-bg);
 }
 
 .settings-open:hover {
-  background: var(--black-hover);
+  background: var(--action-hover);
 }
 
 .project-list {
@@ -402,8 +402,8 @@ body.col-resizing .chat-rail {
 }
 
 .primary-tabs button[aria-selected="true"] {
-  background: var(--black);
-  color: var(--paper);
+  background: var(--action-bg);
+  color: var(--action-text);
 }
 
 .workspace {
@@ -479,8 +479,8 @@ body.col-resizing .chat-rail {
 }
 
 .stage-step.current {
-  color: var(--paper);
-  background: var(--black);
+  color: var(--action-text);
+  background: var(--action-bg);
   overflow: hidden;
   border-radius: var(--radius-full);
   margin: 4px 2px;
@@ -490,6 +490,13 @@ body.col-resizing .chat-rail {
   border-color: var(--on-blue-border);
   background: var(--on-blue-fill);
   color: var(--paper);
+}
+
+/* 深色模式下当前阶段为浅色胶囊,序号圈改深色叠加 */
+[data-theme="dark"] .stage-step.current .step-index {
+  border-color: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--action-text);
 }
 
 .step-badge {
@@ -690,7 +697,7 @@ body.col-resizing .chat-rail {
 .stage-substeps li.active i {
   background: var(--black);
   border-color: var(--black);
-  color: var(--paper);
+  color: var(--output-text);
 }
 
 /* Agent chat rail（右侧对话栏） */
@@ -930,7 +937,7 @@ body.col-resizing .chat-rail {
   height: 26px;
   border-radius: var(--radius-md);
   background: var(--black);
-  color: var(--paper);
+  color: var(--output-text);
   font: 700 10px var(--mono);
   display: grid;
   place-items: center;
@@ -960,7 +967,7 @@ body.col-resizing .chat-rail {
   border-radius: var(--radius-lg);
   border-top-right-radius: var(--radius-sm);
   background: var(--blue);
-  color: var(--paper);
+  color: var(--output-text);
 }
 
 .chat-bubble > p {

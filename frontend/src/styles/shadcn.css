@@ -16,8 +16,8 @@
   --color-card-foreground: var(--ink);
   --color-popover: var(--paper);
   --color-popover-foreground: var(--ink);
-  --color-primary: var(--black);
-  --color-primary-foreground: var(--paper);
+  --color-primary: var(--action-bg);
+  --color-primary-foreground: var(--action-text);
   --color-secondary: var(--ground);
   --color-secondary-foreground: var(--ink);
   --color-muted: var(--ground);

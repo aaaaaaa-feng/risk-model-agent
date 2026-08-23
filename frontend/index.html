@@ -3,8 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <title>风控建模 Agent</title>
+    <script>
+      /* 首帧前写入 data-theme,避免主题闪屏;与 src/hooks/useTheme.ts 的存储键保持一致 */
+      try {
+        var stored = localStorage.getItem("risk-agent-theme");
+        document.documentElement.dataset.theme =
+          stored === "light" || stored === "dark"
+            ? stored
+            : matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
