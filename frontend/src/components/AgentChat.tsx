@@ -1,7 +1,8 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, eventUrl } from "../api";
 import { errorMessage } from "../lib/format";
 import { Markdown } from "./Markdown";
+import { ChatInput, ChatInputSubmit, ChatInputTextArea } from "@/components/ui/chat-input";
 import type { Message } from "../types";
 
 interface ConversationResponse {
@@ -48,8 +49,7 @@ export function AgentChat({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, draft]);
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
+  const submit = async () => {
     if (!projectId || !input.trim() || busy) return;
     const content = input.trim();
     setInput("");
@@ -170,16 +170,20 @@ export function AgentChat({
           </div>
         )}
       </div>
-      <form className="chat-form" onSubmit={submit}>
-        <input
+      <ChatInput
+        className="chat-form"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onSubmit={submit}
+        loading={busy}
+      >
+        <ChatInputTextArea
           aria-label="给 Agent 发送消息"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
           disabled={!projectId || busy}
           placeholder={projectId ? "补充业务要求，或询问当前阶段…" : "请先选择项目"}
         />
-        <button disabled={!projectId || busy || !input.trim()}>{busy ? "处理中" : "发送"}</button>
-      </form>
+        <ChatInputSubmit aria-label="发送" />
+      </ChatInput>
     </section>
   );
 }

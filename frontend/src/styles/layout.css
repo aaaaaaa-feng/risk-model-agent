@@ -887,7 +887,8 @@ body.col-resizing .chat-rail {
   padding: var(--space-3) var(--space-4) 14px;
   box-shadow: var(--shadow-sm);
   display: grid;
-  grid-template-rows: 32px minmax(0, 1fr) 45px;
+  /* 输入区改为自适应高度:ChatInput 的 textarea 随内容增长 */
+  grid-template-rows: 32px minmax(0, 1fr) auto;
   min-height: 0;
 }
 
@@ -1005,6 +1006,12 @@ body.col-resizing .chat-rail {
 .markdown ol {
   margin: 6px 0;
   padding-left: 18px;
+  /* Tailwind preflight 对 ul/ol 设 list-style: none,这里显式恢复 */
+  list-style: disc;
+}
+
+.markdown ol {
+  list-style: decimal;
 }
 
 .markdown li + li {
@@ -1128,36 +1135,7 @@ body.col-resizing .chat-rail {
 }
 
 .chat-form {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-}
-
-.chat-form input {
-  min-width: 0;
-  border: 0;
-  padding: 0 10px;
-  outline: none;
-}
-
-.chat-form input:focus {
-  box-shadow: none;
-}
-
-.chat-form button {
-  border: 0;
-  border-left: 1px solid var(--line-strong);
-  background: var(--black);
-  color: var(--paper);
-  font-weight: 800;
-  cursor: pointer;
-  padding: 0 var(--space-4);
-}
-
-.chat-form button:disabled {
-  background: var(--quiet);
+  margin-top: var(--space-2);
 }
 
 /* Responsive layout */
