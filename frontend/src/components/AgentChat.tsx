@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, eventUrl } from "../api";
 import { errorMessage } from "../lib/format";
+import { Markdown } from "./Markdown";
 import type { Message } from "../types";
 
 interface ConversationResponse {
@@ -105,14 +106,26 @@ export function AgentChat({
       </div>
       <div className="chat-messages" ref={scrollRef}>
         {!projectId && <p className="chat-placeholder">创建或选择项目后开始对话。</p>}
-        {messages.map((message) => (
-          <div className={`chat-message ${message.role}`} key={message.id}>
-            <span>
-              {message.role === "user" ? "YOU" : message.agent?.replace("_", " ") || "AGENT"}
-            </span>
-            <div>
-              <p>{message.content}</p>
-              {message.role === "assistant" && (
+        {messages.map((message) =>
+          message.role === "user" ? (
+            <div className="chat-row user" key={message.id}>
+              <div className="chat-bubble">
+                <p>{message.content}</p>
+              </div>
+              <span className="chat-avatar user" aria-hidden>
+                我
+              </span>
+            </div>
+          ) : (
+            <div className="chat-row assistant" key={message.id}>
+              <span className="chat-avatar" aria-hidden>
+                A
+              </span>
+              <div className="chat-bubble">
+                <span className="chat-meta">
+                  {message.agent?.replace("_", " ") || "AGENT"}
+                </span>
+                <Markdown>{message.content}</Markdown>
                 <div className="message-feedback">
                   <button
                     onClick={() => feedback(message.id, "up")}
@@ -129,23 +142,31 @@ export function AgentChat({
                     踩
                   </button>
                 </div>
-              )}
+              </div>
             </div>
-          </div>
-        ))}
+          ),
+        )}
         {draft && (
-          <div className="chat-message assistant streaming">
-            <span>MAIN AGENT</span>
-            <p>
-              {draft}
-              <i className="cursor" />
-            </p>
+          <div className="chat-row assistant streaming">
+            <span className="chat-avatar" aria-hidden>
+              A
+            </span>
+            <div className="chat-bubble">
+              <span className="chat-meta">MAIN AGENT</span>
+              <Markdown>{draft}</Markdown>
+              <i className="cursor" aria-hidden />
+            </div>
           </div>
         )}
         {busy && !draft && (
-          <div className="chat-message assistant">
-            <span>MAIN AGENT</span>
-            <p>正在读取当前项目节点与 Reviewer 证据…</p>
+          <div className="chat-row assistant">
+            <span className="chat-avatar" aria-hidden>
+              A
+            </span>
+            <div className="chat-bubble typing">
+              <span className="chat-meta">MAIN AGENT</span>
+              <p>正在读取当前项目节点与 Reviewer 证据…</p>
+            </div>
           </div>
         )}
       </div>
