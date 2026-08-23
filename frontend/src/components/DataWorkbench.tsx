@@ -1,14 +1,36 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { errorMessage } from "../lib/format";
-import { Tabs } from "./ui/Tabs";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
+import { Badge, statusVariant } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { notify } from "@/lib/notify";
+import { Hint } from "@/components/ui/hint";
+import { cn } from "@/lib/utils";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import type { DataAsset, ProjectDetail, RunCreatedResponse } from "../types";
 
 interface Props {
   detail: ProjectDetail;
   onRefresh: () => Promise<void>;
   onRunsStarted: (runId: string) => void;
-  notify: (message: string, error?: boolean) => void;
 }
 
 interface JoinStepDraft {
@@ -25,7 +47,7 @@ const dataSections: ReadonlyArray<readonly [DataSection, string]> = [
   ["notebook", "Notebook"],
 ];
 
-export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Props) {
+export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
   const [section, setSection] = useState<DataSection>("upload");
   const [uploadKind, setUploadKind] = useState("feature");
   const [busy, setBusy] = useState("");
@@ -68,7 +90,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         form.append("kind", uploadKind);
         await api.upload(`/projects/${detail.project.id}/data-assets`, form);
       }
-      notify(`${files.length} 个文件已保存在本机`);
       await onRefresh();
     } catch (error) {
       notify(errorMessage(error), true);
@@ -89,7 +110,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
     setBusy(assetId);
     try {
       await api.post(`/data-assets/${assetId}/materialize`);
-      notify("已生成不可变数据版本");
       await onRefresh();
       setSection("target");
     } catch (error) {
@@ -157,7 +177,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         target_columns: [],
         customer_key: null,
       });
-      notify("关联完成；粒度、重复、膨胀和血缘检查已通过");
       await onRefresh();
       setSection("target");
     } catch (error) {
@@ -197,7 +216,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         dataset_version_id: datasetId,
         target_columns: targets,
       });
-      notify("多个 Y 已建立独立顺序任务");
       setTargets([]);
       await onRefresh();
     } catch (error) {
@@ -218,7 +236,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         });
         first ||= result.run.id;
       }
-      notify(`${selectedTasks.length} 个 Y 已进入本地顺序队列`);
       await onRefresh();
       if (first) onRunsStarted(first);
     } catch (error) {
@@ -232,9 +249,10 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
     <div className="data-workbench">
       <div className="stage-line">
         <div>
-          <span className="eyebrow">DATA PREPARATION</span>
-          <h2>准备本地建模数据</h2>
-          <p>支持直接建模、多表关联和 Notebook 兜底；每个结果都会重新校验。</p>
+          <h2>
+            准备本地建模数据
+            <Hint text="支持直接建模、多表关联和 Notebook 兜底；每个结果都会重新校验。" />
+          </h2>
         </div>
         <div className="run-meta">
           PROJECT <b>{detail.project.id.slice(-8)}</b>
@@ -243,12 +261,18 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         </div>
       </div>
       <Tabs
-        aria-label="数据准备步骤"
-        className="subnav"
-        items={dataSections.map(([id, label]) => ({ id, label }))}
         value={section}
-        onChange={(id) => setSection(id as DataSection)}
-      />
+        onValueChange={(id) => setSection(id as DataSection)}
+        className="contents"
+      >
+        <TabsList className="subnav" aria-label="数据准备步骤">
+          {dataSections.map(([id, label]) => (
+            <TabsTrigger key={id} value={id} id={`tab-${id}`}>
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
       {section === "upload" && (
         <section
           id="data-panel-upload"
@@ -258,22 +282,29 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         >
           <div className="section-heading">
             <div>
-              <h3>导入 CSV / Excel</h3>
-              <p>可一次选择多张表；Excel 多 Sheet 会先要求选择 Sheet。</p>
+              <h3>
+                导入 CSV / Excel
+                <Hint text="可一次选择多张表；Excel 多 Sheet 会先要求选择 Sheet。" />
+              </h3>
             </div>
             <div className="upload-actions">
-              <select
-                aria-label="文件用途"
-                value={uploadKind}
-                onChange={(e) => setUploadKind(e.target.value)}
-              >
-                <option value="base">基准样本表</option>
-                <option value="feature">特征表</option>
-                <option value="dictionary">数据字典</option>
-                <option value="score_input">待评分样本</option>
-              </select>
+              <Select value={uploadKind} onValueChange={setUploadKind}>
+                <SelectTrigger className="w-[150px]" aria-label="文件用途">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="base">基准样本表</SelectItem>
+                  <SelectItem value="feature">特征表</SelectItem>
+                  <SelectItem value="dictionary">数据字典</SelectItem>
+                  <SelectItem value="score_input">待评分样本</SelectItem>
+                </SelectContent>
+              </Select>
               <label
-                className={`button primary file-button ${busy === "upload" ? "disabled" : ""}`}
+                className={cn(
+                  buttonVariants(),
+                  "file-button",
+                  busy === "upload" && "pointer-events-none opacity-50",
+                )}
               >
                 {busy === "upload" ? "导入中…" : "选择本地文件"}
                 <input
@@ -303,31 +334,37 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         >
           <div className="section-heading">
             <div>
-              <h3>四级关联工作流</h3>
-              <p>Agent 推荐 → 可视化编辑 → Agent Notebook → 用户手写 Notebook。</p>
+              <h3>
+                四级关联工作流
+                <Hint text="Agent 推荐 → 可视化编辑 → Agent Notebook → 用户手写 Notebook。" />
+              </h3>
             </div>
-            <button className="button secondary" onClick={addStep} disabled={assets.length < 2}>
+            <Button variant="outline" onClick={addStep} disabled={assets.length < 2}>
               ＋ 添加特征表
-            </button>
+            </Button>
           </div>
           <label className="field-inline">
             基准表
-            <select
+            <Select
               value={baseId}
-              onChange={(e) => {
-                setBaseId(e.target.value);
+              onValueChange={(value) => {
+                setBaseId(value);
                 setSteps([]);
               }}
             >
-              <option value="">选择基准表</option>
-              {assets
-                .filter((a) => a.kind !== "dictionary")
-                .map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-            </select>
+              <SelectTrigger>
+                <SelectValue placeholder="选择基准表" />
+              </SelectTrigger>
+              <SelectContent>
+                {assets
+                  .filter((a) => a.kind !== "dictionary")
+                  .map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
           </label>
           <div className="join-steps">
             {steps.map((step, index) => (
@@ -335,29 +372,33 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                 <div className="join-step-index">{String(index + 1).padStart(2, "0")}</div>
                 <label>
                   右表
-                  <select
+                  <Select
                     value={step.right_asset_id}
-                    onChange={(e) =>
+                    onValueChange={(value) =>
                       setSteps((current) =>
                         current.map((v) =>
-                          v.id === step.id ? { ...v, right_asset_id: e.target.value } : v,
+                          v.id === step.id ? { ...v, right_asset_id: value } : v,
                         ),
                       )
                     }
                   >
-                    <option value="">选择特征表</option>
-                    {assets
-                      .filter((a) => a.id !== baseId && a.kind !== "dictionary")
-                      .map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                        </option>
-                      ))}
-                  </select>
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择特征表" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assets
+                        .filter((a) => a.id !== baseId && a.kind !== "dictionary")
+                        .map((a) => (
+                          <SelectItem key={a.id} value={a.id}>
+                            {a.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
                 </label>
                 <label>
                   左键（逗号分隔）
-                  <input
+                  <Input
                     value={step.leftKeys}
                     onChange={(e) =>
                       setSteps((current) =>
@@ -371,7 +412,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                 </label>
                 <label>
                   右键（逗号分隔）
-                  <input
+                  <Input
                     value={step.rightKeys}
                     onChange={(e) =>
                       setSteps((current) =>
@@ -383,20 +424,22 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                     placeholder="customer_id"
                   />
                 </label>
-                <button
-                  className="button secondary"
+                <Button
+                  variant="outline"
+                  className="join-step-recommend"
                   onClick={() => recommend(step)}
                   disabled={busy === `recommend-${step.id}`}
                 >
                   {busy === `recommend-${step.id}` ? "分析中…" : "Agent 推荐"}
-                </button>
-                <button
-                  className="icon-button"
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   aria-label="删除步骤"
                   onClick={() => setSteps((current) => current.filter((v) => v.id !== step.id))}
                 >
                   ×
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -416,7 +459,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
               onClick={executeJoin}
               disabled={!steps.length || busy === "join"}
             >
-              <b>1—2</b>
+              <b>1-2</b>
               <strong>执行可视化关联</strong>
               <span>使用 Agent 推荐或手动编辑后的键</span>
             </button>
@@ -446,8 +489,10 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
         >
           <div className="section-heading">
             <div>
-              <h3>创建多个 Y 任务</h3>
-              <p>-1 和空值会按每个 Y 独立排除；一个 Y 阻断不影响其他任务。</p>
+              <h3>
+                创建多个 Y 任务
+                <Hint text="-1 和空值会按每个 Y 独立排除；一个 Y 阻断不影响其他任务。" />
+              </h3>
             </div>
           </div>
           {detail.dataset_versions.length === 0 ? (
@@ -456,31 +501,34 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
             <>
               <label>
                 建模数据版本
-                <select
+                <Select
                   value={datasetId}
-                  onChange={(e) => {
-                    setDatasetId(e.target.value);
+                  onValueChange={(value) => {
+                    setDatasetId(value);
                     setTargets([]);
                   }}
                 >
-                  <option value="">选择版本</option>
-                  {detail.dataset_versions.map((item) => (
-                    <option value={item.id} key={item.id}>
-                      {item.label} · {item.rows.toLocaleString()}×{item.columns}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择版本" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {detail.dataset_versions.map((item) => (
+                      <SelectItem value={item.id} key={item.id}>
+                        {item.label} · {item.rows.toLocaleString()}×{item.columns}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </label>
               <div className="target-candidates">
                 {binaryCandidates.length ? (
                   binaryCandidates.map((column) => (
                     <label key={column}>
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={targets.includes(column)}
-                        onChange={(e) =>
+                        onCheckedChange={(checked) =>
                           setTargets((current) =>
-                            e.target.checked
+                            checked === true
                               ? [...current, column]
                               : current.filter((v) => v !== column),
                           )
@@ -493,32 +541,29 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                   <p>该版本没有识别到同时包含 0/1 的候选 Y。</p>
                 )}
               </div>
-              <button
-                className="button primary"
-                disabled={!targets.length || busy === "targets"}
-                onClick={createTargets}
-              >
+              <Button disabled={!targets.length || busy === "targets"} onClick={createTargets}>
                 {busy === "targets" ? "创建中…" : `创建 ${targets.length || ""} 个 Y 任务`}
-              </button>
+              </Button>
             </>
           )}
           {detail.target_tasks.length > 0 && (
             <div className="task-queue">
               <div className="section-heading">
                 <div>
-                  <h3>Y 任务队列</h3>
-                  <p>可一次启动多个任务，本地 Worker 按顺序执行。</p>
+                  <h3>
+                    Y 任务队列
+                    <Hint text="可一次启动多个任务，本地 Worker 按顺序执行。" />
+                  </h3>
                 </div>
               </div>
               {detail.target_tasks.map((task) => (
                 <label className="task-row" key={task.id}>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     disabled={!["queued", "failed", "blocked"].includes(task.status)}
                     checked={selectedTasks.includes(task.id)}
-                    onChange={(e) =>
+                    onCheckedChange={(checked) =>
                       setSelectedTasks((current) =>
-                        e.target.checked
+                        checked === true
                           ? [...current, task.id]
                           : current.filter((v) => v !== task.id),
                       )
@@ -526,16 +571,12 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                   />
                   <strong>{task.target_column}</strong>
                   <span>{task.valid_sample_count.toLocaleString()} 有效样本</span>
-                  <em className={`status ${task.status}`}>{task.status}</em>
+                  <Badge variant={statusVariant(task.status)}>{task.status}</Badge>
                 </label>
               ))}
-              <button
-                className="button primary"
-                disabled={!selectedTasks.length || busy === "runs"}
-                onClick={startRuns}
-              >
+              <Button disabled={!selectedTasks.length || busy === "runs"} onClick={startRuns}>
                 {busy === "runs" ? "入队中…" : `启动 ${selectedTasks.length} 个 Run`}
-              </button>
+              </Button>
             </div>
           )}
         </section>
@@ -562,9 +603,9 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Prop
                 用上一步的“Agent 生成 Notebook”或“用户手写
                 Notebook”创建。代码可访问本机与网络，因此不是安全沙箱。
               </p>
-              <button className="button secondary" onClick={() => createNotebook(false)}>
+              <Button variant="outline" onClick={() => createNotebook(false)}>
                 创建空白 Notebook
-              </button>
+              </Button>
             </div>
           )}
         </section>
@@ -587,59 +628,64 @@ function AssetTable({
   if (!assets.length) return <Empty text="尚未导入文件。原始文件不会上传到云端。" />;
   return (
     <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>用途</th>
-            <th>文件</th>
-            <th>格式</th>
-            <th>规模</th>
-            <th>状态 / Sheet</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>用途</TableHead>
+            <TableHead>文件</TableHead>
+            <TableHead>格式</TableHead>
+            <TableHead>规模</TableHead>
+            <TableHead>状态 / Sheet</TableHead>
+            <TableHead>操作</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {assets.map((asset) => (
-            <tr key={asset.id}>
-              <td>{asset.kind}</td>
-              <td>
+            <TableRow key={asset.id}>
+              <TableCell>{asset.kind}</TableCell>
+              <TableCell>
                 <strong>{asset.name}</strong>
-              </td>
-              <td>{asset.format.toUpperCase()}</td>
-              <td>
+              </TableCell>
+              <TableCell>{asset.format.toUpperCase()}</TableCell>
+              <TableCell>
                 {asset.rows == null
                   ? "待选择"
                   : `${asset.rows.toLocaleString()} × ${asset.columns}`}
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 {asset.status === "sheet_selection_required" ? (
-                  <select defaultValue="" onChange={(e) => onSheet(asset, e.target.value)}>
-                    <option value="" disabled>
-                      选择 Sheet
-                    </option>
-                    {asset.metadata?.sheets?.map((sheet) => (
-                      <option key={sheet}>{sheet}</option>
-                    ))}
-                  </select>
+                  <Select onValueChange={(value) => onSheet(asset, value)}>
+                    <SelectTrigger className="h-[34px]">
+                      <SelectValue placeholder="选择 Sheet" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {asset.metadata?.sheets?.map((sheet) => (
+                        <SelectItem key={sheet} value={sheet}>
+                          {sheet}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 ) : (
-                  <span className="status ready">ready</span>
+                  <Badge variant="ok">ready</Badge>
                 )}
-              </td>
-              <td>
-                <button
-                  className="text-button"
+              </TableCell>
+              <TableCell>
+                <Button
+                  variant="link"
+                  size="sm"
                   disabled={
                     asset.status !== "ready" || busy === asset.id || asset.kind === "dictionary"
                   }
                   onClick={() => onMaterialize(asset.id)}
                 >
                   {busy === asset.id ? "生成中…" : "生成数据版本"}
-                </button>
-              </td>
-            </tr>
+                </Button>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }
@@ -673,7 +719,13 @@ interface NotebookExecuteResponse {
   };
 }
 
-function NotebookEditor({ notebook, document, setDocument, onRefresh, notify }: NotebookEditorProps) {
+function NotebookEditor({
+  notebook,
+  document,
+  setDocument,
+  onRefresh,
+  notify,
+}: NotebookEditorProps) {
   const [busy, setBusy] = useState("");
   const [output, setOutput] = useState("joined_output.csv");
   const [label, setLabel] = useState("Notebook 关联结果");
@@ -681,7 +733,6 @@ function NotebookEditor({ notebook, document, setDocument, onRefresh, notify }: 
     setBusy("save");
     try {
       await api.put(`/notebooks/${notebook.id}`, { notebook: document });
-      notify("Notebook 已保存");
     } catch (e) {
       notify(errorMessage(e), true);
     } finally {
@@ -692,17 +743,19 @@ function NotebookEditor({ notebook, document, setDocument, onRefresh, notify }: 
     setBusy(`cell-${index}`);
     try {
       await save();
-      const result = await api.post<NotebookExecuteResponse>(`/notebooks/${notebook.id}/execute-cell`, {
-        cell_index: index,
-      });
+      const result = await api.post<NotebookExecuteResponse>(
+        `/notebooks/${notebook.id}/execute-cell`,
+        {
+          cell_index: index,
+        },
+      );
       const copy = structuredClone(document);
       copy.cells[index].outputs = result.execution.outputs;
       copy.cells[index].execution_count = result.execution.execution_count;
       setDocument(copy);
-      notify(
-        result.execution.status === "succeeded" ? "单元格执行完成" : "单元格执行失败",
-        result.execution.status !== "succeeded",
-      );
+      if (result.execution.status !== "succeeded") {
+        notify("单元格执行失败", true);
+      }
     } catch (e) {
       notify(errorMessage(e), true);
     } finally {
@@ -718,7 +771,6 @@ function NotebookEditor({ notebook, document, setDocument, onRefresh, notify }: 
         parent_dataset_version_id: notebook.dataset_version_id || null,
         expected_grain: "same_or_fewer_rows",
       });
-      notify("Notebook 输出已通过校验并生成数据版本");
       await onRefresh();
     } catch (e) {
       notify(errorMessage(e), true);
@@ -730,20 +782,21 @@ function NotebookEditor({ notebook, document, setDocument, onRefresh, notify }: 
     <div className="notebook-editor">
       <div className="section-heading">
         <div>
-          <span className="eyebrow">LOCAL KERNEL</span>
-          <h3>{notebook.name}</h3>
-          <p>网络默认开启 · 用户代码不在安全沙箱中 · 产品不会主动外发原始数据</p>
+          <h3>
+            {notebook.name}
+            <Hint text="网络默认开启 · 用户代码不在安全沙箱中 · 产品不会主动外发原始数据" />
+          </h3>
         </div>
-        <button className="button secondary" onClick={save}>
+        <Button variant="outline" onClick={save}>
           {busy === "save" ? "保存中…" : "保存 Notebook"}
-        </button>
+        </Button>
       </div>
       {document.cells.map((cell, index) => (
         <div className={`nb-cell ${cell.cell_type}`} key={index}>
           <div className="nb-gutter">[{cell.execution_count ?? " "}]</div>
           {cell.cell_type === "code" ? (
             <>
-              <textarea
+              <Textarea
                 value={cell.source}
                 onChange={(e) => {
                   const copy = structuredClone(document);
@@ -758,13 +811,18 @@ function NotebookEditor({ notebook, document, setDocument, onRefresh, notify }: 
               {cell.outputs && cell.outputs.length > 0 && (
                 <pre className="cell-output">
                   {cell.outputs
-                    .map((item) => (item as NotebookOutput).text || (item as NotebookOutput).evalue || JSON.stringify((item as NotebookOutput).data || {}))
+                    .map(
+                      (item) =>
+                        (item as NotebookOutput).text ||
+                        (item as NotebookOutput).evalue ||
+                        JSON.stringify((item as NotebookOutput).data || {}),
+                    )
                     .join("\n")}
                 </pre>
               )}
             </>
           ) : (
-            <textarea
+            <Textarea
               value={cell.source}
               onChange={(e) => {
                 const copy = structuredClone(document);
@@ -778,15 +836,15 @@ function NotebookEditor({ notebook, document, setDocument, onRefresh, notify }: 
       <div className="import-output">
         <label>
           输出文件
-          <input value={output} onChange={(e) => setOutput(e.target.value)} />
+          <Input value={output} onChange={(e) => setOutput(e.target.value)} />
         </label>
         <label>
           数据版本名称
-          <input value={label} onChange={(e) => setLabel(e.target.value)} />
+          <Input value={label} onChange={(e) => setLabel(e.target.value)} />
         </label>
-        <button className="button primary" onClick={importOutput} disabled={busy === "import"}>
+        <Button onClick={importOutput} disabled={busy === "import"}>
           {busy === "import" ? "校验中…" : "校验并生成数据版本"}
-        </button>
+        </Button>
       </div>
     </div>
   );

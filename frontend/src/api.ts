@@ -25,16 +25,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const response = await fetch(`${API_ROOT}${path}`, { ...init, headers });
   if (!response.ok) {
-    let body: { error?: { code?: string; message?: string }; detail?: { code?: string; message?: string } | string } = {};
+    let body: {
+      error?: { code?: string; message?: string };
+      detail?: { code?: string; message?: string } | string;
+    } = {};
     try {
       body = await response.json();
     } catch {
       /* response may not be JSON */
     }
-    const detail =
-      (typeof body.error === "object" && body.error) ||
-      (typeof body.detail === "object" && body.detail) ||
-      { message: typeof body.detail === "string" ? body.detail : undefined };
+    const detail = (typeof body.error === "object" && body.error) ||
+      (typeof body.detail === "object" && body.detail) || {
+        message: typeof body.detail === "string" ? body.detail : undefined,
+      };
     throw new ApiError(
       response.status,
       detail.code || `HTTP_${response.status}`,

@@ -36,6 +36,8 @@ a:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
   border-radius: var(--radius-sm);
+  /* 焦点环必须瞬现:键盘用户等不起 200ms 的淡入 */
+  transition: none;
 }
 
 h1,
@@ -43,6 +45,25 @@ h2,
 h3,
 p {
   margin-top: 0;
+}
+
+/* Tofu 风格细滚动条(颜色走令牌,深色模式自动切换) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
 }
 
 /* Reduced motion preferences are applied at the component level via media queries. */

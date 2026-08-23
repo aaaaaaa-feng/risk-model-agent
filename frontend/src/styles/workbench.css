@@ -9,7 +9,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-2xl);
   padding: 22px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-sm);
 }
 
 .work-section,
@@ -32,7 +32,6 @@
   margin: 0 0 3px;
 }
 
-.section-heading p,
 .section-copy {
   font-size: 11px;
   color: var(--muted);
@@ -40,7 +39,7 @@
   line-height: 1.55;
 }
 
-/* Stage line / hero */
+/* Stage line / hero — 墨色面板,钴蓝只做点缀 */
 .stage-line {
   min-height: 158px;
   display: flex;
@@ -48,37 +47,31 @@
   gap: var(--space-4);
   align-items: flex-end;
   padding: 25px 26px;
-  border-radius: 17px;
-  background: var(--blue);
-  color: var(--paper);
-  box-shadow: var(--shadow-blue);
+  border-radius: var(--radius-xl);
+  background: var(--black);
+  color: var(--output-text);
 }
 
 .stage-line h2 {
   max-width: 760px;
-  color: var(--paper);
+  color: var(--output-text);
+  font-family: var(--display);
   font-size: clamp(24px, 3vw, 40px);
-  font-weight: 800;
-  letter-spacing: -0.04em;
+  font-weight: 600;
+  letter-spacing: -0.015em;
   margin: 6px 0 8px;
 }
 
-.stage-line p {
-  font-size: 12px;
-  color: var(--blue-subtle);
-  margin: 0;
-}
-
 .stage-line .eyebrow {
-  color: var(--blue-subtle);
+  color: var(--blue-on-dark);
 }
 
 .stage-line .run-meta {
-  color: var(--blue-subtle);
+  color: var(--ink-inverse-soft);
 }
 
 .stage-line .run-meta b {
-  color: var(--paper);
+  color: var(--output-text);
 }
 
 .run-meta {
@@ -93,13 +86,12 @@
   color: var(--ink);
 }
 
-/* Progress */
+/* 进度条已迁入 shadcn(ui/progress.tsx),原生 progress 伪元素样式下线 */
 .progress-block {
   margin: 18px 0 15px;
   padding: 13px 15px;
-  border: 1px solid var(--blue-subtle);
   border-radius: var(--radius-xl);
-  background: #f8fbff;
+  background: var(--blue-soft);
 }
 
 .progress-block > div {
@@ -107,37 +99,14 @@
   justify-content: space-between;
   font-size: 11px;
   font-weight: 700;
-  color: #1e3a8a;
+  color: var(--blue-text);
 }
 
-.progress-block progress {
-  width: 100%;
-  height: 9px;
-  border: 0;
-  border-radius: var(--radius-full);
-  overflow: hidden;
-  background: var(--blue-subtle);
-  margin-top: 5px;
-}
-
-.progress-block progress::-webkit-progress-bar {
-  background: var(--blue-subtle);
-  border-radius: var(--radius-full);
-}
-
-.progress-block progress::-webkit-progress-value {
-  background: var(--blue);
-  border-radius: var(--radius-full);
-}
-
-/* Summary grid */
+/* Summary grid — 发丝分隔的规格条,不再是面板里的卡片 */
 .summary-grid {
   display: grid;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
-  background: var(--paper);
-  overflow: hidden;
-  box-shadow: var(--shadow-sm);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   margin-bottom: var(--space-4);
 }
 
@@ -156,13 +125,12 @@
 .summary-cell {
   padding: var(--space-4) 17px;
   border-right: 1px solid var(--line);
-  background: var(--paper);
   min-width: 0;
-  transition: background 0.2s ease;
+  transition: background var(--dur-short) var(--ease-out);
 }
 
 .summary-cell:hover {
-  background: #f8fbff;
+  background: var(--blue-soft);
 }
 
 .summary-cell:first-child {
@@ -175,7 +143,7 @@
 
 .summary-cell span {
   display: block;
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   color: var(--muted);
   text-transform: uppercase;
   font-weight: 700;
@@ -184,9 +152,11 @@
 
 .summary-cell strong {
   display: block;
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  font-family: var(--mono);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
   margin-top: 6px;
   white-space: nowrap;
   overflow: hidden;
@@ -218,12 +188,12 @@
   color: var(--muted);
   font-weight: 600;
   transition:
-    background 0.2s ease,
-    color 0.2s ease;
+    background var(--dur-short) var(--ease-out),
+    color var(--dur-short) var(--ease-out);
 }
 
 .subnav button:hover {
-  background: #f4f4f5;
+  background: var(--ground-hover);
 }
 
 .subnav button[aria-selected="true"] {
@@ -238,7 +208,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-left: 4px solid var(--green);
+  border: 1px solid var(--green-border);
   border-radius: var(--radius-xl);
   background: var(--green-soft);
   padding: 13px 15px;
@@ -248,7 +218,7 @@
 
 .review-banner.revise,
 .review-banner.conditional_pass {
-  border-color: #fdba74;
+  border-color: var(--amber-border);
   background: var(--amber-soft);
 }
 
@@ -260,7 +230,7 @@
 
 .review-banner div span {
   display: block;
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   color: var(--muted);
 }
 
@@ -276,13 +246,11 @@
   color: var(--muted);
 }
 
-/* Decision section */
+/* Decision section — 面板内的分区,用发丝线而不是嵌套卡片 */
 .decision-section {
   margin-top: var(--space-4);
-  padding: var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
-  background: #fafafa;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
 }
 
 .decision-actions {
@@ -295,10 +263,8 @@
 }
 
 .review-details {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
-  background: var(--paper);
-  padding: 13px 15px;
+  border-top: 1px solid var(--line);
+  padding-top: 13px;
   margin-top: var(--space-4);
 }
 
@@ -325,7 +291,7 @@
 .review-details pre {
   background: var(--ground);
   padding: 10px;
-  font-size: 9px;
+  font-size: 10px;
   overflow: auto;
   max-height: 150px;
   border-radius: var(--radius-sm);
@@ -338,18 +304,18 @@
 }
 
 .issue {
-  border-left: 3px solid var(--line-strong);
+  border: 1px solid var(--line);
   padding: 8px 10px;
   background: var(--ground);
   display: grid;
   grid-template-columns: 190px 1fr;
   gap: 8px;
   font-size: 11px;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border-radius: var(--radius-sm);
 }
 
 .issue.blocking {
-  border-color: var(--red);
+  border-color: var(--red-border);
   background: var(--red-soft);
 }
 
@@ -369,10 +335,9 @@
   align-items: center;
   gap: 9px;
   cursor: pointer;
-  box-shadow: var(--shadow-xs);
   transition:
-    background 0.2s ease,
-    border-color 0.2s ease;
+    background var(--dur-short) var(--ease-out),
+    border-color var(--dur-short) var(--ease-out);
 }
 
 .action-list label:hover {
@@ -408,8 +373,7 @@
   gap: 7px;
   color: var(--ink);
   cursor: pointer;
-  box-shadow: var(--shadow-xs);
-  transition: border-color 0.2s ease;
+  transition: border-color var(--dur-short) var(--ease-out);
 }
 
 .target-candidates label:hover {
@@ -431,10 +395,9 @@
   text-align: left;
   padding: 11px;
   cursor: pointer;
-  box-shadow: var(--shadow-xs);
   transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
+    border-color var(--dur-short) var(--ease-out),
+    box-shadow var(--dur-short) var(--ease-out);
 }
 
 .fallback-card:hover {
@@ -511,7 +474,7 @@
   display: grid;
   place-items: center;
   background: var(--black);
-  color: var(--paper);
+  color: var(--output-text);
   font: 10px var(--mono);
   border-radius: var(--radius-sm);
 }
@@ -580,9 +543,9 @@
 .cell-output {
   grid-column: 2;
   margin: 6px 0 0;
-  background: #f4f4f4;
-  border-left: 3px solid var(--green);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   padding: 8px;
   max-height: 160px;
   overflow: auto;
@@ -613,7 +576,7 @@
 }
 
 .bin-list {
-  background: #fafafa;
+  background: var(--ground);
   border-right: 1px solid var(--line);
   max-height: 390px;
   overflow: auto;
@@ -623,21 +586,20 @@
   width: 100%;
   border: 0;
   border-bottom: 1px solid var(--line);
-  border-left: 3px solid transparent;
   background: transparent;
   text-align: left;
   padding: 11px;
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: background var(--dur-short) var(--ease-out);
 }
 
 .bin-list button:hover {
-  background: #f0f6ff;
+  background: var(--blue-hover-tint);
 }
 
 .bin-list button.active {
   background: var(--blue-soft);
-  border-left-color: var(--blue);
+  box-shadow: inset 0 0 0 1px var(--line-blue);
 }
 
 .bin-list strong,
@@ -646,7 +608,7 @@
 }
 
 .bin-list span {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--muted);
   margin-top: 3px;
 }
@@ -692,10 +654,6 @@
   color: var(--muted);
 }
 
-.bin-detail-head .status {
-  margin-top: 3px;
-}
-
 .bin-metric-grid {
   margin: 0 0 10px;
 }
@@ -706,8 +664,8 @@
   gap: 6px;
   padding: 8px 10px;
   background: var(--ground);
-  border-left: 3px solid var(--blue);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  border: 1px solid var(--line-blue);
+  border-radius: var(--radius-sm);
   font-size: 11px;
 }
 
@@ -735,12 +693,12 @@
 .bin-table th {
   position: sticky;
   top: 0;
-  background: #f4f4f5;
+  background: var(--ground-hover);
   z-index: 1;
 }
 
 .bin-table .bin-missing {
-  background: #fff9e6;
+  background: var(--amber-missing);
 }
 
 .bin-rate-cell {
@@ -754,7 +712,7 @@
   display: block;
   width: 62px;
   height: 7px;
-  background: #e9edf4;
+  background: var(--track);
   overflow: hidden;
   border-radius: var(--radius-full);
 }
@@ -767,6 +725,7 @@
 
 .bin-rate-cell b {
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .bin-editor-grid {
@@ -819,7 +778,7 @@
 
 .model-grid.head {
   min-height: 36px;
-  background: #f4f4f5;
+  background: var(--ground-hover);
   border-top: 1px solid var(--line);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   font-weight: 600;
@@ -835,7 +794,7 @@
 }
 
 .model-grid.row:hover {
-  background: #f8fbff;
+  background: var(--blue-soft);
 }
 
 .model-grid > span {
@@ -852,7 +811,7 @@
 .model-grid small {
   display: block;
   color: var(--quiet);
-  font: 9px var(--mono);
+  font: 10px var(--mono);
 }
 
 .recommended,
@@ -894,10 +853,9 @@
 .candidate-bars {
   display: grid;
   gap: var(--space-2);
-  padding: var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
-  background: var(--paper);
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
 
 .candidate-bars > div {
@@ -912,7 +870,7 @@
 .candidate-bars i {
   height: 10px;
   display: block;
-  background: #d4d4d8;
+  background: var(--ink-inverse-soft);
   max-width: 100%;
   border-radius: var(--radius-full);
 }
@@ -929,6 +887,7 @@
 .candidate-bars b {
   font-weight: 500;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .feature-pills {
@@ -943,7 +902,6 @@
   background: var(--paper);
   padding: 6px 8px;
   font-size: 10px;
-  box-shadow: var(--shadow-xs);
 }
 
 .feature-pills b {
@@ -952,7 +910,7 @@
 
 .count-badge {
   background: var(--black);
-  color: var(--paper);
+  color: var(--output-text);
   padding: 5px 8px;
   font: 10px var(--mono);
   border-radius: var(--radius-full);
@@ -963,21 +921,17 @@
   border: 0;
   border-radius: var(--radius-xl);
   background: var(--black);
-  color: var(--paper);
+  color: var(--output-text);
   padding: var(--space-4);
   display: grid;
   grid-template-columns: minmax(220px, 1fr) 220px auto;
   gap: var(--space-3);
   align-items: end;
-  box-shadow: 0 10px 20px rgba(24, 24, 27, 0.12);
+  box-shadow: var(--shadow-panel-dark);
 }
 
 .score-panel > div {
   grid-row: span 2;
-}
-
-.score-panel .eyebrow {
-  color: #93c5fd;
 }
 
 .score-panel h3 {
@@ -987,7 +941,7 @@
 .score-panel p {
   margin: 0;
   font-size: 11px;
-  color: #d4d4d8;
+  color: var(--ink-inverse-soft);
 }
 
 .score-panel select {
@@ -1008,7 +962,7 @@
   gap: 15px;
   border: 1px solid var(--blue-subtle);
   border-radius: var(--radius-xl);
-  background: #f8fbff;
+  background: var(--blue-soft);
   padding: var(--space-5);
 }
 
@@ -1023,7 +977,7 @@
   height: 14px;
   border-radius: 50%;
   background: var(--blue);
-  box-shadow: 0 0 0 0 rgba(26, 86, 219, 0.35);
+  box-shadow: 0 0 0 0 var(--pulse-glow);
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -1034,16 +988,14 @@
 
 @keyframes pulse {
   70% {
-    box-shadow: 0 0 0 12px rgba(15, 98, 254, 0);
+    box-shadow: 0 0 0 12px transparent;
   }
 }
 
 .event-preview {
   margin-top: var(--space-4);
-  padding: 15px var(--space-4);
-  border: 1px solid var(--line);
-  border-radius: 15px;
-  background: #fafafa;
+  padding: 15px 0 0;
+  border-top: 1px solid var(--line);
 }
 
 .event-preview h3 {
@@ -1073,9 +1025,15 @@
 .error-panel {
   margin-top: var(--space-4);
   background: var(--red-soft);
-  border-left: 4px solid var(--red);
+  border: 1px solid var(--red-border);
   border-radius: var(--radius-xl);
   padding: var(--space-4);
+}
+
+.error-panel h2 {
+  font-size: 18px;
+  font-weight: 800;
+  margin: var(--space-2) 0;
 }
 
 .error-panel strong {
@@ -1087,56 +1045,91 @@
   margin: 7px 0 14px;
 }
 
-/* Welcome */
+/* Run 完成提示条（替代原蓝色 stage-line） */
+.run-complete {
+  margin: var(--space-4) 0 0;
+  border: 1px solid var(--green-border);
+  border-radius: var(--radius-xl);
+  background: var(--green-soft);
+  padding: var(--space-3) var(--space-4);
+}
+
+.run-complete strong {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--green-text);
+}
+
+.run-complete p {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Welcome — Tofu bento:三俏色大圆角卡片 + hover 微放大 */
 .welcome {
   max-width: none;
   min-height: 0;
-  padding: 28px 32px;
+  padding: 32px 36px;
+  border: 1px solid var(--line);
   border-radius: var(--radius-2xl);
-  background: var(--blue);
-  color: var(--paper);
-  box-shadow: var(--shadow-blue);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
-.welcome .eyebrow {
-  color: var(--blue-subtle);
-}
-
 .welcome h2 {
-  font-size: clamp(26px, 3vw, 44px);
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  margin: 6px 0 8px;
+  font-family: var(--display);
+  font-size: clamp(28px, 3vw, 46px);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin: 8px 0 10px;
 }
 
 .welcome > p {
   max-width: 720px;
-  color: var(--blue-subtle);
+  color: var(--muted);
   font-size: 13px;
   margin: 0;
 }
 
 .welcome-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  border-top: 1px solid rgba(255, 255, 255, 0.32);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.32);
-  margin: 18px 0;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: var(--space-4);
+  margin: 20px 0;
 }
 
 .welcome-grid > div {
-  padding: 12px var(--space-4);
-  border-right: 1px solid rgba(255, 255, 255, 0.22);
+  padding: var(--space-5);
+  border-radius: var(--radius-xl);
+  min-height: 128px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  transition: transform var(--dur-med) var(--ease-out);
 }
 
-.welcome-grid > div:last-child {
-  border: 0;
+.welcome-grid > div:hover {
+  transform: scale(1.015);
+}
+
+.welcome-grid > div:nth-child(1) {
+  background: var(--tofu-green);
+}
+
+.welcome-grid > div:nth-child(2) {
+  background: var(--tofu-purple);
+}
+
+.welcome-grid > div:nth-child(3) {
+  background: var(--tofu-orange);
 }
 
 .welcome-grid b {
-  font: 10px var(--mono);
-  color: var(--paper);
+  font: 500 10px var(--mono);
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .welcome-grid strong,
@@ -1146,56 +1139,31 @@
 
 .welcome-grid strong {
   margin: 6px 0 3px;
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
 }
 
 .welcome-grid span {
-  font-size: 10px;
-  color: var(--blue-subtle);
-  line-height: 1.4;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.88);
+  line-height: 1.5;
 }
 
-.welcome .button.primary {
-  background: var(--paper);
-  border-color: var(--paper);
-  color: var(--blue);
-  box-shadow: none;
-  min-height: 38px;
-  padding: 0 18px;
-}
-
-.welcome .button.primary:hover {
-  background: var(--blue-soft);
-}
-
-/* Workspace setup */
-.workspace-setup-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-workspace-setup);
-  background: rgba(17, 17, 27, 0.73);
-  display: grid;
-  place-items: center;
-  padding: var(--space-5);
-}
-
+/* Workspace setup — 遮罩/定位由 ui/dialog.tsx(Radix)承担,保留面板与头部皮肤 */
 .workspace-setup {
-  width: min(620px, calc(100vw - 40px));
-  max-height: calc(100vh - 40px);
+  width: min(620px, calc(100dvw - 40px));
+  max-height: calc(100dvh - 40px);
   overflow: auto;
   background: var(--paper);
   border-radius: var(--radius-2xl);
-  box-shadow: 0 24px 70px rgba(24, 24, 27, 0.22);
+  box-shadow: var(--shadow-modal);
 }
 
 .workspace-setup-head {
-  background: var(--blue);
-  color: var(--paper);
+  background: var(--black);
+  color: var(--output-text);
   padding: 22px var(--space-5);
-}
-
-.workspace-setup-head .eyebrow {
-  color: #93c5fd;
 }
 
 .workspace-setup-head h2 {
@@ -1282,7 +1250,7 @@
 .settings-nav {
   padding: var(--space-3) 8px;
   border-right: 1px solid var(--line);
-  background: #fafafa;
+  background: var(--ground);
   overflow: auto;
 }
 
@@ -1293,40 +1261,23 @@
   border-radius: var(--radius-md);
   background: transparent;
   text-align: left;
-  padding: 10px 9px;
+  padding: 10px 12px;
   cursor: pointer;
-  color: var(--muted);
-  margin-bottom: 4px;
-  transition: background 0.2s ease;
-}
-
-.settings-nav-item strong,
-.settings-nav-item span {
-  display: block;
-}
-
-.settings-nav-item strong {
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 700;
   color: var(--ink);
-}
-
-.settings-nav-item span {
-  font-size: 9px;
-  margin-top: 3px;
-  line-height: 1.35;
+  margin-bottom: 4px;
+  transition: background var(--dur-short) var(--ease-out);
 }
 
 .settings-nav-item:hover {
-  background: #f0f4ff;
+  background: var(--blue-hover-tint);
 }
 
 .settings-nav-item.active {
   background: var(--blue-soft);
-  box-shadow: inset 3px 0 0 var(--blue);
-}
-
-.settings-nav-item.active strong {
-  color: var(--blue-hover);
+  box-shadow: inset 0 0 0 1px var(--line-blue);
+  color: var(--blue-text);
 }
 
 .settings-panel {
@@ -1340,10 +1291,6 @@
 }
 
 .provider-profiles {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: #fafafa;
-  padding: 9px;
   margin-bottom: 13px;
 }
 
@@ -1352,13 +1299,8 @@
   justify-content: space-between;
   gap: var(--space-2);
   align-items: center;
-  padding: 0 2px 7px;
+  padding: 0 0 7px;
   font-size: 10px;
-}
-
-.provider-profiles-head span {
-  color: var(--muted);
-  font-size: 9px;
 }
 
 .provider-profile {
@@ -1366,32 +1308,24 @@
   align-items: center;
   gap: var(--space-2);
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--paper);
   padding: 8px 9px;
   margin-top: 6px;
   cursor: pointer;
   transition:
-    background 0.2s ease,
-    border-color 0.2s ease;
+    background var(--dur-short) var(--ease-out),
+    border-color var(--dur-short) var(--ease-out);
 }
 
 .provider-profile:hover {
   border-color: var(--focus-color);
-  background: #f8fbff;
+  background: var(--blue-soft);
 }
 
 .provider-profile.active {
-  border-color: var(--focus-color);
+  border-color: var(--line-blue);
   background: var(--blue-soft);
-  box-shadow: inset 3px 0 0 var(--blue);
-}
-
-.provider-profile input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--blue);
-  flex: none;
 }
 
 .provider-profile-copy {
@@ -1413,13 +1347,13 @@
 }
 
 .provider-profile-copy small {
-  font: 9px var(--mono);
+  font: 10px var(--mono);
   color: var(--muted);
   margin-top: 2px;
 }
 
 .provider-profile-state {
-  font-size: 9px;
+  font-size: 10px;
   color: var(--muted);
   white-space: nowrap;
 }
@@ -1446,7 +1380,7 @@
   gap: 4px;
 }
 
-.model-checks label {
+.model-check {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1470,13 +1404,14 @@
   .sidebar,
   .app-header,
   .primary-tabs,
-  .stage-rail,
-  .agent-chat {
-    animation: surface-in 0.45s ease-out both;
+  .stage-progress,
+  .stage-panel,
+  .chat-rail {
+    animation: surface-in var(--dur-med) var(--ease-out) both;
   }
 
   .workspace > * {
-    animation: surface-in 0.5s ease-out both;
+    animation: surface-in var(--dur-med) var(--ease-out) both;
   }
 
   .workspace > *:nth-child(2) {
@@ -1528,7 +1463,7 @@
     grid-column: 2/4;
   }
 
-  .join-step .button {
+  .join-step .join-step-recommend {
     grid-column: 2;
   }
 
@@ -1541,4 +1476,13 @@
   .summary-cell:nth-child(2n) {
     border-right: 0;
   }
+}
+
+/* 深色模式:纯黑面板(舞台 hero / 记分卡)在深灰画布上补一道细边保持轮廓 */
+[data-theme="dark"] .stage-line,
+[data-theme="dark"] .score-panel,
+[data-theme="dark"] .workspace-setup-head,
+[data-theme="dark"] .modal-head,
+[data-theme="dark"] .drawer-head {
+  box-shadow: inset 0 0 0 1px var(--line);
 }

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import type { CSSProperties } from "react";
+import { Moon, Sun } from "lucide-react";
 import { api } from "./api";
 import { useGlobalPolling } from "./hooks/useGlobalPolling";
 import { useProjectData } from "./hooks/useProjectData";
@@ -6,12 +8,18 @@ import { useProjects } from "./hooks/useProjects";
 import { useRunData } from "./hooks/useRunData";
 import { useSelectionState, type View } from "./hooks/useSelectionState";
 import { useSettings } from "./hooks/useSettings";
-import { useToast } from "./hooks/useToast";
+import { useChatRailState } from "./hooks/useChatRailState";
+import { useColumnWidth } from "./hooks/useColumnWidth";
+import { useSidebarState } from "./hooks/useSidebarState";
+import { useTheme } from "./hooks/useTheme";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { errorMessage } from "./lib/format";
+import { notify } from "@/lib/notify";
 import type { ProjectCreatedResponse, RunCreatedResponse, WorkspaceStatus } from "./types";
 import { AppStateContext } from "./stores/AppStateContext";
 import { AgentChat } from "./components/AgentChat";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { DataWorkbench } from "./components/DataWorkbench";
 import { DecisionWorkbench } from "./components/DecisionWorkbench";
 import { HistoryView } from "./components/HistoryView";
@@ -20,18 +28,20 @@ import { ProjectSidebar } from "./components/ProjectSidebar";
 import { ReportView } from "./components/ReportView";
 import { RunWorkbench } from "./components/RunWorkbench";
 import { SettingsDrawer } from "./components/SettingsDrawer";
-import { StageRail } from "./components/StageRail";
-import { Tabs } from "./components/ui/Tabs";
+import { StagePanel } from "./components/StagePanel";
+import { StageProgressBar } from "./components/StageProgressBar";
+import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Toaster } from "sonner";
 import { WorkspaceSetup } from "./components/WorkspaceSetup";
 
 export function App() {
-  const { toast, notify } = useToast();
-  const { projects, loadProjects } = useProjects(notify);
+  const { projects, loadProjects } = useProjects();
+  const { theme, toggle: toggleTheme } = useTheme();
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   // 该回调必须保持稳定，否则工作区 Hook 会把每次渲染都当成一次初始化。
   const openWorkspaceSetup = useCallback(() => setWorkspaceOpen(true), []);
-  const { workspace, setWorkspace, loadWorkspace } = useWorkspace(notify, openWorkspaceSetup);
-  const { settings, loadSettings } = useSettings(notify);
+  const { workspace, setWorkspace, loadWorkspace } = useWorkspace(openWorkspaceSetup);
+  const { settings, loadSettings } = useSettings();
   const {
     selectedId,
     setSelectedId,
@@ -50,14 +60,28 @@ export function App() {
     selectedId,
     selectedRef,
     setRunId,
-    notify,
   );
   const { run, setRun, decision, setDecision, events, setEvents, loadRun, runAbort, clearRun } =
-    useRunData(runId, selectedId, runRef, selectedRef, loadDetail, notify);
+    useRunData(runId, selectedId, runRef, selectedRef, loadDetail);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sidebarOpen, toggleSidebar] = useSidebarState();
+  const chatRail = useChatRailState();
+  const sidebarWidth = useColumnWidth({
+    storageKey: "risk-agent-sidebar-width",
+    min: 180,
+    max: 360,
+    initial: 224,
+  });
+  const chatWidth = useColumnWidth({
+    storageKey: "risk-agent-chat-rail-width",
+    min: 240,
+    max: 520,
+    initial: typeof window !== "undefined" && window.innerWidth < 1440 ? 260 : 320,
+    invert: true,
+  });
 
   useEffect(() => {
     // 应用启动时只加载一次基础上下文；项目详情和 Run 事件由各自的 Hook 管理。
@@ -106,7 +130,6 @@ export function App() {
       setSelectedId(value.project.id);
       setCreateOpen(false);
       setDataMode(true);
-      notify("项目已创建；可开始导入本地数据");
     } catch (error) {
       notify(errorMessage(error), true);
     } finally {
@@ -126,7 +149,6 @@ export function App() {
       setSelectedId(value.project.id);
       setCreateOpen(false);
       setDataMode(true);
-      notify("合成多表项目已就绪；三个 Y 可分别排队建模");
     } catch (error) {
       notify(errorMessage(error), true);
     } finally {
@@ -145,7 +167,6 @@ export function App() {
       runRef.current = value.run.id;
       setRunId(value.run.id);
       setView("workbench");
-      notify("新 Run 已进入队列");
     } catch (error) {
       notify(errorMessage(error), true);
     }
@@ -174,7 +195,6 @@ export function App() {
   return (
     <AppStateContext.Provider
       value={{
-        notify,
         settings,
         workspace,
         projects,
@@ -189,11 +209,23 @@ export function App() {
           projects={projects}
           selectedId={selectedId}
           settings={settings}
+          open={sidebarOpen}
+          onToggle={toggleSidebar}
+          width={sidebarOpen ? sidebarWidth.width : undefined}
           onSelect={selectProject}
           onCreate={() => setCreateOpen(true)}
           onSettings={() => setSettingsOpen(true)}
         />
+        {sidebarOpen && (
+          <div
+            className="col-resizer"
+            aria-label="调整项目列表宽度"
+            title="拖动调整宽度，双击恢复默认"
+            {...sidebarWidth.resizerProps}
+          />
+        )}
         <main className="main-column">
+          <StageProgressBar run={run} />
           <header className="app-header">
             <div className="head-title">
               <span>
@@ -204,40 +236,57 @@ export function App() {
               <h1>{selectedProject?.name || "风控建模 Agent"}</h1>
             </div>
             <div className="head-actions">
-              <span
-                className={`tag ${settings?.llm_enabled && settings?.api_key_configured ? "ok" : ""}`}
+              <Badge
+                variant={settings?.llm_enabled && settings?.api_key_configured ? "ok" : "neutral"}
+                className="max-[1100px]:hidden"
               >
                 {providerStatus}
-              </span>
-              <span className="tag network">
+              </Badge>
+              <Badge variant="network" className="max-[1350px]:hidden">
                 Notebook {settings?.notebook_network === false ? "关闭偏好" : "网络开启"}
-              </span>
+              </Badge>
               {selectedProject && (
-                <button
-                  className="button secondary compact"
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => {
                     setDataMode(true);
                     setView("workbench");
                   }}
                 >
                   数据 / 新 Y
-                </button>
+                </Button>
               )}
               {decision && view === "workbench" && !dataMode && (
-                <span className="tag attention">等待你的确认</span>
+                <Badge variant="attention" className="max-[1100px]:hidden">
+                  等待你的确认
+                </Badge>
               )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleTheme}
+                aria-label={theme === "dark" ? "切换到白天模式" : "切换到黑夜模式"}
+                title={theme === "dark" ? "切换到白天模式" : "切换到黑夜模式"}
+              >
+                {theme === "dark" ? <Sun /> : <Moon />}
+              </Button>
             </div>
           </header>
-          <Tabs
-            aria-label="项目主视图"
-            items={[
-              { id: "workbench", label: "当前工作台" },
-              { id: "report", label: "产物报告" },
-              { id: "history", label: "历史 Run" },
-            ]}
-            value={view}
-            onChange={(id) => setView(id as View)}
-          />
+          <Tabs value={view} onValueChange={(id) => setView(id as View)} className="contents">
+            <TabsList className="primary-tabs" aria-label="项目主视图">
+              <TabsTrigger value="workbench" id="tab-workbench">
+                当前工作台
+              </TabsTrigger>
+              <TabsTrigger value="report" id="tab-report">
+                产物报告
+              </TabsTrigger>
+              <TabsTrigger value="history" id="tab-history">
+                历史 Run
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <StagePanel run={run} decision={decision} events={events} />
           <section
             id="main-workspace"
             className="workspace"
@@ -254,7 +303,6 @@ export function App() {
                   setRunId(id);
                   setDataMode(false);
                 }}
-                notify={notify}
               />
             ) : null}
             {selectedProject && view === "workbench" && !dataMode && run && decision ? (
@@ -265,14 +313,13 @@ export function App() {
                   loadRun();
                   loadDetail();
                 }}
-                notify={notify}
               />
             ) : null}
             {selectedProject && view === "workbench" && !dataMode && run && !decision ? (
               <RunWorkbench run={run} events={events} onRetry={retry} />
             ) : null}
             {selectedProject && view === "report" && (
-              <ReportView project={selectedProject} run={run} notify={notify} />
+              <ReportView project={selectedProject} run={run} />
             )}
             {selectedProject && view === "history" && (
               <HistoryView
@@ -283,9 +330,56 @@ export function App() {
               />
             )}
           </section>
-          <AgentChat projectId={selectedId} notify={notify} />
         </main>
-        <StageRail run={run} decision={decision} events={events} />
+        {!chatRail.collapsed && (
+          <div
+            className="col-resizer"
+            aria-label="调整对话栏宽度"
+            title="拖动调整宽度，双击恢复默认"
+            {...chatWidth.resizerProps}
+          />
+        )}
+        <aside
+          className={`chat-rail ${chatRail.collapsed ? "collapsed" : chatRail.mode}`}
+          style={
+            chatRail.collapsed
+              ? undefined
+              : ({ "--chat-rail-width": `${chatWidth.width}px` } as CSSProperties)
+          }
+          aria-label="Agent 对话"
+        >
+          {chatRail.collapsed ? (
+            <button
+              className="chat-expand"
+              type="button"
+              aria-expanded={false}
+              aria-label="展开 Agent 对话栏"
+              onClick={chatRail.toggle}
+            >
+              ◂
+            </button>
+          ) : (
+            <>
+              <div className="chat-rail-head">
+                <span>AGENT</span>
+                <button
+                  className="chat-collapse"
+                  type="button"
+                  aria-expanded={true}
+                  aria-label="收起 Agent 对话栏"
+                  onClick={chatRail.toggle}
+                >
+                  ▸
+                </button>
+              </div>
+              <AgentChat
+                projectId={selectedId}
+                settings={settings}
+                onProviderChange={loadSettings}
+              />
+            </>
+          )}
+        </aside>
         <NewProjectDialog
           open={createOpen}
           busy={busy}
@@ -300,7 +394,6 @@ export function App() {
           onClose={() => setSettingsOpen(false)}
           onChanged={loadSettings}
           onChangeWorkspace={() => setWorkspaceOpen(true)}
-          notify={notify}
         />
         {workspace && workspaceOpen && (
           <WorkspaceSetup
@@ -311,14 +404,12 @@ export function App() {
                 ? undefined
                 : () => setWorkspaceOpen(false)
             }
-            notify={notify}
           />
         )}
-        {toast && (
-          <div className={`toast ${toast.error ? "error" : ""}`} role="status">
-            {toast.message}
-          </div>
-        )}
+        <Toaster
+          position="top-right"
+          toastOptions={{ unstyled: true, classNames: { toast: "app-toast" } }}
+        />
       </div>
     </AppStateContext.Provider>
   );
@@ -327,7 +418,6 @@ export function App() {
 function Welcome({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="welcome">
-      <span className="eyebrow">LOCAL RISK MODELING</span>
       <h2>从一个可追溯的建模项目开始</h2>
       <p>
         导入本地 CSV / Excel，多表关联，确认多个 0/1 Y，再由主 Agent、Reviewer 与确定性 Worker
@@ -352,9 +442,9 @@ function Welcome({ onCreate }: { onCreate: () => void }) {
           <span>同一报告数据导出 Web、Excel、HTML 与模型包。</span>
         </div>
       </div>
-      <button className="button primary" onClick={onCreate}>
+      <Button className="h-[38px] px-[18px]" onClick={onCreate}>
         创建第一个项目
-      </button>
+      </Button>
     </div>
   );
 }

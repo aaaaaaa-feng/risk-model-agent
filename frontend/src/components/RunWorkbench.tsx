@@ -1,5 +1,17 @@
 import { formatMetric } from "../lib/format";
 import { runStageLabel } from "../lib/labels";
+import { Badge, statusVariant } from "@/components/ui/badge";
+import { Hint } from "@/components/ui/hint";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import type { ModelResult } from "../types/model";
 import type { Run, RunEvent } from "../types";
 
@@ -22,63 +34,37 @@ export function RunWorkbench({
   if (run.status === "failed" || run.status === "blocked")
     return (
       <div className="run-workbench">
-        <div className="stage-line">
-          <div>
-            <span className="eyebrow">{run.status.toUpperCase()}</span>
-            <h2>{run.status === "failed" ? "当前 Run 执行失败" : "当前 Run 已安全停止"}</h2>
-            <p>其他 Y 任务不受影响；错误码和最后证据保留在事件记录中。</p>
-          </div>
-          <div className="run-meta">
-            RUN <b>{run.id.slice(-8)}</b>
-            <br />
-            NODE <b>{run.node}</b>
-          </div>
-        </div>
         <div className="error-panel">
+          <span className="eyebrow">{run.status.toUpperCase()}</span>
+          <h2>{run.status === "failed" ? "当前 Run 执行失败" : "当前 Run 已安全停止"}</h2>
+          <p>其他 Y 任务不受影响；错误码和最后证据保留在事件记录中。</p>
           <strong>{run.error || "USER_REJECTED"}</strong>
           <p>{events.at(-1)?.summary}</p>
-          {onRetry && (
-            <button className="button primary" onClick={onRetry}>
-              基于同一 Y 新建 Run
-            </button>
-          )}
+          {onRetry && <Button onClick={onRetry}>基于同一 Y 新建 Run</Button>}
         </div>
       </div>
     );
   return (
     <div className="run-workbench">
-      <div className="stage-line">
-        <div>
-          <span className="eyebrow">
-            {run.status === "succeeded" ? "RUN COMPLETED" : "LOCAL WORKER RUNNING"}
-          </span>
-          <h2>
-            {run.status === "succeeded"
-              ? conditional
-                ? "模型已完成质检，需关注排序"
-                : "模型已通过最终质检"
-              : runStageLabel[run.stage] || run.stage}
-          </h2>
+      {run.status === "succeeded" && (
+        <div className="run-complete">
+          <strong>{conditional ? "模型已完成质检，需关注排序" : "模型已通过最终质检"}</strong>
           <p>
-            {run.status === "succeeded"
-              ? conditional
-                ? "产物已生成；Test 等频分箱未达到绝对排序，报告已标记条件通过。"
-                : "报告、模型包与独立评分入口已生成。"
-              : events.at(-1)?.summary || "等待本地节点反馈…"}
+            {conditional
+              ? "产物已生成；Test 等频分箱未达到绝对排序，报告已标记条件通过。"
+              : "报告、模型包与独立评分入口已生成。"}
           </p>
         </div>
-        <div className="run-meta">
-          RUN <b>{run.id.slice(-8)}</b>
-          <br />
-          CHECKPOINT <b>{run.node}</b>
-        </div>
-      </div>
+      )}
       <div className="progress-block">
         <div>
           <span>整体进度</span>
           <b>{Math.round((run.progress || 0) * 100)}%</b>
         </div>
-        <progress max={1} value={run.progress || 0} />
+        <Progress
+          className="mt-[5px] h-[9px] rounded-full bg-[var(--blue-subtle)]"
+          value={Math.round((run.progress || 0) * 100)}
+        />
       </div>
       {champion ? (
         <>
@@ -90,47 +76,51 @@ export function RunWorkbench({
           </div>
           <div className="section-heading">
             <div>
-              <h3>候选模型执行矩阵</h3>
-              <p>OOT 只在 Champion 冻结后进入最终报告。</p>
+              <h3>
+                候选模型执行矩阵
+                <Hint text="OOT 只在 Champion 冻结后进入最终报告。" />
+              </h3>
             </div>
           </div>
           <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>模型</th>
-                  <th>状态</th>
-                  <th>校准</th>
-                  <th>Test AUC</th>
-                  <th>Test KS</th>
-                  <th>PSI</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>模型</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>校准</TableHead>
+                  <TableHead>Test AUC</TableHead>
+                  <TableHead>Test KS</TableHead>
+                  <TableHead>PSI</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {candidates.map((item) => (
-                  <tr key={item.candidate}>
-                    <td>
+                  <TableRow key={item.candidate}>
+                    <TableCell>
                       <strong>{item.candidate}</strong>
-                    </td>
-                    <td>
-                      <span className={`status ${item.status}`}>{item.status}</span>
-                    </td>
-                    <td>{item.calibration || "—"}</td>
-                    <td>{formatMetric(item.test_metrics?.roc_auc)}</td>
-                    <td>{formatMetric(item.test_metrics?.ks)}</td>
-                    <td>{formatMetric(item.train_test_score_psi)}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
+                    </TableCell>
+                    <TableCell>{item.calibration || "—"}</TableCell>
+                    <TableCell>{formatMetric(item.test_metrics?.roc_auc)}</TableCell>
+                    <TableCell>{formatMetric(item.test_metrics?.ks)}</TableCell>
+                    <TableCell>{formatMetric(item.train_test_score_psi)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </div>
         </>
       ) : (
         <div className="live-node">
           <div className="pulse" />
           <div>
-            <strong>{runStageLabel[run.stage] || run.stage}</strong>
-            <p>页面关闭不会停止任务。所有拟合、统计与报告均在本机执行。</p>
+            <strong>
+              {runStageLabel[run.stage] || run.stage}
+              <Hint text="页面关闭不会停止任务。所有拟合、统计与报告均在本机执行。" />
+            </strong>
           </div>
         </div>
       )}

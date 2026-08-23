@@ -1,12 +1,30 @@
 import { ChangeEvent, useEffect, useState } from "react";
 import { api } from "../api";
 import { errorMessage, formatMetric, formatPercent } from "../lib/format";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { notify } from "@/lib/notify";
+import { Hint } from "@/components/ui/hint";
+import { cn } from "@/lib/utils";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import type { Project, Run } from "../types";
 
 interface Props {
   project: Project;
   run: Run | null;
-  notify: (message: string, error?: boolean) => void;
 }
 
 interface ModelVersion {
@@ -30,7 +48,7 @@ interface ReportData {
   feature_selection?: { selected?: Array<Record<string, unknown>> };
 }
 
-export function ReportView({ project, run, notify }: Props) {
+export function ReportView({ project, run }: Props) {
   const [report, setReport] = useState<ReportData | null>(null);
   const [models, setModels] = useState<ModelVersion[]>([]);
   const [modelId, setModelId] = useState("");
@@ -52,7 +70,7 @@ export function ReportView({ project, run, notify }: Props) {
         .get<ReportData>(`/reports/${run.id}`)
         .then((value) => setReport(value))
         .catch((error) => notify(errorMessage(error), true));
-  }, [project.id, run?.id, run?.status, notify]);
+  }, [project.id, run?.id, run?.status]);
 
   const score = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -62,13 +80,15 @@ export function ReportView({ project, run, notify }: Props) {
       const form = new FormData();
       form.append("file", file);
       form.append("kind", "score_input");
-      const uploaded = await api.upload<{ asset: { id: string } }>(`/projects/${project.id}/data-assets`, form);
+      const uploaded = await api.upload<{ asset: { id: string } }>(
+        `/projects/${project.id}/data-assets`,
+        form,
+      );
       const result = await api.post<{ score_job: ScoreJob }>("/score-jobs", {
         model_version_id: modelId,
         input_asset_id: uploaded.asset.id,
       });
       setScoreJob(result.score_job);
-      notify(`已为 ${result.score_job.rows.toLocaleString()} 条样本打分`);
     } catch (error) {
       notify(errorMessage(error), true);
     } finally {
@@ -82,9 +102,10 @@ export function ReportView({ project, run, notify }: Props) {
       <div className="report-empty">
         <div className="stage-line">
           <div>
-            <span className="eyebrow">REPORT</span>
-            <h2>产物将在最终质检后生成</h2>
-            <p>Web、Excel、单文件 HTML 和模型包共享同一结构化报告数据。</p>
+            <h2>
+              产物将在最终质检后生成
+              <Hint text="Web、Excel、单文件 HTML 和模型包共享同一结构化报告数据。" />
+            </h2>
           </div>
         </div>
         <div className="empty-state">
@@ -104,24 +125,20 @@ export function ReportView({ project, run, notify }: Props) {
     <div className="report-view">
       <div className="stage-line">
         <div>
-          <span className="eyebrow">RISK MODEL REPORT · {report.schema_version}</span>
           <h2>
             {report.project.name} · {report.target.column}
           </h2>
-          <p>管理摘要与专业详情来自同一份事实数据。</p>
+          <Hint text={`管理摘要与专业详情来自同一份事实数据 · Schema ${report.schema_version}。`} />
         </div>
         <div className="report-actions">
-          <a className="button secondary" href={`/api/v1/reports/${run.id}/excel`}>
-            导出 Excel
-          </a>
-          <a
-            className="button secondary"
-            target="_blank"
-            rel="noreferrer"
-            href={`/api/v1/reports/${run.id}/html`}
-          >
-            打开单页 HTML
-          </a>
+          <Button variant="outline" asChild>
+            <a href={`/api/v1/reports/${run.id}/excel`}>导出 Excel</a>
+          </Button>
+          <Button variant="outline" asChild>
+            <a target="_blank" rel="noreferrer" href={`/api/v1/reports/${run.id}/html`}>
+              打开单页 HTML
+            </a>
+          </Button>
         </div>
       </div>
       <div className="summary-grid five">
@@ -137,45 +154,50 @@ export function ReportView({ project, run, notify }: Props) {
             <span>QUALITY NOTICE</span>
             <strong>需关注排序</strong>
           </div>
-          <p>{(summary.quality_notes as string[] | undefined)?.[0] || "Test 等频分箱未达到绝对排序。"}</p>
+          <p>
+            {(summary.quality_notes as string[] | undefined)?.[0] ||
+              "Test 等频分箱未达到绝对排序。"}
+          </p>
         </div>
       )}
       <section className="report-section">
         <div className="section-heading">
           <div>
-            <h3>Train / Test / OOT 整体效果</h3>
-            <p>样本量、好坏占比、AUC、KS、PR-AUC 与 PSI。</p>
+            <h3>
+              Train / Test / OOT 整体效果
+              <Hint text="样本量、好坏占比、AUC、KS、PR-AUC 与 PSI。" />
+            </h3>
           </div>
         </div>
         <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>数据集</th>
-                <th>样本量</th>
-                <th>坏样本</th>
-                <th>坏占比</th>
-                <th>AUC</th>
-                <th>KS</th>
-                <th>PR-AUC</th>
-                <th>PSI</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>数据集</TableHead>
+                <TableHead>样本量</TableHead>
+                <TableHead>坏样本</TableHead>
+                <TableHead>坏占比</TableHead>
+                <TableHead>AUC</TableHead>
+                <TableHead>KS</TableHead>
+                <TableHead>PR-AUC</TableHead>
+                <TableHead>PSI</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {Object.entries(report.sample_overview || {}).map(([name, value]) => {
                 const overview = value as Record<string, unknown>;
                 return (
-                  <tr key={name}>
-                    <td>
+                  <TableRow key={name}>
+                    <TableCell>
                       <strong>{name.toUpperCase()}</strong>
-                    </td>
-                    <td>{Number(overview.rows).toLocaleString()}</td>
-                    <td>{Number(overview.positive_count).toLocaleString()}</td>
-                    <td>{formatPercent(overview.bad_rate)}</td>
-                    <td>{formatMetric(championMetrics(name).roc_auc)}</td>
-                    <td>{formatMetric(championMetrics(name).ks)}</td>
-                    <td>{formatMetric(championMetrics(name).pr_auc)}</td>
-                    <td>
+                    </TableCell>
+                    <TableCell>{Number(overview.rows).toLocaleString()}</TableCell>
+                    <TableCell>{Number(overview.positive_count).toLocaleString()}</TableCell>
+                    <TableCell>{formatPercent(overview.bad_rate)}</TableCell>
+                    <TableCell>{formatMetric(championMetrics(name).roc_auc)}</TableCell>
+                    <TableCell>{formatMetric(championMetrics(name).ks)}</TableCell>
+                    <TableCell>{formatMetric(championMetrics(name).pr_auc)}</TableCell>
+                    <TableCell>
                       {formatMetric(
                         name === "test"
                           ? champion.train_test_score_psi
@@ -183,19 +205,21 @@ export function ReportView({ project, run, notify }: Props) {
                             ? champion.test_oot_score_psi
                             : null,
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </section>
       <section className="report-section">
         <div className="section-heading">
           <div>
-            <h3>候选模型对比</h3>
-            <p>Test 选择，OOT 不参与候选排序。</p>
+            <h3>
+              候选模型对比
+              <Hint text="Test 选择，OOT 不参与候选排序。" />
+            </h3>
           </div>
         </div>
         <div className="candidate-bars">
@@ -226,49 +250,53 @@ export function ReportView({ project, run, notify }: Props) {
       <section className="report-section">
         <div className="section-heading">
           <div>
-            <h3>Champion 等频分箱</h3>
-            <p>坏占比、Lift、累计捕获与绝对排序。</p>
+            <h3>
+              Champion 等频分箱
+              <Hint text="坏占比、Lift、累计捕获与绝对排序。" />
+            </h3>
           </div>
         </div>
         <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>数据集</th>
-                <th>箱</th>
-                <th>样本量</th>
-                <th>坏占比</th>
-                <th>Lift</th>
-                <th>累计捕获</th>
-                <th>坏概率区间</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>数据集</TableHead>
+                <TableHead>箱</TableHead>
+                <TableHead>样本量</TableHead>
+                <TableHead>坏占比</TableHead>
+                <TableHead>Lift</TableHead>
+                <TableHead>累计捕获</TableHead>
+                <TableHead>坏概率区间</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {Object.entries((champion.lift as Record<string, unknown>) || {}).flatMap(
                 ([name, rows]) =>
                   ((rows as Array<Record<string, unknown>>) || []).map((row) => (
-                    <tr key={`${name}-${row.bucket}`}>
-                      <td>{name.toUpperCase()}</td>
-                      <td>{String(row.bucket)}</td>
-                      <td>{Number(row.count).toLocaleString()}</td>
-                      <td>{formatPercent(row.bad_rate)}</td>
-                      <td>{formatMetric(row.lift)}</td>
-                      <td>{formatPercent(row.cumulative_capture)}</td>
-                      <td>
-                        {formatMetric(row.min_probability)}—{formatMetric(row.max_probability)}
-                      </td>
-                    </tr>
+                    <TableRow key={`${name}-${row.bucket}`}>
+                      <TableCell>{name.toUpperCase()}</TableCell>
+                      <TableCell>{String(row.bucket)}</TableCell>
+                      <TableCell>{Number(row.count).toLocaleString()}</TableCell>
+                      <TableCell>{formatPercent(row.bad_rate)}</TableCell>
+                      <TableCell>{formatMetric(row.lift)}</TableCell>
+                      <TableCell>{formatPercent(row.cumulative_capture)}</TableCell>
+                      <TableCell>
+                        {formatMetric(row.min_probability)}-{formatMetric(row.max_probability)}
+                      </TableCell>
+                    </TableRow>
                   )),
               )}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       </section>
       <section className="report-section">
         <div className="section-heading">
           <div>
-            <h3>最终入模变量</h3>
-            <p>报告只展示最终入模变量；完整排除原因保留在 Run 证据中。</p>
+            <h3>
+              最终入模变量
+              <Hint text="报告只展示最终入模变量；完整排除原因保留在 Run 证据中。" />
+            </h3>
           </div>
           <span className="count-badge">{report.feature_selection?.selected?.length || 0}</span>
         </div>
@@ -285,21 +313,33 @@ export function ReportView({ project, run, notify }: Props) {
       </section>
       <section className="score-panel">
         <div>
-          <span className="eyebrow">BATCH SCORING</span>
-          <h3>给新样本批量打分</h3>
-          <p>输出列使用模型名称命名，并同时保留原始分、坏概率与封顶/封底证据。</p>
+          <h3>
+            给新样本批量打分
+            <Hint text="输出列使用模型名称命名，并同时保留原始分、坏概率与封顶/封底证据。" />
+          </h3>
         </div>
         <label>
           模型版本
-          <select value={modelId} onChange={(e) => setModelId(e.target.value)}>
-            {models.map((model) => (
-              <option value={model.id} key={model.id}>
-                {model.name}
-              </option>
-            ))}
-          </select>
+          <Select value={modelId} onValueChange={setModelId}>
+            <SelectTrigger>
+              <SelectValue placeholder="选择模型" />
+            </SelectTrigger>
+            <SelectContent>
+              {models.map((model) => (
+                <SelectItem value={model.id} key={model.id}>
+                  {model.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
-        <label className={`button primary file-button ${busy || !modelId ? "disabled" : ""}`}>
+        <label
+          className={cn(
+            buttonVariants(),
+            "file-button",
+            (busy || !modelId) && "pointer-events-none opacity-50",
+          )}
+        >
           {busy ? "评分中…" : "选择 CSV / Excel 并评分"}
           <input
             type="file"
@@ -309,9 +349,11 @@ export function ReportView({ project, run, notify }: Props) {
           />
         </label>
         {scoreJob && (
-          <a className="button secondary" href={`/api/v1/score-jobs/${scoreJob.id}/download`}>
-            下载 {scoreJob.rows.toLocaleString()} 行评分结果
-          </a>
+          <Button variant="outline" asChild>
+            <a href={`/api/v1/score-jobs/${scoreJob.id}/download`}>
+              下载 {scoreJob.rows.toLocaleString()} 行评分结果
+            </a>
+          </Button>
         )}
       </section>
     </div>
@@ -319,7 +361,12 @@ export function ReportView({ project, run, notify }: Props) {
 }
 
 function Metric({ label, value }: { label: string; value: unknown }) {
-  const rendered = value == null ? "—" : typeof value === "string" || typeof value === "number" ? String(value) : "—";
+  const rendered =
+    value == null
+      ? "—"
+      : typeof value === "string" || typeof value === "number"
+        ? String(value)
+        : "—";
   return (
     <div className="summary-cell">
       <span>{label}</span>

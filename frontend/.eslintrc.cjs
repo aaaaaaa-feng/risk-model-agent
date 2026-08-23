@@ -15,6 +15,13 @@ module.exports = {
     tsconfigRootDir: __dirname,
   },
   plugins: ["react-refresh", "@typescript-eslint"],
+  overrides: [
+    {
+      /* shadcn 组件文件同时导出组件与 variants 函数,属该库正规用法 */
+      files: ["src/components/ui/**/*.tsx"],
+      rules: { "react-refresh/only-export-components": "off" },
+    },
+  ],
   rules: {
     "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     "@typescript-eslint/no-explicit-any": "warn",

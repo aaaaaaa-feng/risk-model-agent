@@ -1,3 +1,14 @@
+/* 本地打包字体（@fontsource），保持 LOCAL-FIRST 不依赖网络 CDN */
+/* Shrikhand 拉丁显示体 + DM Sans 正文 + IBM Plex Mono 数据 */
+@import "@fontsource/shrikhand/400.css";
+@import "@fontsource/dm-sans/400.css";
+@import "@fontsource/dm-sans/500.css";
+@import "@fontsource/dm-sans/700.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/700.css";
+
+@import "./shadcn.css";
 @import "./tokens.css";
 @import "./base.css";
 @import "./layout.css";

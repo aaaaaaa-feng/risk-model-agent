@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { api } from "../api";
 import { useRunEvents } from "./useRunEvents";
 import { errorMessage, isAbort } from "../lib/format";
+import { notify } from "@/lib/notify";
 import { isCurrentSelection, mergeEventsForRun } from "../runState";
 import type { Decision, EventsResponse, Run, RunEvent, RunResponse } from "../types";
 
@@ -11,7 +12,6 @@ export function useRunData(
   runRef: React.MutableRefObject<string | null>,
   selectedRef: React.MutableRefObject<string | null>,
   loadDetail: () => Promise<void>,
-  notify: (message: string, error?: boolean) => void,
 ) {
   const [run, setRun] = useState<Run | null>(null);
   const [decision, setDecision] = useState<Decision | null>(null);
@@ -48,7 +48,7 @@ export function useRunData(
     } catch (error) {
       if (!isAbort(error)) notify(errorMessage(error), true);
     }
-  }, [selectedId, runId, notify, selectedRef, runRef]);
+  }, [selectedId, runId, selectedRef, runRef]);
 
   useRunEvents(
     runId,
@@ -75,5 +75,16 @@ export function useRunData(
     setEvents([]);
   }, []);
 
-  return { run, setRun, decision, setDecision, events, setEvents, loadRun, runAbort, runRequest, clearRun };
+  return {
+    run,
+    setRun,
+    decision,
+    setDecision,
+    events,
+    setEvents,
+    loadRun,
+    runAbort,
+    runRequest,
+    clearRun,
+  };
 }

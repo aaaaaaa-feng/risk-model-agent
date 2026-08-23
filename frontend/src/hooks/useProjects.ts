@@ -1,9 +1,10 @@
 import { useCallback, useState } from "react";
 import { api } from "../api";
 import { errorMessage } from "../lib/format";
+import { notify } from "@/lib/notify";
 import type { Project, ProjectsResponse } from "../types";
 
-export function useProjects(notify: (message: string, error?: boolean) => void) {
+export function useProjects() {
   const [projects, setProjects] = useState<Project[]>([]);
 
   const loadProjects = useCallback(async () => {
@@ -15,7 +16,7 @@ export function useProjects(notify: (message: string, error?: boolean) => void) 
       notify(errorMessage(error), true);
       return [] as Project[];
     }
-  }, [notify]);
+  }, []);
 
   return { projects, setProjects, loadProjects };
 }

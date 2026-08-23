@@ -1,4 +1,15 @@
 import { runStageLabel } from "../lib/labels";
+import { Badge, statusVariant } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Hint } from "@/components/ui/hint";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import type { Run, TargetTask } from "../types";
 
 export function HistoryView({
@@ -17,9 +28,10 @@ export function HistoryView({
     <div className="history-view">
       <div className="stage-line">
         <div>
-          <span className="eyebrow">RUN HISTORY</span>
-          <h2>历史 Run 与只读证据</h2>
-          <p>新 Run 不覆盖旧记录；失败和阻断同样保留。</p>
+          <h2>
+            历史 Run 与只读证据
+            <Hint text="新 Run 不覆盖旧记录；失败和阻断同样保留。" />
+          </h2>
         </div>
         <div className="run-meta">
           TOTAL <b>{runs.length}</b>
@@ -32,40 +44,40 @@ export function HistoryView({
         </div>
       ) : (
         <div className="table-wrap history-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Run</th>
-                <th>Y</th>
-                <th>状态</th>
-                <th>最后阶段</th>
-                <th>进度</th>
-                <th>更新时间</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Run</TableHead>
+                <TableHead>Y</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead>最后阶段</TableHead>
+                <TableHead>进度</TableHead>
+                <TableHead>更新时间</TableHead>
+                <TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {runs.map((run) => (
-                <tr className={run.id === selectedId ? "selected" : ""} key={run.id}>
-                  <td>
+                <TableRow className={run.id === selectedId ? "selected" : ""} key={run.id}>
+                  <TableCell>
                     <code>{run.id.slice(-10)}</code>
-                  </td>
-                  <td>{target.get(run.target_task_id) || "—"}</td>
-                  <td>
-                    <span className={`status ${run.status}`}>{run.status}</span>
-                  </td>
-                  <td>{runStageLabel[run.stage]}</td>
-                  <td>{Math.round((run.progress || 0) * 100)}%</td>
-                  <td>{new Date(run.updated_at).toLocaleString()}</td>
-                  <td>
-                    <button className="text-button" onClick={() => onSelect(run.id)}>
+                  </TableCell>
+                  <TableCell>{target.get(run.target_task_id) || "—"}</TableCell>
+                  <TableCell>
+                    <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+                  </TableCell>
+                  <TableCell>{runStageLabel[run.stage]}</TableCell>
+                  <TableCell>{Math.round((run.progress || 0) * 100)}%</TableCell>
+                  <TableCell>{new Date(run.updated_at).toLocaleString()}</TableCell>
+                  <TableCell>
+                    <Button variant="link" size="sm" onClick={() => onSelect(run.id)}>
                       查看
-                    </button>
-                  </td>
-                </tr>
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>

@@ -3,48 +3,96 @@
   font-synthesis: none;
   line-break: strict;
 
+  /*
+   * 视觉语言:Tofu 嘉年华(2026-08-23,DesignFest 模板风格)
+   * 材质:浅灰画布 + 白色大圆角卡片/胶囊,软卡片投影,hover 轻微放大
+   * 色彩:黑色行动层 + 三俏色(绿 #00C65E / 紫 #5C5FEF / 橙 #FF5C00);
+   *       链接/聚焦/选中锁定豆腐紫,状态色仅表语义
+   * 字体:Shrikhand 拉丁显示体 + DM Sans 正文(中文回退苹方)+ IBM Plex Mono 数据
+   * 规则:按钮/导航/输入一律胶囊(full);卡片 16-32px 大圆角;装饰几何仅用三俏色
+   */
+
   /* Canvas & surfaces */
   --paper: #ffffff;
-  --ground: #f3f4f6;
-  --panel: rgba(255, 255, 255, 0.76);
+  --ground: #f2f2f0;
+  --panel: #ffffff;
 
   /* Text */
-  --ink: #18181b;
-  --muted: #71717a;
-  --quiet: #a1a1aa;
+  --ink: #111827;
+  --muted: #4b5563;
+  --quiet: #9ca3af;
 
   /* Borders */
-  --line: #e4e4e7;
-  --line-strong: #d4d4d8;
-  --line-blue: #bfdbfe;
+  --line: #e5e7eb;
+  --line-strong: #d1d5db;
+  --line-soft: #f3f4f6;
+  --line-blue: #d6d8fb;
+  --green-border: #a7ecc6;
 
-  /* Brand */
-  --black: #18181b;
-  --blue: #1a56db;
-  --blue-hover: #1648b8;
-  --blue-soft: #eff6ff;
-  --blue-text: #1d4ed8;
-  --blue-subtle: #dbeafe;
+  /* Derived surfaces & text */
+  --ground-hover: #e8e8e4;
+  --blue-hover-tint: #f2f3fe;
+  --panel-solid: #f6f6f4;
+  --track: #e8e8e4;
+  --code-bg: #f3f4f6;
+  --output-text: #e4e4e7;
+  --th-text: #4b5563;
+  --disabled-bg: #d4d4d0;
+  --disabled-text: #6b7280;
+  --amber-deep: #8a3a06;
+  --amber-missing: #fff6ec;
+  --black-hover: #1f2937;
+  --blue-on-dark: #b7bbff;
+  --ink-inverse-soft: #c8cdd5;
+  --on-blue-border: rgba(255, 255, 255, 0.55);
+  --on-blue-fill: rgba(255, 255, 255, 0.16);
+  --on-blue-shimmer: rgba(255, 255, 255, 0.28);
+  --scrim: rgba(17, 24, 39, 0.44);
+  --scrim-strong: rgba(17, 24, 39, 0.76);
+  --pulse-glow: rgba(92, 95, 239, 0.35);
 
-  /* Status */
-  --green: #16a34a;
-  --green-soft: #ecfdf3;
-  --green-text: #15803d;
-  --amber: #b45309;
-  --amber-soft: #fff7ed;
-  --amber-text: #9a3412;
-  --amber-border: #fed7aa;
+  /* Brand — 黑色行动层 + 豆腐紫 accent */
+  --black: #000000;
+  --blue: #5c5fef;
+  --blue-hover: #4a4de0;
+  --blue-soft: #eef0fe;
+  --blue-text: #4f52e8;
+  --blue-subtle: #dcdff9;
+
+  /* Action — 主按钮等 CTA(深色模式下反转为浅色,--black 装饰面板不反转) */
+  --action-bg: var(--black);
+  --action-text: var(--paper);
+  --action-hover: var(--black-hover);
+
+  /* Scrollbar */
+  --scroll-thumb: #c8c8c4;
+  --scroll-thumb-hover: #9a9a96;
+
+  /* Tofu 三俏色 — 装饰与状态共用 */
+  --tofu-green: #00c65e;
+  --tofu-purple: #5c5fef;
+  --tofu-orange: #ff5c00;
+
+  /* Status — 仅表语义,不作装饰 */
+  --green: #00c65e;
+  --green-soft: #e0f9ec;
+  --green-text: #00964a;
+  --amber: #ff5c00;
+  --amber-soft: #fff1e8;
+  --amber-text: #d64d00;
+  --amber-border: #ffc9a6;
   --red: #dc2626;
   --red-soft: #fef2f2;
   --red-text: #b91c1c;
-  --red-border: #fca5a5;
+  --red-border: #fecaca;
 
-  /* Focus */
-  --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.55);
-  --focus-color: #2563eb;
+  /* Focus — 豆腐紫,瞬现,不做过渡 */
+  --focus-ring: 0 0 0 3px rgba(92, 95, 239, 0.4);
+  --focus-color: #5c5fef;
 
-  /* Typography */
-  --body: "Plus Jakarta Sans", "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* Typography — Shrikhand 拉丁显示体 + DM Sans 正文,数据 Mono */
+  --body: "DM Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --display: "Shrikhand", "DM Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
   --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
 
   /* Spacing scale */
@@ -56,25 +104,111 @@
   --space-6: 24px;
   --space-7: 28px;
 
-  /* Border radius */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 16px;
-  --radius-2xl: 20px;
+  /* Border radius — Tofu 大圆角体系:控件胶囊,卡片 16-32px */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
   --radius-full: 999px;
 
-  /* Shadows */
-  --shadow-xs: 0 2px 6px rgba(24, 24, 27, 0.03);
-  --shadow-sm: 0 4px 12px rgba(24, 24, 27, 0.04);
-  --shadow-md: 0 8px 22px rgba(24, 24, 27, 0.05);
-  --shadow-lg: 0 12px 30px rgba(24, 24, 27, 0.06);
-  --shadow-xl: 0 20px 60px rgba(24, 24, 27, 0.12);
-  --shadow-blue: 0 7px 15px rgba(26, 86, 219, 0.2);
+  /* Shadows — 软卡片投影(模板 card shadow),浮层加深 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-xl: 0 16px 40px rgba(17, 24, 39, 0.16);
+  --shadow-modal: 0 24px 70px rgba(17, 24, 39, 0.22);
+  --shadow-toast: 0 12px 28px rgba(17, 24, 39, 0.16);
+  --shadow-panel-dark: 0 10px 20px rgba(17, 24, 39, 0.12);
+
+  /* Motion — 命名缓动与时长,禁止浏览器默认 ease */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.32, 0, 0.67, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-short: 150ms;
+  --dur-med: 250ms;
 
   /* Z-index scale */
   --z-modal-backdrop: 50;
   --z-drawer: 60;
-  --z-toast: 80;
   --z-workspace-setup: 90;
+}
+
+/*
+ * 深色模式(2026-08-24)— 同结构令牌整体覆写:
+ * 画布/面板反转为深灰;--black 装饰面板(舞台/弹窗头/代码块)保持黑;
+ * --action-* CTA 反转为浅色保证可读;状态色提亮,投影加深。
+ */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Canvas & surfaces */
+  --paper: #232327;
+  --ground: #17171a;
+  --panel: #232327;
+
+  /* Text */
+  --ink: #f2f2f0;
+  --muted: #a6a6ad;
+  --quiet: #6f6f77;
+
+  /* Borders */
+  --line: #35353b;
+  --line-strong: #4a4a52;
+  --line-soft: #2b2b30;
+  --line-blue: #3d3f70;
+  --green-border: #1d5c3c;
+
+  /* Derived surfaces & text */
+  --ground-hover: #2e2e34;
+  --blue-hover-tint: #23233d;
+  --panel-solid: #28282d;
+  --track: #35353b;
+  --code-bg: #1d1d21;
+  --th-text: #a6a6ad;
+  --disabled-bg: #3a3a41;
+  --disabled-text: #7c7c84;
+  --amber-deep: #ffb38a;
+  --amber-missing: #2e1a08;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --scrim-strong: rgba(0, 0, 0, 0.85);
+  --pulse-glow: rgba(131, 133, 247, 0.4);
+
+  /* Accent — 深色下提亮 */
+  --blue: #8385f7;
+  --blue-hover: #9b9df9;
+  --blue-soft: #26274a;
+  --blue-text: #a7a9fa;
+  --blue-subtle: #34366b;
+
+  /* Action — CTA 反转为浅色 */
+  --action-bg: #f2f2f0;
+  --action-text: #17171a;
+  --action-hover: #d9d9d5;
+
+  /* Status — 深色下提亮文字,底色转深 */
+  --green-soft: #0e2c1d;
+  --green-text: #4fe08f;
+  --amber-soft: #2e1a0c;
+  --amber-text: #ff9a5c;
+  --amber-border: #6b3410;
+  --red: #ef4444;
+  --red-soft: #311414;
+  --red-text: #f87171;
+  --red-border: #7f1d1d;
+
+  /* Focus */
+  --focus-ring: 0 0 0 3px rgba(131, 133, 247, 0.5);
+  --focus-color: #8385f7;
+
+  /* Shadows — 深色下投影加深 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 16px 40px rgba(0, 0, 0, 0.55);
+  --shadow-modal: 0 24px 70px rgba(0, 0, 0, 0.65);
+  --shadow-toast: 0 12px 28px rgba(0, 0, 0, 0.55);
+  --shadow-panel-dark: 0 10px 20px rgba(0, 0, 0, 0.4);
+
+  /* Scrollbar */
+  --scroll-thumb: #4a4a52;
+  --scroll-thumb-hover: #5f5f68;
 }

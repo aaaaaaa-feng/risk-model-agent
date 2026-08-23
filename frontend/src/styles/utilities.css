@@ -1,22 +1,11 @@
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .workspace > *,
   .sidebar,
   .app-header,
   .primary-tabs,
-  .stage-rail,
-  .agent-chat {
+  .stage-progress,
+  .stage-panel,
+  .chat-rail {
     animation: none !important;
   }
 }

@@ -1,116 +1,4 @@
-.button {
-  min-height: 42px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  padding: 0 15px;
-  background: var(--paper);
-  color: var(--ink);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-decoration: none;
-  cursor: pointer;
-  font-weight: 600;
-  white-space: nowrap;
-  box-shadow: var(--shadow-sm);
-  transition:
-    background 0.2s ease,
-    box-shadow 0.2s ease,
-    border-color 0.2s ease;
-}
-
-.button:hover:not(:disabled) {
-  background: #f4f4f5;
-  border-color: #c7d2fe;
-  box-shadow: var(--shadow-md);
-}
-
-.button.primary {
-  border-color: var(--blue);
-  background: var(--blue);
-  color: var(--paper);
-  box-shadow: var(--shadow-blue);
-}
-
-.button.primary:hover:not(:disabled) {
-  background: var(--blue-hover);
-}
-
-.button.secondary {
-  background: var(--paper);
-}
-
-.button.compact {
-  min-height: 34px;
-  font-size: 11px;
-}
-
-.button.demo-button {
-  width: 100%;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--black);
-  color: var(--paper);
-}
-
-.button:disabled,
-.button.disabled {
-  background: #c6c6c6;
-  border-color: #c6c6c6;
-  color: #6f6f6f;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-.text-button {
-  border: 0;
-  background: transparent;
-  color: var(--blue);
-  cursor: pointer;
-  padding: 8px 5px;
-  font-weight: 700;
-  border-radius: var(--radius-sm);
-}
-
-.text-button:disabled {
-  color: var(--quiet);
-  cursor: not-allowed;
-}
-
-.text-danger {
-  border: 0;
-  background: transparent;
-  color: var(--red);
-  cursor: pointer;
-  padding: 8px;
-  border-radius: var(--radius-sm);
-}
-
-.danger-outline {
-  border-color: var(--red-border);
-  color: var(--red-text);
-}
-
-.icon-button {
-  width: 40px;
-  height: 40px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  font-size: 22px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.icon-button:hover {
-  background: var(--ground);
-}
-
-.icon-button.inverse {
-  color: var(--paper);
-}
+/* 按钮/文本按钮/图标按钮/状态徽章已迁入 shadcn(ui/button.tsx、ui/badge.tsx)*/
 
 .file-button {
   position: relative;
@@ -124,102 +12,26 @@
   cursor: pointer;
 }
 
-/* Tags & status */
-.tag {
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-full);
-  background: var(--paper);
-  padding: 0 11px;
-  font: 10px var(--mono);
-  white-space: nowrap;
-}
-
-.tag.network {
-  border-color: var(--amber-border);
-  background: var(--amber-soft);
-  color: var(--amber-text);
-}
-
-.tag.ok {
-  border-color: #bbf7d0;
-  background: var(--green-soft);
-  color: var(--green-text);
-}
-
-.tag.attention {
-  border-color: #fecaca;
-  background: var(--red-soft);
-  color: var(--red-text);
-}
-
-.status {
-  font: 10px var(--mono);
-  font-weight: 700;
-  padding: 5px 8px;
-  border-radius: var(--radius-full);
-  background: var(--ground);
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-}
-
-.status.ready,
-.status.trained,
-.status.succeeded {
-  background: var(--green-soft);
-  color: var(--green-text);
-}
-
-.status.queued,
-.status.running,
-.status.awaiting_decision {
-  background: var(--amber-soft);
-  color: var(--amber-text);
-}
-
-.status.failed,
-.status.blocked {
-  background: var(--red-soft);
-  color: var(--red-text);
-}
-
-/* Forms */
-label {
+/* Forms — 控件本体已迁入 shadcn(ui/input、select、checkbox、radio-group、textarea),
+ * 这里只保留 label 文案与表单布局 */
+label,
+.field-label {
   font-size: 12px;
   color: var(--muted);
 }
 
+/* 包裹式 label 与控件之间的间距(Radix 触发器/输入框均为块级弹性盒) */
 label > input:not([type="checkbox"]):not([type="radio"]),
-label > select,
 label > textarea,
-.form-stack input,
-.form-stack select,
-.form-stack textarea {
-  display: block;
+label > button[role="combobox"] {
+  /* 只加间距与宽度:display 必须保留控件自身布局(flex 等) */
   width: 100%;
   margin-top: 5px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  background: var(--paper);
-  min-height: 40px;
-  padding: 8px 10px;
-  outline: none;
-  transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
 }
 
-label > input:focus,
-label > select:focus,
-label > textarea:focus,
-.form-stack input:focus,
-.form-stack select:focus,
-.form-stack textarea:focus {
-  border-color: var(--focus-color);
-  box-shadow: var(--focus-ring);
+label > input:not([type="checkbox"]):not([type="radio"]),
+label > textarea {
+  display: block;
 }
 
 .form-stack {
@@ -262,40 +74,33 @@ label > textarea:focus,
   min-height: 34px;
 }
 
-.check-row input,
-.switch-row input {
-  width: 17px;
-  height: 17px;
-  accent-color: var(--blue);
-}
-
-/* Tables */
+/* Tables(选择器收敛到 .data-table,由 ui/table.tsx 默认挂载) */
 .table-wrap {
   width: 100%;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--paper);
-  box-shadow: var(--shadow-sm);
 }
 
-table {
+.data-table {
   width: 100%;
   border-collapse: collapse;
   white-space: nowrap;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
-th,
-td {
+.data-table th,
+.data-table td {
   padding: 11px 12px;
-  border-bottom: 1px solid #f0f0f2;
+  border-bottom: 1px solid var(--line-soft);
   text-align: left;
 }
 
-th {
-  background: #f4f4f5;
-  color: #52525b;
+.data-table th {
+  background: var(--ground-hover);
+  color: var(--th-text);
   font-size: 10px;
   font-weight: 800;
   position: sticky;
@@ -303,15 +108,15 @@ th {
   z-index: 1;
 }
 
-tbody tr {
-  transition: background 0.2s ease;
+.data-table tbody tr {
+  transition: background var(--dur-short) var(--ease-out);
 }
 
-tbody tr:hover {
-  background: #f8fbff;
+.data-table tbody tr:hover {
+  background: var(--blue-soft);
 }
 
-tbody tr:last-child td {
+.data-table tbody tr:last-child td {
   border-bottom: 0;
 }
 
@@ -349,34 +154,26 @@ tbody tr:last-child td {
   color: var(--muted);
 }
 
-/* Modal & drawer */
-.modal-backdrop,
-.drawer-scrim {
-  position: fixed;
-  inset: 0;
-  background: rgba(24, 24, 27, 0.42);
-  backdrop-filter: blur(3px);
-  z-index: var(--z-modal-backdrop);
-}
-
+/* Modal & drawer — 遮罩与骨架已由 ui/dialog.tsx、ui/sheet.tsx(Radix)接管,
+ * 保留头部与内容区皮肤 */
 .modal {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: min(520px, calc(100vw - 40px));
-  max-height: calc(100vh - 40px);
+  width: min(520px, calc(100dvw - 40px));
+  max-height: calc(100dvh - 40px);
   overflow: auto;
   background: var(--paper);
   border-radius: var(--radius-2xl);
-  box-shadow: 0 24px 70px rgba(24, 24, 27, 0.22);
+  box-shadow: var(--shadow-modal);
 }
 
 .modal-head,
 .drawer-head {
   height: 76px;
-  background: var(--blue);
-  color: var(--paper);
+  background: var(--black);
+  color: var(--output-text);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -401,22 +198,6 @@ tbody tr:last-child td {
   padding-top: 3px;
 }
 
-.settings-drawer {
-  position: fixed;
-  z-index: var(--z-drawer);
-  top: var(--space-3);
-  right: var(--space-3);
-  bottom: var(--space-3);
-  width: min(500px, calc(100vw - 30px));
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-2xl);
-  box-shadow: var(--shadow-xl);
-  overflow: hidden;
-  display: grid;
-  grid-template-rows: 76px minmax(0, 1fr);
-}
-
 .settings-body {
   overflow: auto;
 }
@@ -431,12 +212,6 @@ tbody tr:last-child td {
   font-size: 14px;
 }
 
-.settings-section > p {
-  font-size: 10px;
-  color: var(--muted);
-  margin: 0 0 11px;
-}
-
 .drawer-save {
   position: sticky;
   bottom: 0;
@@ -447,28 +222,91 @@ tbody tr:last-child td {
   justify-content: flex-end;
 }
 
-/* Toast */
-.toast {
-  position: fixed;
-  z-index: var(--z-toast);
-  top: 22px;
-  right: 310px;
+/* Toast(sonner,unstyled + app-toast 类)— 容器定位由 Toaster 负责 */
+.app-toast {
   max-width: 420px;
   background: var(--green);
-  color: var(--paper);
+  color: var(--output-text);
   padding: 10px 13px;
   font-size: 11px;
   border-radius: var(--radius-lg);
-  box-shadow: 0 12px 28px rgba(24, 24, 27, 0.16);
+  box-shadow: var(--shadow-toast);
+  list-style: none;
 }
 
-.toast.error {
+.app-toast[data-type="error"] {
   background: var(--red);
 }
 
 /* Utility text colors */
 .ok {
   color: var(--green-text);
+}
+
+/* Hint — 问号说明:hover 展示,点击锁定 */
+.hint {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.hint-trigger {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--quiet);
+  cursor: help;
+  padding: 0;
+  transition:
+    color var(--dur-short) var(--ease-out),
+    background var(--dur-short) var(--ease-out);
+}
+
+.hint-trigger svg {
+  width: 14px;
+  height: 14px;
+}
+
+.hint-trigger:hover,
+.hint-trigger[aria-expanded="true"] {
+  color: var(--blue);
+  background: var(--blue-soft);
+}
+
+.hint-bubble {
+  position: absolute;
+  z-index: var(--z-workspace-setup);
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 260px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+  box-shadow: var(--shadow-xl);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.55;
+  white-space: normal;
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--dur-short) var(--ease-out),
+    visibility var(--dur-short);
+}
+
+.hint:hover .hint-bubble,
+.hint-bubble.open {
+  opacity: 1;
+  visibility: visible;
 }
 
 .danger {
@@ -481,9 +319,9 @@ tbody tr:last-child td {
   line-height: 1.5;
   padding: 10px 12px;
   background: var(--amber-soft);
-  border-left: 4px solid #f59e0b;
+  border: 1px solid var(--amber-border);
   border-radius: var(--radius-lg);
-  color: #6b5310;
+  color: var(--amber-deep);
   margin: 10px 0;
 }
 
@@ -538,13 +376,5 @@ tbody tr:last-child td {
 
   .settings-nav-item {
     padding-inline: 7px;
-  }
-
-  .settings-nav-item span {
-    display: none;
-  }
-
-  .settings-drawer {
-    width: calc(100vw - 16px);
   }
 }

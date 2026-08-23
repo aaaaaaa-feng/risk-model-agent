@@ -2,7 +2,6 @@ import { createContext, useContext } from "react";
 import type { Decision, Project, ProjectDetail, Run, Settings, WorkspaceStatus } from "../types";
 
 export interface AppState {
-  notify: (message: string, error?: boolean) => void;
   settings: Settings | null;
   workspace: WorkspaceStatus | null;
   projects: Project[];

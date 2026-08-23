@@ -1,0 +1,43 @@
+/*
+ * shadcn/ui 基础设施(2026-08-23)
+ * Tailwind v4 分层引入:preflight/utilities 进入 cascade layer,
+ * 现有手写 CSS(未分层)优先级恒高于层内样式,迁移期两套体系并存、互不覆盖。
+ * 主题直接引用 tokens.css 变量,保持单一事实源;视觉语言为 Tofu 嘉年华。
+ */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme {
+  /* 色彩 — 引用 tokens.css:黑色行动层 + 豆腐紫 accent */
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+  --color-card: var(--panel);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--paper);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--action-bg);
+  --color-primary-foreground: var(--action-text);
+  --color-secondary: var(--ground);
+  --color-secondary-foreground: var(--ink);
+  --color-muted: var(--ground);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--blue-soft);
+  --color-accent-foreground: var(--blue-text);
+  --color-destructive: var(--red);
+  --color-destructive-foreground: var(--paper);
+  --color-border: var(--line);
+  --color-input: var(--line-strong);
+  --color-ring: var(--blue);
+
+  /* 字体 — Shrikhand/DM Sans/Plex Mono 本地字体族 */
+  --font-sans: var(--body);
+  --font-mono: var(--mono);
+
+  /* 圆角 — Tofu 大圆角:控件 8-12px,卡片 16-32px */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+}

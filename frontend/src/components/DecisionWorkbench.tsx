@@ -1,19 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { formatMetric, formatNumber, formatPercent } from "../lib/format";
+import { confirmLabel, decisionStageName, monotonicLabel, reviewLabel } from "../lib/labels";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
-  confirmLabel,
-  decisionStageName,
-  monotonicLabel,
-  reviewLabel,
-} from "../lib/labels";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { notify } from "@/lib/notify";
+import { Hint } from "@/components/ui/hint";
 import type { Decision, Run } from "../types";
 
 interface Props {
   run: Run;
   decision: Decision;
   onResolved: () => void;
-  notify: (message: string, error?: boolean) => void;
 }
 
 const modelCatalog = [
@@ -32,7 +48,7 @@ interface RestoreFeature {
   reason: string;
 }
 
-export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) {
+export function DecisionWorkbench({ run, decision, onResolved }: Props) {
   const details = decision.payload;
   const summary = details.summary;
   const [busy, setBusy] = useState(false);
@@ -62,7 +78,9 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
       const binningSummary = summary as import("../types").BinningSummary;
       const first = Object.keys(binningSummary.specs || {})[0] || "";
       setManualColumn(first);
-      setManualSpec(first ? JSON.stringify(editableBinSpec(binningSummary.specs?.[first]), null, 2) : "");
+      setManualSpec(
+        first ? JSON.stringify(editableBinSpec(binningSummary.specs?.[first]), null, 2) : "",
+      );
     } else {
       setEdits({});
     }
@@ -82,7 +100,6 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
         payloadEdits.manual_specs = { [manualColumn]: JSON.parse(manualSpec) };
       }
       await api.post(`/runs/${run.id}/decisions/${decision.id}`, { approved, edits: payloadEdits });
-      notify(approved ? "已确认；将从当前 checkpoint 继续" : "Run 已按你的决定安全停止");
       onResolved();
     } catch (error) {
       notify(error instanceof Error ? error.message : "提交失败", true);
@@ -96,8 +113,10 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
       <div className="stage-line">
         <div>
           <span className="eyebrow">HUMAN IN THE LOOP · {decision.stage}</span>
-          <h2>{details.title || decisionStageName[decision.stage] || decision.stage}</h2>
-          <p>Reviewer 已先完成审核；你只需确认业务选择，不需要阅读长代码。</p>
+          <h2>
+            {details.title || decisionStageName[decision.stage] || decision.stage}
+            <Hint text="Reviewer 已先完成审核；你只需确认业务选择，不需要阅读长代码。" />
+          </h2>
         </div>
         <div className="run-meta">
           RUN <b>{run.id.slice(-8)}</b>
@@ -126,13 +145,25 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
         <TargetDecision summary={summary as import("../types").TargetSummary} />
       )}
       {decision.kind === "confirm_data" && (
-        <DataDecision summary={summary as import("../types").DataSummary} edits={edits} setEdits={setEdits} />
+        <DataDecision
+          summary={summary as import("../types").DataSummary}
+          edits={edits}
+          setEdits={setEdits}
+        />
       )}
       {decision.kind === "confirm_split" && (
-        <SplitDecision summary={summary as import("../types").SplitSummary} edits={edits} setEdits={setEdits} />
+        <SplitDecision
+          summary={summary as import("../types").SplitSummary}
+          edits={edits}
+          setEdits={setEdits}
+        />
       )}
       {decision.kind === "confirm_screening" && (
-        <ScreeningDecision summary={summary as import("../types").ScreeningSummary} edits={edits} setEdits={setEdits} />
+        <ScreeningDecision
+          summary={summary as import("../types").ScreeningSummary}
+          edits={edits}
+          setEdits={setEdits}
+        />
       )}
       {decision.kind === "confirm_binning" && (
         <BinningDecision
@@ -144,7 +175,17 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
         />
       )}
       {decision.kind === "confirm_models" && (
-        <ModelDecision plan={(summary as import("../types").ModelsSummary).plan || { models: [], score: {}, search_budget: 0 }} edits={edits} setEdits={setEdits} />
+        <ModelDecision
+          plan={
+            (summary as import("../types").ModelsSummary).plan || {
+              models: [],
+              score: {},
+              search_budget: 0,
+            }
+          }
+          edits={edits}
+          setEdits={setEdits}
+        />
       )}
       <details className="review-details">
         <summary>查看 Reviewer 结论与证据</summary>
@@ -163,16 +204,12 @@ export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) 
         <pre>{JSON.stringify(review.evidence || {}, null, 2)}</pre>
       </details>
       <div className="decision-actions">
-        <button
-          className="button secondary danger-outline"
-          disabled={busy}
-          onClick={() => confirm(false)}
-        >
+        <Button variant="destructiveOutline" disabled={busy} onClick={() => confirm(false)}>
           不批准并停止本 Run
-        </button>
-        <button className="button primary" disabled={busy} onClick={() => confirm(true)}>
+        </Button>
+        <Button disabled={busy} onClick={() => confirm(true)}>
           {busy ? "提交中…" : confirmLabel[decision.kind] || "确认并继续"}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -220,17 +257,17 @@ function DataDecision({
         {(summary.actions || []).length ? (
           (summary.actions || []).map((action) => (
             <label key={action.id}>
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={accepted.includes(action.id)}
-                onChange={(e) =>
+                onCheckedChange={(checked) =>
                   setEdits((current) => {
                     const currentAccepted = (current.accepted_action_ids as string[]) || [];
                     return {
                       ...current,
-                      accepted_action_ids: e.target.checked
-                        ? [...currentAccepted, action.id]
-                        : currentAccepted.filter((id) => id !== action.id),
+                      accepted_action_ids:
+                        checked === true
+                          ? [...currentAccepted, action.id]
+                          : currentAccepted.filter((id) => id !== action.id),
                     };
                   })
                 }
@@ -272,17 +309,22 @@ function SplitDecision({
       <div className="form-grid">
         <label>
           切分方法
-          <select
+          <Select
             value={(edits.method as string | undefined) || plan.method || "time_holdout"}
-            onChange={(e) => change("method", e.target.value)}
+            onValueChange={(value) => change("method", value)}
           >
-            <option value="time_holdout">时间 Train/Test/OOT</option>
-            <option value="random_stratified">随机分层 Train/Test</option>
-          </select>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="time_holdout">时间 Train/Test/OOT</SelectItem>
+              <SelectItem value="random_stratified">随机分层 Train/Test</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <label>
           时间字段
-          <input
+          <Input
             value={(edits.time_column as string | undefined) || ""}
             onChange={(e) => change("time_column", e.target.value || null)}
             disabled={edits.method !== "time_holdout"}
@@ -290,14 +332,14 @@ function SplitDecision({
         </label>
         <label>
           客户主键
-          <input
+          <Input
             value={(edits.customer_key as string | undefined) || ""}
             onChange={(e) => change("customer_key", e.target.value || null)}
           />
         </label>
         <label>
           Test 比例
-          <input
+          <Input
             type="number"
             step="0.05"
             min="0.1"
@@ -308,7 +350,7 @@ function SplitDecision({
         </label>
         <label>
           OOT 比例
-          <input
+          <Input
             type="number"
             step="0.05"
             min="0.1"
@@ -337,7 +379,9 @@ function ScreeningDecision({
 }) {
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const recoverable = (summary.excluded || []).filter((item) => item.recoverable);
-  const selected = new Set(((edits.restore_features as RestoreFeature[]) || []).map((item) => item.column));
+  const selected = new Set(
+    ((edits.restore_features as RestoreFeature[]) || []).map((item) => item.column),
+  );
   const toggle = (item: import("../types").ScreeningExcluded, checked: boolean) => {
     const current = (edits.restore_features as RestoreFeature[]) || [];
     const reason = (reasons[item.column] || "").trim();
@@ -362,35 +406,34 @@ function ScreeningDecision({
         个字符的业务理由，再勾选恢复。
       </p>
       <div className="table-wrap compact-table">
-        <table>
-          <thead>
-            <tr>
-              <th>恢复</th>
-              <th>变量</th>
-              <th>原因</th>
-              <th>缺失率</th>
-              <th>IV</th>
-              <th>业务理由</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>恢复</TableHead>
+              <TableHead>变量</TableHead>
+              <TableHead>原因</TableHead>
+              <TableHead>缺失率</TableHead>
+              <TableHead>IV</TableHead>
+              <TableHead>业务理由</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {recoverable.slice(0, 200).map((item) => (
-              <tr key={item.column}>
-                <td>
-                  <input
-                    type="checkbox"
+              <TableRow key={item.column}>
+                <TableCell>
+                  <Checkbox
                     checked={selected.has(item.column)}
                     disabled={(reasons[item.column] || "").trim().length < 8}
                     title="请先填写至少 8 个字符的业务理由"
-                    onChange={(e) => toggle(item, e.target.checked)}
+                    onCheckedChange={(checked) => toggle(item, checked === true)}
                   />
-                </td>
-                <td>{item.column}</td>
-                <td>{item.reason}</td>
-                <td>{formatPercent(item.missing_rate)}</td>
-                <td>{formatMetric(item.iv)}</td>
-                <td>
-                  <input
+                </TableCell>
+                <TableCell>{item.column}</TableCell>
+                <TableCell>{item.reason}</TableCell>
+                <TableCell>{formatPercent(item.missing_rate)}</TableCell>
+                <TableCell>{formatMetric(item.iv)}</TableCell>
+                <TableCell>
+                  <Input
                     value={reasons[item.column] || ""}
                     onChange={(e) => {
                       const value = e.target.value;
@@ -410,11 +453,11 @@ function ScreeningDecision({
                     }}
                     placeholder="至少 8 个字符"
                   />
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
       {recoverable.length === 0 && <p className="success-line">没有可恢复的排除变量。</p>}
     </section>
@@ -485,12 +528,14 @@ function BinningDecision({
             <>
               <div className="section-heading bin-detail-head">
                 <div>
-                  <h3>{manualColumn} · 分箱结果</h3>
-                  <p>当前表格是已生成的分箱逻辑；如需调整，在下方编辑边界/类别组后确认。</p>
+                  <h3>
+                    {manualColumn} · 分箱结果
+                    <Hint text="当前表格是已生成的分箱逻辑；如需调整，在下方编辑边界/类别组后确认。" />
+                  </h3>
                 </div>
-                <span className={`status ${sample.monotonic ? "succeeded" : "blocked"}`}>
+                <Badge variant={sample.monotonic ? "ok" : "attention"} className="mt-[3px]">
                   {monotonicLabel(stats.rates, sample.monotonic)}
-                </span>
+                </Badge>
               </div>
               <div className="summary-grid five bin-metric-grid">
                 <Metric label="箱数" value={formatNumber(stats.rows.length)} />
@@ -499,7 +544,7 @@ function BinningDecision({
                 <Metric label="IV" value={formatMetric(sample.iv)} />
                 <Metric
                   label="坏率范围"
-                  value={`${formatPercent(stats.minRate)}—${formatPercent(stats.maxRate)}`}
+                  value={`${formatPercent(stats.minRate)}-${formatPercent(stats.maxRate)}`}
                 />
               </div>
               <div className="bin-ordering">
@@ -508,21 +553,21 @@ function BinningDecision({
                 <small>不把缺失箱参与趋势判断；缺失箱仍单独展示。</small>
               </div>
               <div className="table-wrap bin-table-wrap">
-                <table className="bin-table">
-                  <thead>
-                    <tr>
-                      <th>分箱</th>
-                      <th>样本数</th>
-                      <th>占比</th>
-                      <th>好</th>
-                      <th>坏</th>
-                      <th>坏率 / 趋势</th>
-                      <th>Lift</th>
-                      <th>WOE</th>
-                      <th>IV</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table className="bin-table">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>分箱</TableHead>
+                      <TableHead>样本数</TableHead>
+                      <TableHead>占比</TableHead>
+                      <TableHead>好</TableHead>
+                      <TableHead>坏</TableHead>
+                      <TableHead>坏率 / 趋势</TableHead>
+                      <TableHead>Lift</TableHead>
+                      <TableHead>WOE</TableHead>
+                      <TableHead>IV</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {stats.rows.map((row, index) => {
                       const rate = Number(row.bad_rate);
                       const width = Number.isFinite(rate)
@@ -533,39 +578,43 @@ function BinningDecision({
                         : 0;
                       const lift = stats.overallRate ? rate / stats.overallRate : null;
                       return (
-                        <tr
+                        <TableRow
                           key={`${row.bin}-${index}`}
                           className={row.bin === "<MISSING>" ? "bin-missing" : ""}
                         >
-                          <td>
+                          <TableCell>
                             <strong>{row.bin}</strong>
-                          </td>
-                          <td>{formatNumber(row.count)}</td>
-                          <td>{formatPercent(stats.count ? Number(row.count) / stats.count : null)}</td>
-                          <td>{formatNumber(row.good)}</td>
-                          <td>{formatNumber(row.bad)}</td>
-                          <td>
+                          </TableCell>
+                          <TableCell>{formatNumber(row.count)}</TableCell>
+                          <TableCell>
+                            {formatPercent(stats.count ? Number(row.count) / stats.count : null)}
+                          </TableCell>
+                          <TableCell>{formatNumber(row.good)}</TableCell>
+                          <TableCell>{formatNumber(row.bad)}</TableCell>
+                          <TableCell>
                             <div className="bin-rate-cell">
                               <span className="bin-rate-track">
                                 <i style={{ width: `${width}%` }} />
                               </span>
                               <b>{formatPercent(row.bad_rate)}</b>
                             </div>
-                          </td>
-                          <td>{formatMetric(lift)}</td>
-                          <td>{formatMetric(row.woe)}</td>
-                          <td>{formatMetric(row.iv)}</td>
-                        </tr>
+                          </TableCell>
+                          <TableCell>{formatMetric(lift)}</TableCell>
+                          <TableCell>{formatMetric(row.woe)}</TableCell>
+                          <TableCell>{formatMetric(row.iv)}</TableCell>
+                        </TableRow>
                       );
                     })}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               </div>
               <div className="bin-editor-grid">
                 <div>
-                  <h3>人工分箱规则</h3>
-                  <p>保存后会生成新分箱版本，并使训练、质检和报告失效重跑。</p>
-                  <textarea
+                  <h3>
+                    人工分箱规则
+                    <Hint text="保存后会生成新分箱版本，并使训练、质检和报告失效重跑。" />
+                  </h3>
+                  <Textarea
                     value={manualSpec}
                     onChange={(e) => setManualSpec(e.target.value)}
                     spellCheck={false}
@@ -650,7 +699,10 @@ function ModelDecision({
 }) {
   const selected = (edits.models as string[]) || [];
   const toggle = (name: string, checked: boolean) =>
-    setEdits({ ...edits, models: checked ? [...selected, name] : selected.filter((v) => v !== name) });
+    setEdits({
+      ...edits,
+      models: checked ? [...selected, name] : selected.filter((v) => v !== name),
+    });
   const score = (edits.score as import("../types").ScoreConfig) || plan.score || {};
   const scoreChange = (key: string, value: number) =>
     setEdits({ ...edits, score: { ...score, [key]: value } });
@@ -659,17 +711,19 @@ function ModelDecision({
     <section className="decision-section">
       <div className="section-heading">
         <div>
-          <h3>候选模型执行矩阵</h3>
-          <p>资源预算只顺序运行推荐组合，不会默认全部跑。</p>
+          <h3>
+            候选模型执行矩阵
+            <Hint text="资源预算只顺序运行推荐组合，不会默认全部跑。" />
+          </h3>
         </div>
-        <button
-          className="text-button"
+        <Button
+          variant="link"
           onClick={() =>
             setEdits({ ...edits, models: plan.models, search_budget: plan.search_budget ?? 0 })
           }
         >
           恢复 Agent 推荐
-        </button>
+        </Button>
       </div>
       <div className="model-grid head">
         <span>运行</span>
@@ -680,10 +734,9 @@ function ModelDecision({
       {modelCatalog.map(([id, name, purpose]) => (
         <label className="model-grid row" key={id}>
           <span>
-            <input
-              type="checkbox"
+            <Checkbox
               checked={selected.includes(id)}
-              onChange={(e) => toggle(id, e.target.checked)}
+              onCheckedChange={(checked) => toggle(id, checked === true)}
             />
           </span>
           <span>
@@ -702,7 +755,7 @@ function ModelDecision({
       <div className="form-grid score-fields">
         <label>
           最低分
-          <input
+          <Input
             type="number"
             value={score.minimum ?? 300}
             onChange={(e) => scoreChange("minimum", Number(e.target.value))}
@@ -710,7 +763,7 @@ function ModelDecision({
         </label>
         <label>
           最高分
-          <input
+          <Input
             type="number"
             value={score.maximum ?? 900}
             onChange={(e) => scoreChange("maximum", Number(e.target.value))}
@@ -718,7 +771,7 @@ function ModelDecision({
         </label>
         <label>
           基准分
-          <input
+          <Input
             type="number"
             value={score.base_score ?? 600}
             onChange={(e) => scoreChange("base_score", Number(e.target.value))}
@@ -726,7 +779,7 @@ function ModelDecision({
         </label>
         <label>
           基准好坏比
-          <input
+          <Input
             type="number"
             value={score.base_odds ?? 20}
             onChange={(e) => scoreChange("base_odds", Number(e.target.value))}
@@ -734,7 +787,7 @@ function ModelDecision({
         </label>
         <label>
           PDO
-          <input
+          <Input
             type="number"
             value={score.pdo ?? 50}
             onChange={(e) => scoreChange("pdo", Number(e.target.value))}
@@ -742,7 +795,7 @@ function ModelDecision({
         </label>
         <label>
           调参试验数
-          <input
+          <Input
             type="number"
             min="0"
             max="12"
@@ -757,7 +810,7 @@ function ModelDecision({
         </label>
       </div>
       <p className="boundary-note">
-        默认不额外调参；设为 1—12 后只在 Train/CV 使用固定小网格，Test 仍只用于方案选择，OOT
+        默认不额外调参；设为 1-12 后只在 Train/CV 使用固定小网格，Test 仍只用于方案选择，OOT
         不参与调参。
       </p>
     </section>

@@ -1,13 +1,13 @@
 import { useCallback, useRef, useState } from "react";
 import { api } from "../api";
 import { errorMessage, isAbort } from "../lib/format";
+import { notify } from "@/lib/notify";
 import type { ProjectDetail } from "../types";
 
 export function useProjectData(
   selectedId: string | null,
   selectedRef: React.MutableRefObject<string | null>,
   setRunId: React.Dispatch<React.SetStateAction<string | null>>,
-  notify: (message: string, error?: boolean) => void,
 ) {
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const detailAbort = useRef<AbortController | null>(null);
@@ -39,7 +39,7 @@ export function useProjectData(
     } catch (error) {
       if (!isAbort(error)) notify(errorMessage(error), true);
     }
-  }, [selectedId, notify, selectedRef, setRunId]);
+  }, [selectedId, selectedRef, setRunId]);
 
   const clearDetail = useCallback(() => {
     detailAbort.current?.abort();

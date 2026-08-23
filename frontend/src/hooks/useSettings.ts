@@ -1,9 +1,10 @@
 import { useCallback, useState } from "react";
 import { api } from "../api";
 import { errorMessage } from "../lib/format";
+import { notify } from "@/lib/notify";
 import type { Settings, SettingsResponse } from "../types";
 
-export function useSettings(notify: (message: string, error?: boolean) => void) {
+export function useSettings() {
   const [settings, setSettings] = useState<Settings | null>(null);
 
   const loadSettings = useCallback(async () => {
@@ -19,7 +20,7 @@ export function useSettings(notify: (message: string, error?: boolean) => void) 
       notify(errorMessage(error), true);
       return null;
     }
-  }, [notify]);
+  }, []);
 
   return { settings, setSettings, loadSettings };
 }
