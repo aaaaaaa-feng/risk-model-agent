@@ -895,6 +895,33 @@ body.col-resizing .chat-rail {
   color: var(--quiet);
 }
 
+/* 空对话欢迎卡(AI 助手卡片风格) */
+.chat-welcome {
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+}
+
+.chat-welcome h3 {
+  font-size: 15px;
+}
+
+.chat-welcome p {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chat-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chat-prompts .prompt {
+  text-align: left;
+  white-space: normal;
+  height: auto;
+}
+
 /* 对话气泡：Agent 在左、用户在右（类似微信） */
 .chat-row {
   display: flex;

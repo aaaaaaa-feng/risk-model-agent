@@ -360,7 +360,11 @@ export function App() {
                   ▸
                 </button>
               </div>
-              <AgentChat projectId={selectedId} />
+              <AgentChat
+                projectId={selectedId}
+                settings={settings}
+                onProviderChange={loadSettings}
+              />
             </>
           )}
         </aside>

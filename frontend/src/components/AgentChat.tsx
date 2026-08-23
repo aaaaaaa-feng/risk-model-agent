@@ -2,9 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, eventUrl } from "../api";
 import { errorMessage } from "../lib/format";
 import { Markdown } from "./Markdown";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { ChatInput, ChatInputSubmit, ChatInputTextArea } from "@/components/ui/chat-input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { notify } from "@/lib/notify";
-import type { Message } from "../types";
+import { RefreshCw } from "lucide-react";
+import type { Message, Settings } from "../types";
 
 interface ConversationResponse {
   conversation: { id: string };
@@ -17,11 +28,26 @@ interface MessagePostResponse {
   user_message: Message;
 }
 
-export function AgentChat({ projectId }: { projectId: string | null }) {
+/* 风控语境的快捷提问,点击填入输入框 */
+const promptSuggestions = [
+  "解释当前所处阶段与下一步",
+  "检查数据资产的质量与风险",
+  "汇总最新 Run 的模型效果",
+  "审阅特征工程与分箱方案",
+];
+
+interface Props {
+  projectId: string | null;
+  settings: Settings | null;
+  onProviderChange: () => void;
+}
+
+export function AgentChat({ projectId, settings, onProviderChange }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const load = useCallback(async () => {
     if (!projectId) {
@@ -95,6 +121,32 @@ export function AgentChat({ projectId }: { projectId: string | null }) {
     }
   };
 
+  /* 模型配置:多个可用 Provider 时允许在对话栏直接切换 */
+  const profiles = settings?.profiles || [];
+  const activeId = settings?.active_profile_id || settings?.provider || "";
+  const activeProfile = profiles.find((profile) => profile.id === activeId);
+  const modelLabel = activeProfile?.model || settings?.model || "";
+  const switchable = profiles.filter(
+    (profile) => profile.llm_enabled && profile.api_key_configured,
+  );
+
+  const activate = async (profileId: string) => {
+    if (profileId === activeId || switching) return;
+    setSwitching(true);
+    try {
+      await api.post(`/providers/profiles/${profileId}/activate`);
+      const target = profiles.find((profile) => profile.id === profileId);
+      notify(`已切换模型配置：${target?.label || profileId}`);
+      onProviderChange();
+    } catch (error) {
+      notify(errorMessage(error), true);
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  const welcome = projectId && !messages.length && !busy && !draft;
+
   return (
     <section className="agent-chat" aria-label="项目 Agent 对话">
       <div className="chat-head">
@@ -103,6 +155,28 @@ export function AgentChat({ projectId }: { projectId: string | null }) {
       </div>
       <div className="chat-messages" ref={scrollRef}>
         {!projectId && <p className="chat-placeholder">创建或选择项目后开始对话。</p>}
+        {welcome && (
+          <Card className="chat-welcome">
+            <CardContent className="flex flex-col items-start gap-3">
+              <span className="eyebrow">MAIN AGENT</span>
+              <h3>你好，我是本项目的建模 Agent</h3>
+              <p>可以询问当前阶段、数据质量或模型效果，也可以从一个常见问题开始：</p>
+              <div className="chat-prompts">
+                {promptSuggestions.map((prompt) => (
+                  <Button
+                    key={prompt}
+                    variant="outline"
+                    size="sm"
+                    className="prompt"
+                    onClick={() => setInput(prompt)}
+                  >
+                    {prompt}
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
         {messages.map((message) =>
           message.role === "user" ? (
             <div className="chat-row user" key={message.id}>
@@ -177,7 +251,45 @@ export function AgentChat({ projectId }: { projectId: string | null }) {
           disabled={!projectId || busy}
           placeholder={projectId ? "补充业务要求，或询问当前阶段…" : "请先选择项目"}
         />
-        <ChatInputSubmit aria-label="发送" />
+        <div className="flex w-full items-center justify-between gap-2">
+          {settings?.llm_enabled && modelLabel ? (
+            switchable.length > 1 ? (
+              <Select value={activeId} onValueChange={activate} disabled={switching}>
+                <SelectTrigger
+                  aria-label="切换模型配置"
+                  className="h-[30px] w-auto gap-1.5 px-2 font-mono text-[10px]"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {switchable.map((profile) => (
+                    <SelectItem value={profile.id} key={profile.id}>
+                      {profile.label}
+                      {profile.model ? ` · ${profile.model}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Badge variant="muted">{modelLabel}</Badge>
+            )
+          ) : (
+            <Badge variant="muted">本地降级</Badge>
+          )}
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-[30px] w-[30px]"
+              aria-label="重新加载对话"
+              disabled={!projectId || busy}
+              onClick={load}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+            <ChatInputSubmit aria-label="发送" />
+          </div>
+        </div>
       </ChatInput>
     </section>
   );
