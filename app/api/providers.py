@@ -130,7 +130,6 @@ def activate_profile(profile_id: str, ctx: AppContext = Depends(context)) -> dic
     profiles = ProviderProfileStore(ctx.paths)
     profile = profiles.activate(profile_id)
     store = SettingsStore(ctx.paths)
-    current = store.load()
     values = {key: profile[key] for key in ("provider", "api_format", "base_url", "model", "reviewer_model", "llm_enabled") if key in profile}
     settings = store.save(values)
     active_profile_id = profiles.active_profile_id(settings)
