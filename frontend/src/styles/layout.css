@@ -521,10 +521,11 @@ body.col-resizing .chat-rail {
     background: linear-gradient(
       100deg,
       transparent 20%,
-      rgba(255, 255, 255, 0.28) 50%,
+      var(--on-blue-shimmer) 50%,
       transparent 80%
     );
-    animation: conduction 2.4s linear infinite;
+    /* 阶段切换时扫光两次即停,不做无限循环 */
+    animation: conduction 1.8s var(--ease-out) 2;
     pointer-events: none;
   }
 }
@@ -887,7 +888,7 @@ body.col-resizing .chat-rail {
 /* Agent chat */
 .agent-chat {
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
   background: var(--paper);
   padding: var(--space-3) var(--space-4) 14px;
   box-shadow: var(--shadow-sm);
@@ -1275,7 +1276,7 @@ body.col-resizing .chat-rail {
 
   .sidebar,
   .chat-rail {
-    border-radius: 18px;
+    border-radius: var(--radius-xl);
   }
 
   .sidebar {

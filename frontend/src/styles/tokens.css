@@ -44,6 +44,7 @@
   --ink-inverse-soft: #d4d4d8;
   --on-blue-border: rgba(255, 255, 255, 0.55);
   --on-blue-fill: rgba(255, 255, 255, 0.16);
+  --on-blue-shimmer: rgba(255, 255, 255, 0.28);
   --scrim: rgba(24, 24, 27, 0.42);
   --scrim-strong: rgba(17, 17, 27, 0.73);
   --pulse-glow: rgba(30, 64, 175, 0.35);
@@ -98,8 +99,6 @@
   /* Shadows */
   --shadow-xs: 0 1px 4px rgba(15, 23, 42, 0.05);
   --shadow-sm: 0 3px 10px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 7px 20px rgba(15, 23, 42, 0.07);
-  --shadow-lg: 0 12px 28px rgba(15, 23, 42, 0.08);
   --shadow-xl: 0 20px 56px rgba(15, 23, 42, 0.14);
   --shadow-blue: 0 6px 14px rgba(30, 64, 175, 0.22);
   --shadow-blue-hover: 0 8px 18px rgba(30, 64, 175, 0.24);

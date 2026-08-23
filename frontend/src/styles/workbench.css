@@ -48,7 +48,7 @@
   gap: var(--space-4);
   align-items: flex-end;
   padding: 25px 26px;
-  border-radius: 17px;
+  border-radius: var(--radius-xl);
   background: var(--blue);
   color: var(--paper);
   box-shadow: var(--shadow-blue);
@@ -1189,8 +1189,8 @@
 }
 
 .workspace-setup {
-  width: min(620px, calc(100vw - 40px));
-  max-height: calc(100vh - 40px);
+  width: min(620px, calc(100dvw - 40px));
+  max-height: calc(100dvh - 40px);
   overflow: auto;
   background: var(--paper);
   border-radius: var(--radius-2xl);
@@ -1367,7 +1367,7 @@
   align-items: center;
   gap: var(--space-2);
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--paper);
   padding: 8px 9px;
   margin-top: 6px;

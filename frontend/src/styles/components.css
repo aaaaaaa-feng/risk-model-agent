@@ -365,8 +365,8 @@ tbody tr:last-child td {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: min(520px, calc(100vw - 40px));
-  max-height: calc(100vh - 40px);
+  width: min(520px, calc(100dvw - 40px));
+  max-height: calc(100dvh - 40px);
   overflow: auto;
   background: var(--paper);
   border-radius: var(--radius-2xl);
@@ -408,7 +408,7 @@ tbody tr:last-child td {
   top: var(--space-3);
   right: var(--space-3);
   bottom: var(--space-3);
-  width: min(500px, calc(100vw - 30px));
+  width: min(500px, calc(100dvw - 30px));
   background: var(--paper);
   border: 1px solid var(--line);
   border-radius: var(--radius-2xl);
@@ -546,6 +546,6 @@ tbody tr:last-child td {
   }
 
   .settings-drawer {
-    width: calc(100vw - 16px);
+    width: calc(100dvw - 16px);
   }
 }
