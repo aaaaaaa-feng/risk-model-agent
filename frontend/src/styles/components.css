@@ -149,8 +149,7 @@ tbody tr:last-child td {
   color: var(--muted);
 }
 
-/* Modal & drawer */
-.modal-backdrop,
+/* Modal & drawer — 模态遮罩已由 ui/dialog.tsx 接管,抽屉遮罩待 Sheet 迁移后移除 */
 .drawer-scrim {
   position: fixed;
   inset: 0;

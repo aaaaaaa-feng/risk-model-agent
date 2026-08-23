@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { WorkspaceStatus } from "../types";
 
@@ -59,15 +60,16 @@ export function WorkspaceSetup({ workspace, onSelected, onClose, notify }: Props
 
   const mandatory = workspace.needs_setup && !workspace.project_count;
   return (
-    <div className="workspace-setup-backdrop" role="presentation">
-      <section
-        className="workspace-setup"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="workspace-setup-title"
+    <Dialog open>
+      <DialogContent
+        className="workspace-setup z-[calc(var(--z-workspace-setup)+1)]"
+        overlayClassName="z-[var(--z-workspace-setup)] bg-[var(--scrim-strong)] backdrop-blur-none"
+        /* 工作区未选定前不允许 Escape / 点击遮罩关闭,只能走页面内按钮 */
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
       >
         <div className="workspace-setup-head">
-          <h2 id="workspace-setup-title">先选择工作文件夹</h2>
+          <DialogTitle id="workspace-setup-title">先选择工作文件夹</DialogTitle>
         </div>
         <div className="workspace-setup-body">
           <p>
@@ -105,17 +107,12 @@ export function WorkspaceSetup({ workspace, onSelected, onClose, notify }: Props
             应用只在系统应用目录保留一个工作区指针，用于下次启动找到这里；项目数据本身不会上传到云端。
           </p>
           {!mandatory && onClose && (
-            <Button
-              type="button"
-              variant="link"
-              className="workspace-later"
-              onClick={onClose}
-            >
+            <Button type="button" variant="link" className="workspace-later" onClick={onClose}>
               暂不更换，继续使用当前目录
             </Button>
           )}
         </div>
-      </section>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

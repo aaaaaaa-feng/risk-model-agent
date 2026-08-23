@@ -1143,17 +1143,7 @@
   line-height: 1.5;
 }
 
-/* Workspace setup */
-.workspace-setup-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-workspace-setup);
-  background: var(--scrim-strong);
-  display: grid;
-  place-items: center;
-  padding: var(--space-5);
-}
-
+/* Workspace setup — 遮罩/定位由 ui/dialog.tsx(Radix)承担,保留面板与头部皮肤 */
 .workspace-setup {
   width: min(620px, calc(100dvw - 40px));
   max-height: calc(100dvh - 40px);
