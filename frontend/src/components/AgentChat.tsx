@@ -3,6 +3,7 @@ import { api, eventUrl } from "../api";
 import { errorMessage } from "../lib/format";
 import { Markdown } from "./Markdown";
 import { ChatInput, ChatInputSubmit, ChatInputTextArea } from "@/components/ui/chat-input";
+import { notify } from "@/lib/notify";
 import type { Message } from "../types";
 
 interface ConversationResponse {
@@ -16,13 +17,7 @@ interface MessagePostResponse {
   user_message: Message;
 }
 
-export function AgentChat({
-  projectId,
-  notify,
-}: {
-  projectId: string | null;
-  notify: (message: string, error?: boolean) => void;
-}) {
+export function AgentChat({ projectId }: { projectId: string | null }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [draft, setDraft] = useState("");
@@ -39,7 +34,7 @@ export function AgentChat({
     } catch (error) {
       notify(errorMessage(error), true);
     }
-  }, [projectId, notify]);
+  }, [projectId]);
 
   useEffect(() => {
     load();

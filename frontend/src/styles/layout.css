@@ -1157,10 +1157,6 @@ body.col-resizing .chat-rail {
   .stage-line h2 {
     font-size: 28px;
   }
-
-  .toast {
-    right: var(--space-3);
-  }
 }
 
 @media (max-width: 1100px) {
@@ -1329,10 +1325,6 @@ body.col-resizing .chat-rail {
   .form-grid,
   .form-two {
     grid-template-columns: 1fr;
-  }
-
-  .toast {
-    right: var(--space-3);
   }
 }
 

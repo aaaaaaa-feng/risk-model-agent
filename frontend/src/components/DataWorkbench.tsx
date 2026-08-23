@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { notify } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import {
   Table,
@@ -29,7 +30,6 @@ interface Props {
   detail: ProjectDetail;
   onRefresh: () => Promise<void>;
   onRunsStarted: (runId: string) => void;
-  notify: (message: string, error?: boolean) => void;
 }
 
 interface JoinStepDraft {
@@ -46,7 +46,7 @@ const dataSections: ReadonlyArray<readonly [DataSection, string]> = [
   ["notebook", "Notebook"],
 ];
 
-export function DataWorkbench({ detail, onRefresh, onRunsStarted, notify }: Props) {
+export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
   const [section, setSection] = useState<DataSection>("upload");
   const [uploadKind, setUploadKind] = useState("feature");
   const [busy, setBusy] = useState("");

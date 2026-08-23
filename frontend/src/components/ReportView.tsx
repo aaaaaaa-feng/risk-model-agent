@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { notify } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import {
   Table,
@@ -23,7 +24,6 @@ import type { Project, Run } from "../types";
 interface Props {
   project: Project;
   run: Run | null;
-  notify: (message: string, error?: boolean) => void;
 }
 
 interface ModelVersion {
@@ -47,7 +47,7 @@ interface ReportData {
   feature_selection?: { selected?: Array<Record<string, unknown>> };
 }
 
-export function ReportView({ project, run, notify }: Props) {
+export function ReportView({ project, run }: Props) {
   const [report, setReport] = useState<ReportData | null>(null);
   const [models, setModels] = useState<ModelVersion[]>([]);
   const [modelId, setModelId] = useState("");
@@ -69,7 +69,7 @@ export function ReportView({ project, run, notify }: Props) {
         .get<ReportData>(`/reports/${run.id}`)
         .then((value) => setReport(value))
         .catch((error) => notify(errorMessage(error), true));
-  }, [project.id, run?.id, run?.status, notify]);
+  }, [project.id, run?.id, run?.status]);
 
   const score = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];

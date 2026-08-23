@@ -10,9 +10,9 @@ import { useSettings } from "./hooks/useSettings";
 import { useChatRailState } from "./hooks/useChatRailState";
 import { useColumnWidth } from "./hooks/useColumnWidth";
 import { useSidebarState } from "./hooks/useSidebarState";
-import { useToast } from "./hooks/useToast";
 import { useWorkspace } from "./hooks/useWorkspace";
 import { errorMessage } from "./lib/format";
+import { notify } from "@/lib/notify";
 import type { ProjectCreatedResponse, RunCreatedResponse, WorkspaceStatus } from "./types";
 import { AppStateContext } from "./stores/AppStateContext";
 import { AgentChat } from "./components/AgentChat";
@@ -29,16 +29,16 @@ import { SettingsDrawer } from "./components/SettingsDrawer";
 import { StagePanel } from "./components/StagePanel";
 import { StageProgressBar } from "./components/StageProgressBar";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Toaster } from "sonner";
 import { WorkspaceSetup } from "./components/WorkspaceSetup";
 
 export function App() {
-  const { toast, notify } = useToast();
-  const { projects, loadProjects } = useProjects(notify);
+  const { projects, loadProjects } = useProjects();
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   // 该回调必须保持稳定，否则工作区 Hook 会把每次渲染都当成一次初始化。
   const openWorkspaceSetup = useCallback(() => setWorkspaceOpen(true), []);
-  const { workspace, setWorkspace, loadWorkspace } = useWorkspace(notify, openWorkspaceSetup);
-  const { settings, loadSettings } = useSettings(notify);
+  const { workspace, setWorkspace, loadWorkspace } = useWorkspace(openWorkspaceSetup);
+  const { settings, loadSettings } = useSettings();
   const {
     selectedId,
     setSelectedId,
@@ -57,10 +57,9 @@ export function App() {
     selectedId,
     selectedRef,
     setRunId,
-    notify,
   );
   const { run, setRun, decision, setDecision, events, setEvents, loadRun, runAbort, clearRun } =
-    useRunData(runId, selectedId, runRef, selectedRef, loadDetail, notify);
+    useRunData(runId, selectedId, runRef, selectedRef, loadDetail);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -193,7 +192,6 @@ export function App() {
   return (
     <AppStateContext.Provider
       value={{
-        notify,
         settings,
         workspace,
         projects,
@@ -263,11 +261,7 @@ export function App() {
               )}
             </div>
           </header>
-          <Tabs
-            value={view}
-            onValueChange={(id) => setView(id as View)}
-            className="contents"
-          >
+          <Tabs value={view} onValueChange={(id) => setView(id as View)} className="contents">
             <TabsList className="primary-tabs" aria-label="项目主视图">
               <TabsTrigger value="workbench" id="tab-workbench">
                 当前工作台
@@ -297,7 +291,6 @@ export function App() {
                   setRunId(id);
                   setDataMode(false);
                 }}
-                notify={notify}
               />
             ) : null}
             {selectedProject && view === "workbench" && !dataMode && run && decision ? (
@@ -308,14 +301,13 @@ export function App() {
                   loadRun();
                   loadDetail();
                 }}
-                notify={notify}
               />
             ) : null}
             {selectedProject && view === "workbench" && !dataMode && run && !decision ? (
               <RunWorkbench run={run} events={events} onRetry={retry} />
             ) : null}
             {selectedProject && view === "report" && (
-              <ReportView project={selectedProject} run={run} notify={notify} />
+              <ReportView project={selectedProject} run={run} />
             )}
             {selectedProject && view === "history" && (
               <HistoryView
@@ -368,7 +360,7 @@ export function App() {
                   ▸
                 </button>
               </div>
-              <AgentChat projectId={selectedId} notify={notify} />
+              <AgentChat projectId={selectedId} />
             </>
           )}
         </aside>
@@ -386,7 +378,6 @@ export function App() {
           onClose={() => setSettingsOpen(false)}
           onChanged={loadSettings}
           onChangeWorkspace={() => setWorkspaceOpen(true)}
-          notify={notify}
         />
         {workspace && workspaceOpen && (
           <WorkspaceSetup
@@ -397,14 +388,12 @@ export function App() {
                 ? undefined
                 : () => setWorkspaceOpen(false)
             }
-            notify={notify}
           />
         )}
-        {toast && (
-          <div className={`toast ${toast.error ? "error" : ""}`} role="status">
-            {toast.message}
-          </div>
-        )}
+        <Toaster
+          position="top-right"
+          toastOptions={{ unstyled: true, classNames: { toast: "app-toast" } }}
+        />
       </div>
     </AppStateContext.Provider>
   );

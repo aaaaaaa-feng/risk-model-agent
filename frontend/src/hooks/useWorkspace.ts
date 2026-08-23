@@ -1,12 +1,10 @@
 import { useCallback, useState } from "react";
 import { api } from "../api";
 import { errorMessage } from "../lib/format";
+import { notify } from "@/lib/notify";
 import type { WorkspaceStatus } from "../types";
 
-export function useWorkspace(
-  notify: (message: string, error?: boolean) => void,
-  onNeedsSetup?: () => void,
-) {
+export function useWorkspace(onNeedsSetup?: () => void) {
   const [workspace, setWorkspace] = useState<WorkspaceStatus | null>(null);
 
   const loadWorkspace = useCallback(async () => {
@@ -19,7 +17,7 @@ export function useWorkspace(
       notify(errorMessage(error), true);
       return null;
     }
-  }, [notify, onNeedsSetup]);
+  }, [onNeedsSetup]);
 
   return { workspace, setWorkspace, loadWorkspace };
 }

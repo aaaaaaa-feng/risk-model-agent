@@ -22,13 +22,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { notify } from "@/lib/notify";
 import type { Decision, Run } from "../types";
 
 interface Props {
   run: Run;
   decision: Decision;
   onResolved: () => void;
-  notify: (message: string, error?: boolean) => void;
 }
 
 const modelCatalog = [
@@ -47,7 +47,7 @@ interface RestoreFeature {
   reason: string;
 }
 
-export function DecisionWorkbench({ run, decision, onResolved, notify }: Props) {
+export function DecisionWorkbench({ run, decision, onResolved }: Props) {
   const details = decision.payload;
   const summary = details.summary;
   const [busy, setBusy] = useState(false);

@@ -3,16 +3,16 @@ import { api } from "../api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { notify } from "@/lib/notify";
 import type { WorkspaceStatus } from "../types";
 
 interface Props {
   workspace: WorkspaceStatus;
   onSelected: (workspace: WorkspaceStatus) => void;
   onClose?: () => void;
-  notify: (message: string, error?: boolean) => void;
 }
 
-export function WorkspaceSetup({ workspace, onSelected, onClose, notify }: Props) {
+export function WorkspaceSetup({ workspace, onSelected, onClose }: Props) {
   const [path, setPath] = useState(workspace.current_path || workspace.path || "");
   const [busy, setBusy] = useState("");
 

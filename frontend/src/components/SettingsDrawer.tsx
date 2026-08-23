@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { notify } from "@/lib/notify";
 import type {
   BackupsResponse,
   ProviderProfile,
@@ -28,7 +29,6 @@ interface Props {
   onClose: () => void;
   onChanged: () => void;
   onChangeWorkspace: () => void;
-  notify: (message: string, error?: boolean) => void;
 }
 
 type SectionId = "providers" | "modeling" | "network" | "workspace" | "backup";
@@ -86,7 +86,6 @@ export function SettingsDrawer({
   onClose,
   onChanged,
   onChangeWorkspace,
-  notify,
 }: Props) {
   const [form, setForm] = useState<Record<string, unknown>>({});
   const [apiKey, setApiKey] = useState("");
