@@ -35,14 +35,6 @@ class SecretStore:
         environment = os.getenv("RISK_AGENT_API_KEY", "").strip()
         if environment:
             return environment
-        keyring = _keyring()
-        if keyring:
-            try:
-                value = str(keyring.get_password(SERVICE, self.username) or "").strip()
-                if value:
-                    return value
-            except Exception:
-                pass
         try:
             return self.local_path.read_text(encoding="utf-8").strip()
         except OSError:
@@ -54,15 +46,6 @@ class SecretStore:
         value = value.strip()
         if not value:
             raise ValueError("EMPTY_API_KEY")
-        keyring = _keyring()
-        if keyring:
-            try:
-                keyring.set_password(SERVICE, self.username, value)
-                self.local_path.parent.mkdir(parents=True, exist_ok=True)
-                self._remove_local()
-                return "os-keychain"
-            except Exception:
-                pass
         self.local_path.parent.mkdir(parents=True, exist_ok=True)
         self.local_path.write_text(value, encoding="utf-8")
         try:
@@ -72,16 +55,40 @@ class SecretStore:
         return "local-protected-file"
 
     def clear(self, include_legacy: bool = False) -> str:
-        keyring = _keyring()
-        if keyring:
-            try:
-                keyring.delete_password(SERVICE, self.username)
-            except Exception:
-                pass
         self._remove_local()
         if include_legacy and self.profile_id:
             SecretStore(self.paths).clear()
         return "environment" if os.getenv("RISK_AGENT_API_KEY", "").strip() else "not_configured"
+
+    def migrate_keyring_to_local(self, *, remove_source: bool = True) -> bool:
+        """Move a legacy keyring value to local storage once.
+
+        Normal application reads never touch the OS keychain.  This explicit
+        migration is kept for upgrades where an older version stored the key
+        there.  The value is never returned or logged; after a successful
+        local write the old keyring entry is removed by default.
+        """
+
+        if os.getenv("RISK_AGENT_API_KEY", "").strip() or self.read():
+            return False
+        keyring = _keyring()
+        if not keyring:
+            return False
+        try:
+            value = str(keyring.get_password(SERVICE, self.username) or "").strip()
+        except Exception:
+            return False
+        if not value:
+            return False
+        self.save(value)
+        if remove_source:
+            try:
+                keyring.delete_password(SERVICE, self.username)
+            except Exception:
+                # Local storage is already authoritative.  A platform may
+                # refuse deletion, but normal reads still never use keyring.
+                pass
+        return True
 
     def migrate_legacy(self) -> bool:
         """Copy the pre-profile secret into this profile without exposing it."""

@@ -64,7 +64,7 @@ def get_settings(ctx: AppContext = Depends(context)) -> dict[str, Any]:
     secret = SecretStore(ctx.paths, profile_id=active_profile_id)
     configured = bool(secret.read())
     if configured != settings.api_key_configured:
-        storage = "environment" if os.getenv("RISK_AGENT_API_KEY", "").strip() else (settings.secret_storage if settings.secret_storage != "not_configured" else "local-or-keychain")
+        storage = "environment" if os.getenv("RISK_AGENT_API_KEY", "").strip() else (settings.secret_storage if settings.secret_storage != "not_configured" else "local-protected-file")
         settings = store.save_secret_state(configured, storage if configured else "not_configured")
     public = settings.public(ctx.paths)
     public["active_profile_id"] = active_profile_id
@@ -192,7 +192,7 @@ def reset_settings(payload: ResetSettings, ctx: AppContext = Depends(context)) -
     secrets = SecretStore(ctx.paths, profile_id=active_profile_id)
     configured = bool(secrets.read())
     storage = "environment" if os.getenv("RISK_AGENT_API_KEY", "").strip() else (
-        "local-or-keychain" if configured else "not_configured"
+        "local-protected-file" if configured else "not_configured"
     )
     settings = store.save_secret_state(configured, storage if configured else "not_configured")
     return {"settings": settings.public(ctx.paths), "api_key_cleared": payload.clear_api_key and not configured}

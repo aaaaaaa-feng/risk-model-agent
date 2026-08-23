@@ -111,10 +111,46 @@ def test_secret_store_is_scoped_to_application_paths(app_paths, monkeypatch):
     monkeypatch.delenv("RISK_AGENT_API_KEY", raising=False)
     store = SecretStore(app_paths)
     storage = store.save("local-test-key-value")
-    assert storage in {"os-keychain", "local-protected-file"}
+    assert storage == "local-protected-file"
     assert store.read() == "local-test-key-value"
     assert store.clear() == "not_configured"
     assert store.read() == ""
+
+
+def test_secret_store_normal_operations_never_touch_keyring(app_paths, monkeypatch):
+    monkeypatch.delenv("RISK_AGENT_API_KEY", raising=False)
+
+    def fail_if_called():
+        raise AssertionError("normal secret operations must not access keyring")
+
+    monkeypatch.setattr("app.providers.secrets._keyring", fail_if_called)
+    store = SecretStore(app_paths, profile_id="deepseek")
+    assert store.save("local-only-key") == "local-protected-file"
+    assert store.read() == "local-only-key"
+    assert store.clear() == "not_configured"
+
+
+def test_secret_store_explicitly_migrates_legacy_keyring_once(app_paths, monkeypatch):
+    monkeypatch.delenv("RISK_AGENT_API_KEY", raising=False)
+
+    class FakeKeyring:
+        deleted: list[tuple[str, str]] = []
+
+        @staticmethod
+        def get_password(service: str, username: str) -> str:
+            assert service == "risk-model-agent-v1"
+            assert username == "provider-api-key:deepseek"
+            return "legacy-keyring-value"
+
+        @classmethod
+        def delete_password(cls, service: str, username: str) -> None:
+            cls.deleted.append((service, username))
+
+    monkeypatch.setattr("app.providers.secrets._keyring", lambda: FakeKeyring)
+    store = SecretStore(app_paths, profile_id="deepseek")
+    assert store.migrate_keyring_to_local() is True
+    assert store.read() == "legacy-keyring-value"
+    assert FakeKeyring.deleted == [("risk-model-agent-v1", "provider-api-key:deepseek")]
 
 
 class FakeResponse:

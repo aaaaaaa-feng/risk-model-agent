@@ -123,7 +123,7 @@ class ProviderProfileStore:
             secret = SecretStore(self.paths, profile_id=profile_id)
             configured = bool(secret.read())
             storage = "environment" if os.getenv("RISK_AGENT_API_KEY", "").strip() else (
-                "not_configured" if not configured else "local-or-keychain"
+                "not_configured" if not configured else "local-protected-file"
             )
             provider = str(item.get("provider") or profile_id)
             preset = PROVIDER_PRESETS.get(provider, {})
