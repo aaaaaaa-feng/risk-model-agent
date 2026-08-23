@@ -18,6 +18,55 @@
   box-shadow: var(--shadow-lg);
 }
 
+/* 栏间拖拽分隔条：覆盖在 gap 上，不改变布局宽度 */
+.col-resizer {
+  flex: none;
+  width: var(--space-4);
+  margin: 0 calc(-1 * var(--space-4));
+  cursor: col-resize;
+  position: relative;
+  z-index: 5;
+  touch-action: none;
+}
+
+.col-resizer::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 3px;
+  height: 64px;
+  border-radius: var(--radius-full);
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.col-resizer:hover::before,
+.col-resizer:focus-visible::before {
+  background: var(--line-strong);
+}
+
+.col-resizer:active::before {
+  background: var(--blue);
+}
+
+body.col-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.col-resizing .sidebar,
+body.col-resizing .chat-rail {
+  transition: none;
+}
+
+@media (max-width: 820px) {
+  .col-resizer {
+    display: none;
+  }
+}
+
 /* Sidebar */
 .sidebar {
   width: var(--sidebar-width, 224px);

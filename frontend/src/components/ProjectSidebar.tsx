@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { Project, Settings } from "../types";
 
 interface Props {
@@ -6,6 +7,8 @@ interface Props {
   settings: Settings | null;
   open: boolean;
   onToggle: () => void;
+  /** 展开时的宽度（拖拽分隔条实时调整）；折叠时忽略 */
+  width?: number;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onSettings: () => void;
@@ -17,13 +20,22 @@ export function ProjectSidebar({
   settings,
   open,
   onToggle,
+  width,
   onSelect,
   onCreate,
   onSettings,
 }: Props) {
   const selected = projects.find((project) => project.id === selectedId);
   return (
-    <aside className={`sidebar ${open ? "" : "collapsed"}`} aria-label="项目列表">
+    <aside
+      className={`sidebar ${open ? "" : "collapsed"}`}
+      style={
+        open && width
+          ? ({ "--sidebar-width": `${width}px` } as CSSProperties)
+          : undefined
+      }
+      aria-label="项目列表"
+    >
       <div className="brand">
         <div className="brand-mark">RM</div>
         {open && (

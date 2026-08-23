@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 import { api } from "./api";
 import { useGlobalPolling } from "./hooks/useGlobalPolling";
 import { useProjectData } from "./hooks/useProjectData";
@@ -7,6 +8,7 @@ import { useRunData } from "./hooks/useRunData";
 import { useSelectionState, type View } from "./hooks/useSelectionState";
 import { useSettings } from "./hooks/useSettings";
 import { useChatRailState } from "./hooks/useChatRailState";
+import { useColumnWidth } from "./hooks/useColumnWidth";
 import { useSidebarState } from "./hooks/useSidebarState";
 import { useToast } from "./hooks/useToast";
 import { useWorkspace } from "./hooks/useWorkspace";
@@ -63,6 +65,19 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [sidebarOpen, toggleSidebar] = useSidebarState();
   const chatRail = useChatRailState();
+  const sidebarWidth = useColumnWidth({
+    storageKey: "risk-agent-sidebar-width",
+    min: 180,
+    max: 360,
+    initial: 224,
+  });
+  const chatWidth = useColumnWidth({
+    storageKey: "risk-agent-chat-rail-width",
+    min: 240,
+    max: 520,
+    initial: typeof window !== "undefined" && window.innerWidth < 1440 ? 260 : 320,
+    invert: true,
+  });
 
   useEffect(() => {
     // 应用启动时只加载一次基础上下文；项目详情和 Run 事件由各自的 Hook 管理。
@@ -196,10 +211,19 @@ export function App() {
           settings={settings}
           open={sidebarOpen}
           onToggle={toggleSidebar}
+          width={sidebarOpen ? sidebarWidth.width : undefined}
           onSelect={selectProject}
           onCreate={() => setCreateOpen(true)}
           onSettings={() => setSettingsOpen(true)}
         />
+        {sidebarOpen && (
+          <div
+            className="col-resizer"
+            aria-label="调整项目列表宽度"
+            title="拖动调整宽度，双击恢复默认"
+            {...sidebarWidth.resizerProps}
+          />
+        )}
         <main className="main-column">
           <StageProgressBar run={run} />
           <header className="app-header">
@@ -293,8 +317,21 @@ export function App() {
             )}
           </section>
         </main>
+        {!chatRail.collapsed && (
+          <div
+            className="col-resizer"
+            aria-label="调整对话栏宽度"
+            title="拖动调整宽度，双击恢复默认"
+            {...chatWidth.resizerProps}
+          />
+        )}
         <aside
           className={`chat-rail ${chatRail.collapsed ? "collapsed" : chatRail.mode}`}
+          style={
+            chatRail.collapsed
+              ? undefined
+              : ({ "--chat-rail-width": `${chatWidth.width}px` } as CSSProperties)
+          }
           aria-label="Agent 对话"
         >
           {chatRail.collapsed ? (
