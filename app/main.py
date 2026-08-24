@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import multiprocessing
 import os
 import platform
@@ -14,10 +15,18 @@ from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import router as api_router
+from app.core.errors import (
+    http_error_code,
+    normalize_error_code,
+    public_error_message,
+    value_error_status,
+)
 from app.core.paths import AppPaths, get_paths, is_synced_path
 from app.runtime import AppContext
 from app.workers.modeling import available_models
@@ -25,6 +34,7 @@ from app.workers.modeling import available_models
 
 APP_VERSION = "1.0.2"
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -63,31 +73,62 @@ def create_app(
     application.include_router(api_router, prefix="/api/v1")
 
     @application.exception_handler(KeyError)
-    async def not_found(_: Request, error: KeyError) -> JSONResponse:
+    async def not_found(_: Request, __: KeyError) -> JSONResponse:
         return JSONResponse(
             status_code=404,
-            content={"error": {"code": "RESOURCE_NOT_FOUND", "message": str(error.args[0])}},
+            content={
+                "error": {
+                    "code": "RESOURCE_NOT_FOUND",
+                    "message": public_error_message("RESOURCE_NOT_FOUND", 404),
+                }
+            },
         )
 
     @application.exception_handler(ValueError)
     async def invalid(_: Request, error: ValueError) -> JSONResponse:
-        code = str(error).split(":", 1)[0] or "INVALID_REQUEST"
-        conflict_markers = (
-            "BLOCK",
-            "NOT_PENDING",
-            "AWAITING",
-            "ARCHIVED",
-            "INFLATION",
-            "OVERLAP",
-            "CHECKSUM",
-            "NOT_RECOVERABLE",
-            "LOCKED",
-            "WORKSPACE",
-        )
-        status = 409 if any(marker in code for marker in conflict_markers) else 400
+        code = normalize_error_code(error)
+        status = value_error_status(code)
         return JSONResponse(
             status_code=status,
-            content={"error": {"code": code, "message": _public_message(code)}},
+            content={"error": {"code": code, "message": public_error_message(code, status)}},
+        )
+
+    @application.exception_handler(RequestValidationError)
+    async def request_validation(_: Request, __: RequestValidationError) -> JSONResponse:
+        code = "REQUEST_VALIDATION_FAILED"
+        return JSONResponse(
+            status_code=422,
+            content={"error": {"code": code, "message": public_error_message(code, 422)}},
+        )
+
+    @application.exception_handler(StarletteHTTPException)
+    async def http_error(_: Request, error: StarletteHTTPException) -> JSONResponse:
+        fallback = http_error_code(error.status_code)
+        detail = error.detail if isinstance(error.detail, dict) else {}
+        code = normalize_error_code(detail.get("code"), fallback)
+        return JSONResponse(
+            status_code=error.status_code,
+            content={
+                "error": {
+                    "code": code,
+                    "message": public_error_message(code, error.status_code),
+                }
+            },
+        )
+
+    @application.exception_handler(Exception)
+    async def internal_error(request: Request, error: Exception) -> JSONResponse:
+        # Do not copy exception text, request bodies, URLs, filesystem paths or
+        # tracebacks into either the response or this ordinary log.
+        logger.error(
+            "未处理的 API 异常 method=%s type=%s",
+            request.method,
+            type(error).__name__,
+        )
+        code = "INTERNAL_SERVER_ERROR"
+        return JSONResponse(
+            status_code=500,
+            content={"error": {"code": code, "message": public_error_message(code, 500)}},
         )
 
     @application.middleware("http")
@@ -208,7 +249,7 @@ def create_app(
     @application.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str) -> Any:
         if full_path.startswith("api/"):
-            raise HTTPException(404, "API route not found")
+            raise HTTPException(404, detail={"code": "ROUTE_NOT_FOUND"})
         index = frontend / "index.html"
         if index.exists():
             response = FileResponse(index)
@@ -239,20 +280,6 @@ def _frontend_dir() -> Path:
     if bundled:
         return Path(bundled) / "frontend_dist"
     return Path(__file__).resolve().parent.parent / "frontend" / "dist"
-
-
-def _public_message(code: str) -> str:
-    messages = {
-        "TARGET_SINGLE_CLASS": "Y 的有效样本必须同时包含 0 和 1。",
-        "TIME_COLUMN_REQUIRED": "时间外推切分需要可用的时间字段。",
-        "NO_FEATURES_AFTER_SCREENING": "筛选后没有可入模变量，请调整可恢复规则或检查数据。",
-        "DLP_BLOCK": "安全策略阻止了可能包含原始数据、PII 或密钥的外发请求。",
-        "ARCHIVE_PASSWORD_TOO_SHORT": "迁移包密码至少需要 10 个字符。",
-        "WORKSPACE_PATH_NOT_WRITABLE": "所选工作文件夹不可写。请换一个有读写权限的本机文件夹，或检查目录是否被其他程序锁定。",
-        "WORKSPACE_SWITCH_ACTIVE_RUNS": "当前工作区仍有运行中的任务，请等待任务结束后再更换文件夹。",
-        "WORKSPACE_SWITCH_REQUIRES_EMPTY_CURRENT_PROJECTS": "当前工作区已有项目，不能直接更换文件夹；首次设置时旧项目会保留在原目录。",
-    }
-    return messages.get(code, code.replace("_", " ").title())
 
 
 def _loopback_name(value: str) -> bool:

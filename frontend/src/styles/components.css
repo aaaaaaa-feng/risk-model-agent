@@ -159,6 +159,43 @@ label > textarea {
   color: var(--muted);
 }
 
+.app-error-boundary {
+  width: min(560px, calc(100dvw - 32px));
+  margin: max(48px, 12dvh) auto;
+  padding: 34px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2xl);
+  background: var(--paper);
+  box-shadow: var(--shadow-xl);
+  color: var(--ink);
+}
+
+.app-error-boundary > span {
+  color: var(--blue-text);
+  font: 700 10px var(--mono);
+  letter-spacing: 0.1em;
+}
+
+.app-error-boundary h1 {
+  margin: 10px 0 8px;
+  font-size: 24px;
+}
+
+.app-error-boundary p {
+  color: var(--muted);
+}
+
+.app-error-boundary button {
+  min-height: 42px;
+  border: 1px solid var(--action-bg);
+  border-radius: var(--radius-full);
+  padding: 0 18px;
+  background: var(--action-bg);
+  color: var(--action-text);
+  font-weight: 700;
+  cursor: pointer;
+}
+
 /* Modal & drawer — 遮罩与骨架已由 ui/dialog.tsx、ui/sheet.tsx(Radix)接管,
  * 保留头部与内容区皮肤 */
 .modal {

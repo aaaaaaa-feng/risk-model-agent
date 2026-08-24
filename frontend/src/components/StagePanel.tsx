@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { reviewLabel, statusLabel } from "../lib/labels";
+import { eventSummary } from "../lib/errors";
 import { Badge, statusVariant } from "@/components/ui/badge";
 import {
   BUSINESS_STAGES,
@@ -97,7 +98,9 @@ export function StagePanel({
       )}
       {expanded && (
         <div className="panel-detail">
-          <p className="panel-latest">{latest?.summary || "等待节点事件"}</p>
+          <p className="panel-latest">
+            {eventSummary(latest?.status, latest?.summary, eventErrorCode(latest))}
+          </p>
           <ul className="audit-list compact">
             <li>
               <span>主 Agent</span>
@@ -149,9 +152,9 @@ export function StagePanel({
                   <div key={event.id}>
                     <time>{new Date(event.time).toLocaleTimeString()}</time>
                     <b>
-                      {event.agent} · {event.status}
+                      {event.agent} · {statusLabel(event.status)}
                     </b>
-                    <p>{event.summary}</p>
+                    <p>{eventSummary(event.status, event.summary, eventErrorCode(event))}</p>
                   </div>
                 ))}
             </div>
@@ -160,4 +163,9 @@ export function StagePanel({
       )}
     </section>
   );
+}
+
+function eventErrorCode(event: RunEvent | undefined): string | undefined {
+  const value = event?.evidence?.error_code;
+  return typeof value === "string" ? value : undefined;
 }

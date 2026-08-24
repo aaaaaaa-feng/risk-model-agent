@@ -1,4 +1,4 @@
-import { runStageLabel } from "../lib/labels";
+import { runStageLabel, statusLabel } from "../lib/labels";
 import { Badge, statusVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Hint } from "@/components/ui/hint";
@@ -64,7 +64,7 @@ export function HistoryView({
                   </TableCell>
                   <TableCell>{target.get(run.target_task_id) || "—"}</TableCell>
                   <TableCell>
-                    <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+                    <Badge variant={statusVariant(run.status)}>{statusLabel(run.status)}</Badge>
                   </TableCell>
                   <TableCell>{runStageLabel[run.stage]}</TableCell>
                   <TableCell>{Math.round((run.progress || 0) * 100)}%</TableCell>

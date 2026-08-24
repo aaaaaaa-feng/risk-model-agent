@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import { notify } from "@/lib/notify";
 import { providerConnectionState, providerModelUpdatePayload } from "@/lib/provider-state";
-import { isAbortError, isCurrentChatRequest } from "@/lib/chat-request";
+import { isAbortError, isCurrentChatRequest, parseConversationEvent } from "@/lib/chat-request";
 import { Hint } from "@/components/ui/hint";
 import { RefreshCw } from "lucide-react";
 import type { Message, Settings } from "../types";
@@ -197,7 +197,15 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
           source.close();
           return;
         }
-        const item = JSON.parse((message as MessageEvent).data);
+        const item = parseConversationEvent((message as MessageEvent).data);
+        if (!item) {
+          closeEventSource();
+          setDraft("");
+          setBusy(false);
+          void load();
+          notify({ code: "CONVERSATION_EVENT_STREAM_INVALID" }, true);
+          return;
+        }
         if (item.evidence?.response_id !== result.response_id) return;
         if (item.status === "delta") setDraft((current) => current + item.content);
       });

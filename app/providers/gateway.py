@@ -10,6 +10,7 @@ import httpx
 
 from app.agents.prompts import CONNECTIVITY_PROMPT
 from app.core.config import Settings, SettingsStore
+from app.core.errors import normalize_error_code, public_error_message
 from app.core.paths import AppPaths
 from app.core.security import sanitize_safe_evidence, sha256_bytes, validate_safe_evidence
 
@@ -202,13 +203,13 @@ class ProviderGateway:
     ) -> ProviderResult:
         started = time.monotonic()
         if not self.configured or (not self.settings.llm_enabled and not allow_disabled_for_test):
-            return ProviderResult(
-                False,
+            result = ProviderResult(
+                ok=False,
                 error_code="PROVIDER_DISABLED",
-                error_message="Provider 未启用或配置不完整",
                 error_type="ConfigurationError",
                 duration_ms=max(0, int((time.monotonic() - started) * 1000)),
             )
+            return self._finalize_result(result, started, not _defer_result_callback)
         selected_model = model or self.settings.model
         try:
             safe_evidence = sanitize_safe_evidence(evidence)
@@ -227,7 +228,6 @@ class ProviderGateway:
             result = ProviderResult(
                 False,
                 error_code="DLP_BLOCK",
-                error_message=str(exc),
                 error_type=type(exc).__name__,
                 model=selected_model,
                 payload_hash=sha256_bytes(b"provider-blocked-request/v1"),
@@ -249,7 +249,6 @@ class ProviderGateway:
                 result = ProviderResult(
                     False,
                     error_code="PROVIDER_BUDGET_EXCEEDED",
-                    error_message=reason,
                     error_type="BudgetError",
                     model=selected_model,
                     payload_hash=payload_hash,
@@ -305,7 +304,6 @@ class ProviderGateway:
             result = ProviderResult(
                 False,
                 error_code=code,
-                error_message=f"HTTP {exc.response.status_code}",
                 model=selected_model,
                 payload_hash=payload_hash,
                 provider_request_id=provider_request_id,
@@ -318,7 +316,6 @@ class ProviderGateway:
             result = ProviderResult(
                 False,
                 error_code="PROVIDER_REQUEST_FAILED",
-                error_message=str(exc)[:300],
                 model=selected_model,
                 payload_hash=payload_hash,
                 provider_request_id=provider_request_id,
@@ -330,7 +327,6 @@ class ProviderGateway:
             result = ProviderResult(
                 False,
                 error_code="PROVIDER_REQUEST_FAILED",
-                error_message=type(exc).__name__,
                 model=selected_model,
                 payload_hash=payload_hash,
                 provider_request_id=provider_request_id,
@@ -378,7 +374,6 @@ class ProviderGateway:
         except (ValueError, json.JSONDecodeError) as exc:
             result.ok = False
             result.error_code = "PROVIDER_SCHEMA_INVALID"
-            result.error_message = str(exc)[:300]
             result.error_type = type(exc).__name__
             self._finalize_result(result, started, True)
             return None, result
@@ -387,6 +382,12 @@ class ProviderGateway:
         self, result: ProviderResult, started: float, notify: bool
     ) -> ProviderResult:
         result.duration_ms = max(result.duration_ms, int((time.monotonic() - started) * 1000))
+        if not result.ok:
+            result.error_code = normalize_error_code(
+                result.error_code,
+                "PROVIDER_REQUEST_FAILED",
+            )
+            result.error_message = public_error_message(result.error_code)
         if result.content and not result.response_hash:
             result.response_hash = sha256_bytes(result.content.encode("utf-8"))
         if notify and result.provider_request_id and self._result_callback:

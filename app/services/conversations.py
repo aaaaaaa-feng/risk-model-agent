@@ -8,6 +8,7 @@ from app.agents.evidence import build_safe_evidence
 from app.agents.prompts import CONVERSATION_PROMPT
 from app.core.config import SettingsStore
 from app.core.database import Database, new_id, now_iso
+from app.core.errors import normalize_error_code, public_error_message
 from app.core.paths import AppPaths, get_paths
 from app.core.security import validate_provider_text
 from app.providers.gateway import ProviderGateway
@@ -79,7 +80,7 @@ class ConversationService:
         try:
             validate_provider_text(safe_question)
         except ValueError as exc:
-            provider_block = str(exc)
+            provider_block = normalize_error_code(exc, "DLP_BLOCK")
         settings = SettingsStore(self.paths).load()
         gateway = ProviderGateway(settings=settings, paths=self.paths)
         answer = ""
@@ -104,7 +105,10 @@ class ConversationService:
                 answer = result.content
                 response_source = "provider"
             else:
-                provider_block = result.error_code
+                provider_block = normalize_error_code(
+                    result.error_code,
+                    "PROVIDER_REQUEST_FAILED",
+                )
         elif not provider_block:
             provider_block = _provider_unavailable_reason(settings, gateway)
         if not answer:
@@ -170,13 +174,10 @@ class ConversationService:
     ) -> str:
         prefix = ""
         if provider_block:
-            if provider_block.startswith("API 未连接") or provider_block.startswith("LLM 已关闭"):
-                prefix = f"{provider_block}\n\n下面是仅基于本地项目状态生成的降级答复。\n\n"
-            else:
-                prefix = (
-                    f"外部 API 本次调用未成功（{provider_block}）。\n\n"
-                    "下面是仅基于本地项目状态生成的降级答复。\n\n"
-                )
+            reason = public_error_message(
+                normalize_error_code(provider_block, "PROVIDER_REQUEST_FAILED")
+            )
+            prefix = f"{reason}\n\n下面是仅基于本地项目状态生成的降级答复。\n\n"
         if not run:
             return (
                 prefix
@@ -196,10 +197,10 @@ class ConversationService:
                 + f"本次已完成，Champion 是 {result.get('champion', '—')}，Test AUC={_metric(test.get('roc_auc'))}、KS={_metric(test.get('ks'))}。可以进入产物报告或上传新样本批量评分。"
             )
         if run["status"] == "failed":
-            return (
-                prefix
-                + f"Run 在「{run['stage']} / {run['node']}」失败，错误码是 {run.get('error') or 'UNKNOWN'}。该失败不会影响同项目的其他 Y 任务。"
+            failure = public_error_message(
+                normalize_error_code(run.get("error"), "RUN_EXECUTION_FAILED")
             )
+            return prefix + f"Run 在「{run['stage']} / {run['node']}」失败：{failure}"
         return (
             prefix
             + f"当前 Run 正在「{run['stage']} / {run['node']}」执行，进度约 {float(run.get('progress') or 0):.0%}。详细工具与证据引用会持续显示在右侧事件流。"
@@ -258,9 +259,9 @@ def _metric(value: Any) -> str:
 
 
 def _provider_unavailable_reason(settings: Any, gateway: ProviderGateway) -> str:
-    """Return a user-facing reason without ever exposing the configured secret."""
+    """Return a stable reason code without ever exposing the configured secret."""
     if not settings.llm_enabled:
-        return "LLM 已关闭：当前不会调用外部 API。可在“设置 > 模型与 API”中重新启用。"
+        return "LLM_DISABLED"
     if not gateway.key:
-        return "API 未连接：尚未配置 API 密钥。请在“设置 > 模型与 API”中填写密钥并测试连接。"
-    return "API 未连接：Provider 地址或模型配置不完整。请在“设置 > 模型与 API”中检查并测试连接。"
+        return "PROVIDER_API_KEY_MISSING"
+    return "PROVIDER_CONFIGURATION_INCOMPLETE"

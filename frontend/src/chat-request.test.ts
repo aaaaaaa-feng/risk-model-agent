@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isAbortError, isCurrentChatRequest } from "./lib/chat-request";
+import { isAbortError, isCurrentChatRequest, parseConversationEvent } from "./lib/chat-request";
 
 describe("project-scoped chat requests", () => {
   it("rejects an old load or stream after the project or request generation changes", () => {
@@ -15,5 +15,23 @@ describe("project-scoped chat requests", () => {
     expect(request.signal.aborted).toBe(true);
     expect(isAbortError(new DOMException("cancelled", "AbortError"))).toBe(true);
     expect(isAbortError(new Error("network"))).toBe(false);
+  });
+
+  it("对话事件损坏时安全返回 null，不抛出解析异常", () => {
+    expect(parseConversationEvent("{not-json")).toBeNull();
+    expect(parseConversationEvent(JSON.stringify({ status: "delta", evidence: {} }))).toBeNull();
+    expect(
+      parseConversationEvent(
+        JSON.stringify({
+          status: "delta",
+          content: "正在分析",
+          evidence: { response_id: "response-1" },
+        }),
+      ),
+    ).toEqual({
+      status: "delta",
+      content: "正在分析",
+      evidence: { response_id: "response-1" },
+    });
   });
 });

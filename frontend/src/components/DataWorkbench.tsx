@@ -1,6 +1,7 @@
 import { ChangeEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { errorMessage } from "../lib/format";
+import { statusLabel } from "../lib/labels";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { Badge, statusVariant } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -578,7 +579,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                   />
                   <strong>{task.target_column}</strong>
                   <span>{task.valid_sample_count.toLocaleString()} 有效样本</span>
-                  <Badge variant={statusVariant(task.status)}>{task.status}</Badge>
+                  <Badge variant={statusVariant(task.status)}>{statusLabel(task.status)}</Badge>
                 </label>
               ))}
               <Button disabled={!selectedTasks.length || busy === "runs"} onClick={startRuns}>
@@ -714,6 +715,7 @@ interface NotebookCell {
 
 interface NotebookOutput {
   text?: string;
+  ename?: string;
   evalue?: string;
   data?: Record<string, unknown>;
 }
@@ -761,7 +763,10 @@ function NotebookEditor({
       copy.cells[index].execution_count = result.execution.execution_count;
       setDocument(copy);
       if (result.execution.status !== "succeeded") {
-        notify("单元格执行失败", true);
+        notify(
+          errorMessage({ code: "NOTEBOOK_CELL_EXECUTION_FAILED" }, { context: "notebook" }),
+          true,
+        );
       }
     } catch (e) {
       notify(errorMessage(e), true);
@@ -827,7 +832,15 @@ function NotebookEditor({
                     .map(
                       (item) =>
                         (item as NotebookOutput).text ||
-                        (item as NotebookOutput).evalue ||
+                        ((item as NotebookOutput).evalue || (item as NotebookOutput).ename
+                          ? errorMessage(
+                              {
+                                code: (item as NotebookOutput).ename,
+                                message: (item as NotebookOutput).evalue,
+                              },
+                              { context: "notebook" },
+                            )
+                          : "") ||
                         JSON.stringify((item as NotebookOutput).data || {}),
                     )
                     .join("\n")}

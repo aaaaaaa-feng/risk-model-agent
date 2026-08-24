@@ -104,7 +104,7 @@ async def stream_conversation_events(
         try:
             cursor = max(cursor, int(last_event_id))
         except ValueError:
-            raise HTTPException(400, "Last-Event-ID 必须是整数事件序号。")
+            raise HTTPException(400, detail={"code": "EVENT_CURSOR_INVALID"})
 
     async def generate() -> AsyncIterator[str]:
         current = cursor

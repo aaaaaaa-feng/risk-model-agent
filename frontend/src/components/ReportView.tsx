@@ -1,6 +1,6 @@
 import { ChangeEvent, useEffect, useState } from "react";
 import { api } from "../api";
-import { errorMessage, formatMetric, formatPercent } from "../lib/format";
+import { errorMessage, formatMetric, formatPercent, isAbort } from "../lib/format";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Select,
@@ -10,6 +10,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { notify } from "@/lib/notify";
+import { translateError, type FriendlyError } from "@/lib/errors";
+import { statusLabel } from "@/lib/labels";
+import { openDownloadedHtml, saveDownloadedFile } from "@/lib/download";
 import { Hint } from "@/components/ui/hint";
 import { cn } from "@/lib/utils";
 import {
@@ -54,23 +57,47 @@ export function ReportView({ project, run }: Props) {
   const [modelId, setModelId] = useState("");
   const [busy, setBusy] = useState(false);
   const [scoreJob, setScoreJob] = useState<ScoreJob | null>(null);
+  const [reportError, setReportError] = useState<FriendlyError | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [exporting, setExporting] = useState("");
 
   useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
     setReport(null);
+    setReportError(null);
     setScoreJob(null);
+    setModels([]);
+    setModelId("");
     api
-      .get<{ models: ModelVersion[] }>(`/projects/${project.id}/models`)
-      .then((value) => {
-        setModels(value.models);
-        setModelId((current) => current || value.models[0]?.id || "");
+      .get<{ models: ModelVersion[] }>(`/projects/${project.id}/models`, {
+        signal: controller.signal,
       })
-      .catch(() => undefined);
+      .then((value) => {
+        if (!active) return;
+        setModels(value.models);
+        setModelId(value.models[0]?.id || "");
+      })
+      .catch((error) => {
+        if (active && !isAbort(error)) notify(errorMessage(error, { context: "model" }), true);
+      });
     if (run?.status === "succeeded")
       api
-        .get<ReportData>(`/reports/${run.id}`)
-        .then((value) => setReport(value))
-        .catch((error) => notify(errorMessage(error), true));
-  }, [project.id, run?.id, run?.status]);
+        .get<ReportData>(`/reports/${run.id}`, { signal: controller.signal })
+        .then((value) => {
+          if (active) setReport(value);
+        })
+        .catch((error) => {
+          if (!active || isAbort(error)) return;
+          const friendly = translateError(error, { context: "model" });
+          setReportError(friendly);
+          notify(friendly.text, true);
+        });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [project.id, reloadKey, run?.id, run?.status]);
 
   const score = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -97,6 +124,38 @@ export function ReportView({ project, run }: Props) {
     }
   };
 
+  const downloadFile = async (path: string, fallbackName: string, busyKey: string) => {
+    setExporting(busyKey);
+    try {
+      const file = await api.download(path);
+      saveDownloadedFile(file, fallbackName);
+    } catch (error) {
+      notify(errorMessage(error), true);
+    } finally {
+      setExporting("");
+    }
+  };
+
+  const openHtmlReport = async () => {
+    const preview = window.open("about:blank", "_blank");
+    if (!preview) {
+      notify(errorMessage({ code: "REPORT_PREVIEW_POPUP_BLOCKED" }), true);
+      return;
+    }
+    preview.document.title = "正在读取本地模型报告…";
+    preview.document.body.textContent = "正在读取本地模型报告…";
+    setExporting("html");
+    try {
+      const file = await api.download(`/reports/${run?.id}/html`);
+      openDownloadedHtml(file, preview);
+    } catch (error) {
+      preview.close();
+      notify(errorMessage(error, { context: "model" }), true);
+    } finally {
+      setExporting("");
+    }
+  };
+
   if (!run || run.status !== "succeeded")
     return (
       <div className="report-empty">
@@ -109,9 +168,21 @@ export function ReportView({ project, run }: Props) {
           </div>
         </div>
         <div className="empty-state">
-          <span>WAITING</span>
-          <p>{run ? `当前 Run 状态：${run.status}` : "请选择或启动一个 Run。"}</p>
+          <span>等待报告</span>
+          <p>{run ? `当前 Run 状态：${statusLabel(run.status)}` : "请选择或启动一个 Run。"}</p>
         </div>
+      </div>
+    );
+  if (reportError)
+    return (
+      <div className="loading-panel" role="alert">
+        <strong title={reportError.code ? `诊断码：${reportError.code}` : undefined}>
+          {reportError.summary}
+        </strong>
+        {reportError.action && <p>{reportError.action}</p>}
+        <Button variant="outline" onClick={() => setReloadKey((value) => value + 1)}>
+          重新读取报告
+        </Button>
       </div>
     );
   if (!report) return <div className="loading-panel">正在读取结构化模型报告…</div>;
@@ -131,13 +202,17 @@ export function ReportView({ project, run }: Props) {
           <Hint text={`管理摘要与专业详情来自同一份事实数据 · Schema ${report.schema_version}。`} />
         </div>
         <div className="report-actions">
-          <Button variant="outline" asChild>
-            <a href={`/api/v1/reports/${run.id}/excel`}>导出 Excel</a>
+          <Button
+            variant="outline"
+            disabled={Boolean(exporting)}
+            onClick={() =>
+              downloadFile(`/reports/${run.id}/excel`, `${project.name}-模型报告.xlsx`, "excel")
+            }
+          >
+            {exporting === "excel" ? "导出中…" : "导出 Excel"}
           </Button>
-          <Button variant="outline" asChild>
-            <a target="_blank" rel="noreferrer" href={`/api/v1/reports/${run.id}/html`}>
-              打开单页 HTML
-            </a>
+          <Button variant="outline" disabled={Boolean(exporting)} onClick={openHtmlReport}>
+            {exporting === "html" ? "读取中…" : "打开单页 HTML"}
           </Button>
         </div>
       </div>
@@ -226,10 +301,19 @@ export function ReportView({ project, run }: Props) {
           {(report.model_comparison || []).map((item) => {
             const candidate = item as Record<string, unknown>;
             const metrics = (candidate.test_metrics as Record<string, unknown>) || {};
+            const failure =
+              candidate.status === "trained"
+                ? null
+                : translateError({ code: candidate.error_code }, { context: "model" });
             return (
               <div
                 key={String(candidate.candidate)}
                 className={candidate.candidate === summary.champion ? "champion" : ""}
+                title={
+                  failure
+                    ? `${failure.action}${failure.code ? ` 诊断码：${failure.code}` : ""}`
+                    : undefined
+                }
               >
                 <span>{String(candidate.candidate)}</span>
                 <i
@@ -240,7 +324,7 @@ export function ReportView({ project, run }: Props) {
                 <b>
                   {candidate.status === "trained"
                     ? `AUC ${formatMetric(metrics.roc_auc)} · KS ${formatMetric(metrics.ks)}`
-                    : String(candidate.error_code ?? "—")}
+                    : failure?.summary || "该候选模型未完成训练。"}
                 </b>
               </div>
             );
@@ -350,10 +434,20 @@ export function ReportView({ project, run }: Props) {
           />
         </label>
         {scoreJob && (
-          <Button variant="outline" asChild>
-            <a href={`/api/v1/score-jobs/${scoreJob.id}/download`}>
-              下载 {scoreJob.rows.toLocaleString()} 行评分结果
-            </a>
+          <Button
+            variant="outline"
+            disabled={Boolean(exporting)}
+            onClick={() =>
+              downloadFile(
+                `/score-jobs/${scoreJob.id}/download`,
+                `${project.name}-评分结果.csv`,
+                "score",
+              )
+            }
+          >
+            {exporting === "score"
+              ? "下载中…"
+              : `下载 ${scoreJob.rows.toLocaleString()} 行评分结果`}
           </Button>
         )}
       </section>

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.core.config import PROVIDER_PRESETS, Settings, SettingsStore
+from app.core.errors import normalize_error_code, public_error_message
 from app.providers.gateway import ProviderGateway
 from app.providers.profiles import ProviderProfileStore
 from app.providers.secrets import SecretStore
@@ -224,10 +225,15 @@ def test_provider(
         profile_id=profile_id or None,
     )
     result = gateway.connectivity_check()
+    error_code = (
+        normalize_error_code(result.error_code, "PROVIDER_REQUEST_FAILED")
+        if not result.ok
+        else None
+    )
     return {
         "ok": result.ok,
-        "error_code": result.error_code,
-        "error_message": result.error_message,
+        "error_code": error_code,
+        "error_message": public_error_message(error_code) if error_code else None,
         "model": result.model or settings.model,
         "endpoint": gateway.endpoint(),
         "api_format": gateway.api_format,

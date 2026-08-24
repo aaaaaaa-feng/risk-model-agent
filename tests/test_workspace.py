@@ -153,8 +153,8 @@ def test_native_picker_timeout_returns_actionable_api_error(tmp_path: Path, monk
         response = client.post("/api/v1/workspace/native-picker", json={})
 
     assert response.status_code == 504
-    assert response.json()["detail"]["code"] == "WORKSPACE_NATIVE_PICKER_TIMEOUT"
-    assert "超时" in response.json()["detail"]["message"]
+    assert response.json()["error"]["code"] == "WORKSPACE_NATIVE_PICKER_TIMEOUT"
+    assert "超时" in response.json()["error"]["message"]
 
 
 def test_picker_subprocess_timeout_has_specific_error(monkeypatch):

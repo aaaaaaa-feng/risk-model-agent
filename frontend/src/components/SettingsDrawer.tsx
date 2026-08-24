@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { notify } from "@/lib/notify";
 import { Hint } from "@/components/ui/hint";
+import { saveDownloadedFile } from "@/lib/download";
 import type {
   BackupsResponse,
   ProviderProfile,
@@ -95,6 +96,7 @@ export function SettingsDrawer({
   const [testResult, setTestResult] = useState("");
   const [backups, setBackups] = useState<import("../types").Backup[]>([]);
   const [section, setSection] = useState<SectionId>("providers");
+  const [downloadingBackup, setDownloadingBackup] = useState("");
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -111,7 +113,7 @@ export function SettingsDrawer({
     api
       .get<BackupsResponse>("/backups")
       .then((value) => setBackups(value.backups))
-      .catch(() => undefined);
+      .catch((error) => notify(errorMessage(error), true));
   }, [open]);
 
   if (!open || !settings) return null;
@@ -195,9 +197,13 @@ export function SettingsDrawer({
         llm_enabled: true,
         api_key: apiKey || undefined,
       });
-      setTestResult(result.ok ? `连接成功 · ${result.model}` : `连接失败 · ${result.error_code}`);
+      setTestResult(
+        result.ok
+          ? `连接成功 · ${result.model}`
+          : errorMessage({ code: result.error_code }, { context: "provider" }),
+      );
     } catch (error) {
-      setTestResult(errorMessage(error));
+      setTestResult(errorMessage(error, { context: "provider" }));
     } finally {
       setBusy("");
     }
@@ -216,10 +222,27 @@ export function SettingsDrawer({
     }
   };
 
+  const downloadBackup = async (id: string) => {
+    setDownloadingBackup(id);
+    try {
+      const file = await api.download(`/backups/${id}/download`);
+      saveDownloadedFile(file, `risk-model-agent-backup-${id}.db`);
+    } catch (error) {
+      notify(errorMessage(error), true);
+    } finally {
+      setDownloadingBackup("");
+    }
+  };
+
   const reset = async () => {
     if (!window.confirm("恢复默认设置？项目和数据不会被删除，API Key 默认保留。")) return;
-    await api.post("/system/reset-settings", { confirm: true, clear_api_key: false });
-    onChanged();
+    try {
+      await api.post("/system/reset-settings", { confirm: true, clear_api_key: false });
+      notify("已恢复默认设置，项目、数据和 API Key 保持不变。");
+      onChanged();
+    } catch (error) {
+      notify(error, true);
+    }
   };
 
   return (
@@ -603,7 +626,15 @@ export function SettingsDrawer({
                     {backups.slice(0, 4).map((item) => (
                       <div key={item.id}>
                         <span>{new Date(item.created_at).toLocaleString()}</span>
-                        <a href={`/api/v1/backups/${item.id}/download`}>下载</a>
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="sm"
+                          disabled={Boolean(downloadingBackup)}
+                          onClick={() => downloadBackup(item.id)}
+                        >
+                          {downloadingBackup === item.id ? "下载中…" : "下载"}
+                        </Button>
                       </div>
                     ))}
                   </div>
