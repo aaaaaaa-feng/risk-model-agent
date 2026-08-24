@@ -5,6 +5,7 @@ import { confirmLabel, decisionStageName, monotonicLabel, reviewLabel } from "..
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -109,109 +110,125 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
   };
 
   return (
-    <div className="decision-workbench">
-      <div className="stage-line">
-        <div>
-          <span className="eyebrow">HUMAN IN THE LOOP · {decision.stage}</span>
-          <h2>
-            {details.title || decisionStageName[decision.stage] || decision.stage}
-            <Hint text="Reviewer 已先完成审核；你只需确认业务选择，不需要阅读长代码。" />
-          </h2>
+    <Dialog open>
+      <DialogContent
+        className="hitl-dialog"
+        aria-describedby="hitl-confirmation-description"
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+      >
+        <div className="decision-workbench" data-testid="hitl-confirmation-dialog">
+          <div className="stage-line">
+            <div>
+              <span className="eyebrow">HUMAN IN THE LOOP · {decision.stage}</span>
+              <DialogTitle id="hitl-confirmation-title">
+                {details.title || decisionStageName[decision.stage] || decision.stage}
+                <Hint text="Reviewer 已先完成审核；你只需确认业务选择，不需要阅读长代码。" />
+              </DialogTitle>
+              <DialogDescription
+                id="hitl-confirmation-description"
+                className="hitl-dialog-description"
+              >
+                这是必须完成的阶段确认。请检查摘要与 Reviewer 证据，确认后 Agent 才会继续运行。
+              </DialogDescription>
+            </div>
+            <div className="run-meta">
+              RUN <b>{run.id.slice(-8)}</b>
+              <br />
+              CHECKPOINT <b>{run.node}</b>
+            </div>
+          </div>
+          <div className={`review-banner ${review.status || "pass"}`}>
+            <div>
+              <span>AI REVIEW</span>
+              <strong>{reviewLabel[review.status || ""] || "已完成预审"}</strong>
+            </div>
+            <p>
+              {review.issues?.length
+                ? `${review.issues.length} 条意见；展开下方可查看。`
+                : "没有发现逻辑或安全阻断。"}
+            </p>
+          </div>
+          {review.status === "fallback_pass" && (
+            <p className="inline-warning agent-fallback-note">
+              本阶段没有调用外部 LLM：当前使用本地确定性 Reviewer。若要启用
+              LLM，请到「设置中心」打开“启用 LLM”，保存后重新创建 Run；本次 Run 不会回溯重试。
+            </p>
+          )}
+          {decision.kind === "confirm_target" && (
+            <TargetDecision summary={summary as import("../types").TargetSummary} />
+          )}
+          {decision.kind === "confirm_data" && (
+            <DataDecision
+              summary={summary as import("../types").DataSummary}
+              edits={edits}
+              setEdits={setEdits}
+            />
+          )}
+          {decision.kind === "confirm_split" && (
+            <SplitDecision
+              summary={summary as import("../types").SplitSummary}
+              edits={edits}
+              setEdits={setEdits}
+            />
+          )}
+          {decision.kind === "confirm_screening" && (
+            <ScreeningDecision
+              summary={summary as import("../types").ScreeningSummary}
+              edits={edits}
+              setEdits={setEdits}
+            />
+          )}
+          {decision.kind === "confirm_binning" && (
+            <BinningDecision
+              summary={summary as import("../types").BinningSummary}
+              manualColumn={manualColumn}
+              setManualColumn={setManualColumn}
+              manualSpec={manualSpec}
+              setManualSpec={setManualSpec}
+            />
+          )}
+          {decision.kind === "confirm_models" && (
+            <ModelDecision
+              plan={
+                (summary as import("../types").ModelsSummary).plan || {
+                  models: [],
+                  score: {},
+                  search_budget: 0,
+                }
+              }
+              edits={edits}
+              setEdits={setEdits}
+            />
+          )}
+          <details className="review-details">
+            <summary>查看 Reviewer 结论与证据</summary>
+            {review.issues?.length ? (
+              <ul>
+                {review.issues.map((issue, index) => (
+                  <li key={index}>
+                    <b>{issue.code || "REVIEW"}</b>
+                    <span>{issue.message || JSON.stringify(issue)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>确定性检查和独立上下文 Reviewer 均未发现阻断。</p>
+            )}
+            <pre>{JSON.stringify(review.evidence || {}, null, 2)}</pre>
+          </details>
+          <div className="decision-actions">
+            <Button variant="destructiveOutline" disabled={busy} onClick={() => confirm(false)}>
+              不批准并停止本 Run
+            </Button>
+            <Button disabled={busy} onClick={() => confirm(true)}>
+              {busy ? "提交中…" : confirmLabel[decision.kind] || "确认并继续"}
+            </Button>
+          </div>
         </div>
-        <div className="run-meta">
-          RUN <b>{run.id.slice(-8)}</b>
-          <br />
-          CHECKPOINT <b>{run.node}</b>
-        </div>
-      </div>
-      <div className={`review-banner ${review.status || "pass"}`}>
-        <div>
-          <span>AI REVIEW</span>
-          <strong>{reviewLabel[review.status || ""] || "已完成预审"}</strong>
-        </div>
-        <p>
-          {review.issues?.length
-            ? `${review.issues.length} 条意见；展开下方可查看。`
-            : "没有发现逻辑或安全阻断。"}
-        </p>
-      </div>
-      {review.status === "fallback_pass" && (
-        <p className="inline-warning agent-fallback-note">
-          本阶段没有调用外部 LLM：当前使用本地确定性 Reviewer。若要启用
-          LLM，请到「设置中心」打开“启用 LLM”，保存后重新创建 Run；本次 Run 不会回溯重试。
-        </p>
-      )}
-      {decision.kind === "confirm_target" && (
-        <TargetDecision summary={summary as import("../types").TargetSummary} />
-      )}
-      {decision.kind === "confirm_data" && (
-        <DataDecision
-          summary={summary as import("../types").DataSummary}
-          edits={edits}
-          setEdits={setEdits}
-        />
-      )}
-      {decision.kind === "confirm_split" && (
-        <SplitDecision
-          summary={summary as import("../types").SplitSummary}
-          edits={edits}
-          setEdits={setEdits}
-        />
-      )}
-      {decision.kind === "confirm_screening" && (
-        <ScreeningDecision
-          summary={summary as import("../types").ScreeningSummary}
-          edits={edits}
-          setEdits={setEdits}
-        />
-      )}
-      {decision.kind === "confirm_binning" && (
-        <BinningDecision
-          summary={summary as import("../types").BinningSummary}
-          manualColumn={manualColumn}
-          setManualColumn={setManualColumn}
-          manualSpec={manualSpec}
-          setManualSpec={setManualSpec}
-        />
-      )}
-      {decision.kind === "confirm_models" && (
-        <ModelDecision
-          plan={
-            (summary as import("../types").ModelsSummary).plan || {
-              models: [],
-              score: {},
-              search_budget: 0,
-            }
-          }
-          edits={edits}
-          setEdits={setEdits}
-        />
-      )}
-      <details className="review-details">
-        <summary>查看 Reviewer 结论与证据</summary>
-        {review.issues?.length ? (
-          <ul>
-            {review.issues.map((issue, index) => (
-              <li key={index}>
-                <b>{issue.code || "REVIEW"}</b>
-                <span>{issue.message || JSON.stringify(issue)}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>确定性检查和独立上下文 Reviewer 均未发现阻断。</p>
-        )}
-        <pre>{JSON.stringify(review.evidence || {}, null, 2)}</pre>
-      </details>
-      <div className="decision-actions">
-        <Button variant="destructiveOutline" disabled={busy} onClick={() => confirm(false)}>
-          不批准并停止本 Run
-        </Button>
-        <Button disabled={busy} onClick={() => confirm(true)}>
-          {busy ? "提交中…" : confirmLabel[decision.kind] || "确认并继续"}
-        </Button>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

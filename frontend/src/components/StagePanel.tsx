@@ -14,7 +14,7 @@ import type { Decision, Run, RunEvent } from "../types";
  * 统一的阶段详情面板，位于工作区正上方：
  * 默认紧凑展示 RUN STATUS / 当前业务阶段 / 当前技术子阶段 / NEXT ACTION；
  * 展开后包含最新事件、Audit 列表、业务阶段内子步骤进度与完整事件历史。
- * 待确认（awaiting_decision）时强制展开并高亮，引导用户到中间的 DecisionWorkbench 确认。
+ * 待确认（awaiting_decision）时强制展开并高亮，同时由 DecisionWorkbench 打开确认弹窗。
  */
 export function StagePanel({
   run,
@@ -89,7 +89,7 @@ export function StagePanel({
       </div>
       {awaiting && (
         <p className="panel-attention" role="status">
-          当前方案等待你的确认，请在下方工作台完成选择后继续。
+          当前方案等待你的确认，已打开 Human in the Loop 弹窗；确认后 Agent 才会继续。
         </p>
       )}
       {expanded && (
