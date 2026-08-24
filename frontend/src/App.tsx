@@ -189,8 +189,10 @@ export function App() {
   const providerStatus = settings?.llm_enabled
     ? settings.api_key_configured
       ? "LLM 已启用"
-      : "缺少密钥"
-    : "本地降级";
+      : "API 未连接"
+    : settings?.api_key_configured
+      ? "LLM 已关闭"
+      : "API 未连接";
 
   return (
     <AppStateContext.Provider
@@ -354,6 +356,7 @@ export function App() {
               type="button"
               aria-expanded={false}
               aria-label="展开 Agent 对话栏"
+              title="展开右侧 Agent 对话栏"
               onClick={chatRail.toggle}
             >
               ◂
@@ -367,6 +370,7 @@ export function App() {
                   type="button"
                   aria-expanded={true}
                   aria-label="收起 Agent 对话栏"
+                  title="收起右侧 Agent 对话栏"
                   onClick={chatRail.toggle}
                 >
                   ▸

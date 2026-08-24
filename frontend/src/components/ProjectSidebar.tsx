@@ -46,6 +46,7 @@ export function ProjectSidebar({
           type="button"
           aria-expanded={open}
           aria-label={open ? "收起项目列表" : "展开项目列表"}
+          title={open ? "收起左侧项目列表" : "展开左侧项目列表"}
           onClick={onToggle}
         >
           {open ? "«" : "»"}
@@ -54,7 +55,12 @@ export function ProjectSidebar({
       {open ? (
         <div className="side-scroll">
           <div className="eyebrow side-label">项目</div>
-          <button className="new-project" type="button" onClick={onCreate}>
+          <button
+            className="new-project"
+            type="button"
+            onClick={onCreate}
+            title="创建一个新的风控建模项目"
+          >
             ＋ 新建项目
           </button>
           <div className="project-list">
@@ -68,6 +74,7 @@ export function ProjectSidebar({
                 type="button"
                 onClick={() => onSelect(project.id)}
                 aria-current={project.id === selectedId ? "page" : undefined}
+                title={`打开项目：${project.name}`}
               >
                 <strong>{project.name}</strong>
                 <small>
@@ -110,7 +117,12 @@ export function ProjectSidebar({
               <Hint text="产品与 LLM 不主动上传原始数据；用户代码和第三方包并非安全沙箱。" />
             </b>
           </div>
-          <button className="settings-open" type="button" onClick={onSettings}>
+          <button
+            className="settings-open"
+            type="button"
+            onClick={onSettings}
+            title="打开模型 API、建模、网络、工作文件夹与备份设置"
+          >
             设置中心
           </button>
         </div>

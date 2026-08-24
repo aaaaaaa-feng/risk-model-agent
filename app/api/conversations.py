@@ -15,6 +15,7 @@ from .dependencies import context
 
 
 router = APIRouter(tags=["agent-conversation"])
+EVENT_BATCH_SIZE = 5000
 
 
 class SendMessage(BaseModel):
@@ -79,7 +80,10 @@ def list_conversation_events(
     values = [
         _event(item)
         for item in ctx.database.list(
-            "conversation_events", {"conversation_id": conversation_id}, order_by="seq ASC", limit=5000
+            "conversation_events",
+            {"conversation_id": conversation_id},
+            order_by="seq ASC",
+            limit=5000,
         )
         if int(item["seq"]) > after
     ]
@@ -105,24 +109,40 @@ async def stream_conversation_events(
     async def generate() -> AsyncIterator[str]:
         current = cursor
         quiet_ticks = 0
-        while True:
-            values = [
-                item
-                for item in ctx.database.list(
-                    "conversation_events", {"conversation_id": conversation_id}, order_by="seq ASC", limit=5000
+        if response_id is not None and current > 0:
+            completed_sequence = _completed_response_sequence(
+                ctx,
+                conversation_id,
+                response_id,
+                current,
+            )
+            if completed_sequence is not None:
+                yield _stream_end(
+                    conversation_id,
+                    completed_sequence,
+                    recovered=True,
                 )
-                if int(item["seq"]) > current
-            ]
+                return
+        while True:
+            values = _events_after(
+                ctx,
+                conversation_id,
+                current,
+                response_id,
+            )
             for item in values:
                 payload = _event(item)
                 current = payload["sequence"]
+                # A new EventSource starts at sequence zero.  Without this
+                # response boundary it would replay old deltas (often a local
+                # fallback) before streaming the current LLM answer.
                 yield f"id: {current}\nevent: conversation_event\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                if payload["status"] == "completed" and (
-                    response_id is None or payload["evidence"].get("response_id") == response_id
-                ):
-                    yield f"event: stream_end\ndata: {json.dumps({'conversation_id': conversation_id, 'sequence': current}, ensure_ascii=False)}\n\n"
+                if payload["status"] == "completed":
+                    yield _stream_end(conversation_id, current)
                     return
                 quiet_ticks = 0
+            if len(values) == EVENT_BATCH_SIZE:
+                continue
             quiet_ticks += 1
             if quiet_ticks >= 30:
                 yield f": keepalive {current}\n\n"
@@ -132,8 +152,66 @@ async def stream_conversation_events(
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
+
+
+def _events_after(
+    ctx: AppContext,
+    conversation_id: str,
+    after: int,
+    response_id: str | None,
+) -> list[dict[str, Any]]:
+    where = "conversation_id=? AND seq>?"
+    parameters: list[Any] = [conversation_id, after]
+    if response_id is not None:
+        where += " AND json_valid(evidence_json) AND json_extract(evidence_json, '$.response_id')=?"
+        parameters.append(response_id)
+    parameters.append(EVENT_BATCH_SIZE)
+    with ctx.database.connect() as connection:
+        rows = connection.execute(
+            f"SELECT * FROM conversation_events WHERE {where} ORDER BY seq ASC LIMIT ?",
+            tuple(parameters),
+        ).fetchall()
+    return [ctx.database._decode(row) or {} for row in rows]
+
+
+def _completed_response_sequence(
+    ctx: AppContext,
+    conversation_id: str,
+    response_id: str,
+    at_or_before: int,
+) -> int | None:
+    with ctx.database.connect() as connection:
+        row = connection.execute(
+            """
+            SELECT seq FROM conversation_events
+            WHERE conversation_id=? AND status='completed' AND seq<=?
+              AND json_valid(evidence_json)
+              AND json_extract(evidence_json, '$.response_id')=?
+            ORDER BY seq DESC LIMIT 1
+            """,
+            (conversation_id, at_or_before, response_id),
+        ).fetchone()
+    return int(row["seq"]) if row else None
+
+
+def _stream_end(
+    conversation_id: str,
+    sequence: int,
+    *,
+    recovered: bool = False,
+) -> str:
+    payload = {
+        "conversation_id": conversation_id,
+        "sequence": sequence,
+        "recovered": recovered,
+    }
+    return f"event: stream_end\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def _event(item: dict[str, Any]) -> dict[str, Any]:

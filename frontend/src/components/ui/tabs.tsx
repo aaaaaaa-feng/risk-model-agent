@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 
+import { controlHint } from "@/lib/controlHint";
 import { cn } from "@/lib/utils";
 
 /*
@@ -20,8 +21,16 @@ TabsList.displayName = TabsPrimitive.List.displayName;
 const TabsTrigger = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger>
->(({ className, ...props }, ref) => (
-  <TabsPrimitive.Trigger ref={ref} className={cn(className)} {...props} />
+>(({ className, title, children, "aria-label": ariaLabel, ...props }, ref) => (
+  <TabsPrimitive.Trigger
+    ref={ref}
+    className={cn(className)}
+    title={title || controlHint(children, ariaLabel, "切换页签")}
+    aria-label={ariaLabel}
+    {...props}
+  >
+    {children}
+  </TabsPrimitive.Trigger>
 ));
 TabsTrigger.displayName = TabsPrimitive.Trigger.displayName;
 

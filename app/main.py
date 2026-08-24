@@ -23,7 +23,7 @@ from app.runtime import AppContext
 from app.workers.modeling import available_models
 
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.2"
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
@@ -248,6 +248,7 @@ def _public_message(code: str) -> str:
         "NO_FEATURES_AFTER_SCREENING": "筛选后没有可入模变量，请调整可恢复规则或检查数据。",
         "DLP_BLOCK": "安全策略阻止了可能包含原始数据、PII 或密钥的外发请求。",
         "ARCHIVE_PASSWORD_TOO_SHORT": "迁移包密码至少需要 10 个字符。",
+        "WORKSPACE_PATH_NOT_WRITABLE": "所选工作文件夹不可写。请换一个有读写权限的本机文件夹，或检查目录是否被其他程序锁定。",
         "WORKSPACE_SWITCH_ACTIVE_RUNS": "当前工作区仍有运行中的任务，请等待任务结束后再更换文件夹。",
         "WORKSPACE_SWITCH_REQUIRES_EMPTY_CURRENT_PROJECTS": "当前工作区已有项目，不能直接更换文件夹；首次设置时旧项目会保留在原目录。",
     }

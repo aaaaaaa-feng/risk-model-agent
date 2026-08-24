@@ -239,7 +239,7 @@ export function SettingsDrawer({
             type="button"
             variant="ghost"
             size="icon"
-            className="text-[var(--paper)] hover:bg-[var(--on-blue-fill)] hover:text-[var(--paper)]"
+            className="text-[var(--output-text)] hover:bg-[var(--on-blue-fill)] hover:text-[var(--output-text)]"
             onClick={onClose}
             aria-label="关闭设置"
           >
@@ -255,6 +255,7 @@ export function SettingsDrawer({
                   type="button"
                   className={`settings-nav-item ${section === item.id ? "active" : ""}`}
                   aria-current={section === item.id ? "page" : undefined}
+                  title={`打开${item.label}设置`}
                   onClick={() => setSection(item.id)}
                 >
                   {item.label}

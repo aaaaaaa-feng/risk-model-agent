@@ -611,6 +611,7 @@ body.col-resizing .chat-rail {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   background: var(--paper);
+  color: var(--ink);
   padding: 0 10px;
   font-size: 11px;
   font-weight: 700;
@@ -880,8 +881,31 @@ body.col-resizing .chat-rail {
   font-weight: 800;
 }
 
+.chat-api-state {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  border: 1px solid var(--red-border);
+  border-radius: var(--radius-md);
+  background: var(--red-soft);
+  color: var(--red-text);
+  padding: 9px 10px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.chat-api-state strong {
+  font-size: 11px;
+}
+
+.chat-api-state span {
+  color: inherit;
+}
+
 .chat-messages {
-  overflow: auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: var(--space-2) 0;
   display: flex;
   flex-direction: column;
@@ -925,6 +949,8 @@ body.col-resizing .chat-rail {
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .chat-row.user {
@@ -944,7 +970,8 @@ body.col-resizing .chat-rail {
 }
 
 .chat-avatar.user {
-  background: var(--blue);
+  background: var(--chat-user-bg);
+  color: var(--chat-user-text);
   font-family: var(--body);
 }
 
@@ -962,12 +989,20 @@ body.col-resizing .chat-rail {
   overflow-wrap: break-word;
 }
 
+.chat-bubble .markdown {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-x: contain;
+}
+
 .chat-row.user .chat-bubble {
   border: 0;
   border-radius: var(--radius-lg);
   border-top-right-radius: var(--radius-sm);
-  background: var(--blue);
-  color: var(--output-text);
+  background: var(--chat-user-bg);
+  color: var(--chat-user-text);
 }
 
 .chat-bubble > p {
@@ -1055,7 +1090,9 @@ body.col-resizing .chat-rail {
   border-collapse: collapse;
   margin: 8px 0;
   font-size: 11px;
-  max-width: 100%;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
 }
 
 .markdown th,
@@ -1098,7 +1135,7 @@ body.col-resizing .chat-rail {
   min-height: 24px;
   border: 0;
   background: transparent;
-  color: var(--quiet);
+  color: var(--muted);
   font-size: 10px;
   padding: 2px 4px;
   cursor: pointer;

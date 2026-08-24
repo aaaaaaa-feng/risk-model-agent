@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import sys
 
 
@@ -44,10 +45,26 @@ def main() -> int:
         else ""
     )
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    frontend_package = json.loads((ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
+    main_source = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
     installer = (
         (ROOT / "packaging/windows_installer.iss").read_text(encoding="utf-8")
         if not missing
         else ""
+    )
+    project_version_match = re.search(
+        r'^version = "([0-9]+\.[0-9]+\.[0-9]+)"$', pyproject, re.MULTILINE
+    )
+    backend_version_match = re.search(
+        r'^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$', main_source, re.MULTILINE
+    )
+    installer_fallback_match = re.search(
+        r'#define MyAppVersion "([0-9]+\.[0-9]+\.[0-9]+)"', installer
+    )
+    project_version = project_version_match.group(1) if project_version_match else ""
+    backend_version = backend_version_match.group(1) if backend_version_match else ""
+    installer_fallback_version = (
+        installer_fallback_match.group(1) if installer_fallback_match else ""
     )
     contract = {
         "schema_version": "risk-packaging-contract/v1",
@@ -71,6 +88,10 @@ def main() -> int:
         "has_offline_bundle_builder": (ROOT / "scripts/build_offline_bundle.py").is_file(),
         "spec_uses_repository_root": "ROOT = Path(SPECPATH).resolve().parent\n" in spec,
         "pyinstaller_optional_dependency": "pyinstaller" in pyproject.lower(),
+        "versions_are_consistent": bool(project_version)
+        and project_version == str(frontend_package.get("version") or "")
+        and project_version == backend_version
+        and project_version == installer_fallback_version,
         "windows_installer_is_per_user": (
             "PrivilegesRequired=lowest" in installer
             and "DefaultDirName={localappdata}\\Programs\\RiskModelAgent" in installer
@@ -99,6 +120,7 @@ def main() -> int:
             "has_offline_bundle_builder",
             "spec_uses_repository_root",
             "pyinstaller_optional_dependency",
+            "versions_are_consistent",
             "windows_installer_is_per_user",
             "windows_installer_is_x64",
             "windows_installer_keeps_user_data",

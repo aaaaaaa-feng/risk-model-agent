@@ -8,13 +8,15 @@ import { cn } from "@/lib/utils";
 const Checkbox = React.forwardRef<
   React.ElementRef<typeof CheckboxPrimitive.Root>,
   React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>
->(({ className, ...props }, ref) => (
+>(({ className, title, "aria-label": ariaLabel, ...props }, ref) => (
   <CheckboxPrimitive.Root
     ref={ref}
     className={cn(
       "peer h-[17px] w-[17px] shrink-0 rounded-sm border border-[var(--line-strong)] bg-background focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-[var(--blue)] data-[state=checked]:bg-[var(--blue)] data-[state=checked]:text-white",
       className,
     )}
+    title={title || (typeof ariaLabel === "string" ? ariaLabel : "勾选或取消此选项")}
+    aria-label={ariaLabel}
     {...props}
   >
     <CheckboxPrimitive.Indicator className="flex items-center justify-center text-current">

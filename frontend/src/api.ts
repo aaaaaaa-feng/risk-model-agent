@@ -61,8 +61,9 @@ export async function initializeLocalSession(): Promise<void> {
 
 export const api = {
   get: <T>(path: string, init?: RequestInit) => request<T>(path, init),
-  post: <T>(path: string, payload?: unknown) =>
+  post: <T>(path: string, payload?: unknown, init?: RequestInit) =>
     request<T>(path, {
+      ...init,
       method: "POST",
       body: payload === undefined ? undefined : JSON.stringify(payload),
     }),

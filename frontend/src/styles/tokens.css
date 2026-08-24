@@ -59,6 +59,10 @@
   --blue-text: #4f52e8;
   --blue-subtle: #dcdff9;
 
+  /* 对话气泡使用独立的可读品牌色，12px 文字对比度不低于 4.5:1 */
+  --chat-user-bg: #5c5fef;
+  --chat-user-text: #ffffff;
+
   /* Action — 主按钮等 CTA(深色模式下反转为浅色,--black 装饰面板不反转) */
   --action-bg: var(--black);
   --action-text: var(--paper);
@@ -179,6 +183,10 @@
   --blue-soft: #26274a;
   --blue-text: #a7a9fa;
   --blue-subtle: #34366b;
+
+  /* 不沿用深色模式中提亮的 --blue，避免浅色文字对比度不足 */
+  --chat-user-bg: #5558df;
+  --chat-user-text: #ffffff;
 
   /* Action — CTA 反转为浅色 */
   --action-bg: #f2f2f0;

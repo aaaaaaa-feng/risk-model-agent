@@ -60,6 +60,13 @@ export function businessStageIndex(stage: string | null | undefined): number {
   return BUSINESS_STAGES.findIndex((group) => group.substages.includes(stage));
 }
 
+/** 当前技术阶段在所属业务阶段内的相对下标；未识别时返回 -1。 */
+export function businessSubstageIndex(stage: string | null | undefined): number {
+  const groupIndex = businessStageIndex(stage);
+  if (groupIndex < 0 || !stage) return -1;
+  return BUSINESS_STAGES[groupIndex].substages.indexOf(stage);
+}
+
 /** 技术子阶段的中文标签，未知阶段回退为原始值。 */
 export function stageLabel(stage: string | null | undefined): string {
   if (!stage) return "—";

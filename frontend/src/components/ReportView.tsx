@@ -334,10 +334,11 @@ export function ReportView({ project, run }: Props) {
           </Select>
         </label>
         <label
+          title="选择 CSV / Excel 文件并使用当前模型批量评分"
           className={cn(
             buttonVariants(),
             "file-button",
-            (busy || !modelId) && "pointer-events-none opacity-50",
+            (busy || !modelId) && "cursor-not-allowed opacity-50",
           )}
         >
           {busy ? "评分中…" : "选择 CSV / Excel 并评分"}

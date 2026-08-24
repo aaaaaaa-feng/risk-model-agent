@@ -4,9 +4,9 @@ import { Badge, statusVariant } from "@/components/ui/badge";
 import {
   BUSINESS_STAGES,
   businessStageIndex,
+  businessSubstageIndex,
   nextAction,
   stageLabel,
-  techStageIndex,
 } from "../lib/stages";
 import type { Decision, Run, RunEvent } from "../types";
 
@@ -48,7 +48,7 @@ export function StagePanel({
 
   const groupIndex = businessStageIndex(run.stage);
   const group = groupIndex >= 0 ? BUSINESS_STAGES[groupIndex] : null;
-  const currentIndex = Math.max(0, techStageIndex(run.stage));
+  const currentIndex = Math.max(0, businessSubstageIndex(run.stage));
   const latest = events.at(-1);
   const review = decision?.payload?.summary?.review || decision?.review;
 
@@ -82,6 +82,9 @@ export function StagePanel({
           className="panel-toggle"
           type="button"
           aria-expanded={expanded}
+          title={
+            expanded ? "收起 Agent、Reviewer 和本地工具详情" : "展开 Agent、Reviewer 和本地工具详情"
+          }
           onClick={() => setExpanded((v) => !v)}
         >
           {expanded ? "收起阶段详情" : "展开阶段详情"}
@@ -125,8 +128,7 @@ export function StagePanel({
           </ul>
           {group && (
             <ol className="stage-substeps" aria-label={`${group.label}子步骤`}>
-              {group.substages.map((stage) => {
-                const index = techStageIndex(stage);
+              {group.substages.map((stage, index) => {
                 const state =
                   index < currentIndex ? "done" : index === currentIndex ? "active" : "";
                 return (

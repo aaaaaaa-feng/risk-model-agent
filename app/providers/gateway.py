@@ -13,6 +13,7 @@ from app.core.config import Settings, SettingsStore
 from app.core.paths import AppPaths
 from app.core.security import sanitize_safe_evidence, sha256_bytes, validate_safe_evidence
 
+from .profiles import ProviderProfileStore
 from .secrets import SecretStore
 
 
@@ -57,6 +58,7 @@ class ProviderGateway:
         request_callback: Callable[[str, dict[str, Any], str], str | None] | None = None,
         result_callback: Callable[[str, ProviderResult], None] | None = None,
         paths: AppPaths | None = None,
+        profile_id: str | None = None,
     ):
         self.settings = settings or SettingsStore().load()
         self._api_key_override = (api_key or "").strip()
@@ -68,8 +70,14 @@ class ProviderGateway:
         # Each active Provider profile has its own namespaced secret.  The
         # explicit api_key override remains useful for the connection-test
         # endpoint and never gets persisted by the gateway.
-        self._secrets = SecretStore(paths, profile_id=self.settings.provider)
-        if not self._api_key_override:
+        active_profile_id = profile_id or ProviderProfileStore(paths).active_profile_id(
+            self.settings
+        )
+        self._secrets = SecretStore(
+            paths,
+            profile_id=active_profile_id or self.settings.provider,
+        )
+        if not self._api_key_override and profile_id is None:
             # A worker can start before the settings page is opened after an
             # upgrade.  Migrate the legacy single-key slot lazily as a second
             # line of defence so that existing users never lose access.
@@ -103,20 +111,26 @@ class ProviderGateway:
 
     def status(self) -> dict[str, Any]:
         active = self.enabled
+        if active:
+            connection_state = "ready"
+            message = "API 已配置并启用；仅允许 SafeEvidence 出站。"
+        elif not self.configured:
+            connection_state = "not_configured"
+            message = "API 未连接：配置不完整，当前只使用明确标注的本地降级。"
+        else:
+            connection_state = "disabled"
+            message = "LLM 已关闭：API 配置已保存，当前只使用明确标注的本地降级。"
         return {
             "configured": self.configured,
             "enabled": active,
+            "connection_state": connection_state,
             "provider": self.settings.provider,
             "api_format": self.api_format,
             "endpoint": self.endpoint() if self.settings.base_url else "",
             "model": self.settings.model,
             "reviewer_model": self.settings.reviewer_model or self.settings.model,
             "mode": "external-enabled" if active else "deterministic-fallback",
-            "message": (
-                "外部 API 已启用；仅允许 SafeEvidence 出站。"
-                if active
-                else "外部 API 未启用，使用本地确定性降级。"
-            ),
+            "message": message,
         }
 
     def _body(

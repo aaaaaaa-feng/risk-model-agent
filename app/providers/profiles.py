@@ -52,7 +52,20 @@ class ProviderProfileStore:
     def ensure_for_settings(self, settings: Settings) -> str:
         data = self.load()
         profiles: list[dict[str, Any]] = data["profiles"]
-        active = next((item for item in profiles if item.get("provider") == settings.provider), None)
+        stored_active_id = str(data.get("active_profile_id") or "")
+        active = next(
+            (
+                item
+                for item in profiles
+                if item.get("id") == stored_active_id and item.get("provider") == settings.provider
+            ),
+            None,
+        )
+        if active is None:
+            active = next(
+                (item for item in profiles if item.get("provider") == settings.provider),
+                None,
+            )
         if active is None:
             profile_id = _profile_id(settings.provider)
             existing_ids = {str(item["id"]) for item in profiles}
@@ -103,8 +116,13 @@ class ProviderProfileStore:
     def active_profile_id(self, settings: Settings | None = None) -> str:
         data = self.load()
         active = str(data.get("active_profile_id") or "").strip()
-        ids = {str(item["id"]) for item in data["profiles"]}
-        if active in ids:
+        active_profile = next(
+            (item for item in data["profiles"] if str(item["id"]) == active),
+            None,
+        )
+        if active_profile is not None and (
+            settings is None or active_profile.get("provider") == settings.provider
+        ):
             return active
         if settings:
             return self.ensure_for_settings(settings)
@@ -112,7 +130,9 @@ class ProviderProfileStore:
 
     def get(self, profile_id: str) -> dict[str, Any] | None:
         profile_id = _profile_id(profile_id)
-        return next((dict(item) for item in self.load()["profiles"] if item["id"] == profile_id), None)
+        return next(
+            (dict(item) for item in self.load()["profiles"] if item["id"] == profile_id), None
+        )
 
     def public_profiles(self, active_profile_id: str | None = None) -> list[dict[str, Any]]:
         data = self.load()
@@ -122,8 +142,10 @@ class ProviderProfileStore:
             profile_id = str(item["id"])
             secret = SecretStore(self.paths, profile_id=profile_id)
             configured = bool(secret.read())
-            storage = "environment" if os.getenv("RISK_AGENT_API_KEY", "").strip() else (
-                "not_configured" if not configured else "local-protected-file"
+            storage = (
+                "environment"
+                if os.getenv("RISK_AGENT_API_KEY", "").strip()
+                else ("not_configured" if not configured else "local-protected-file")
             )
             provider = str(item.get("provider") or profile_id)
             preset = PROVIDER_PRESETS.get(provider, {})
@@ -148,7 +170,9 @@ class ProviderProfileStore:
     def _write(self, value: dict[str, Any]) -> None:
         self.paths.provider_profiles.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(value, ensure_ascii=False, indent=2)
-        fd, name = tempfile.mkstemp(prefix="provider_profiles-", suffix=".tmp", dir=self.paths.provider_profiles.parent)
+        fd, name = tempfile.mkstemp(
+            prefix="provider_profiles-", suffix=".tmp", dir=self.paths.provider_profiles.parent
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(payload)
@@ -169,6 +193,13 @@ def _settings_values(settings: Settings) -> dict[str, Any]:
 
 def _profile_id(value: str) -> str:
     candidate = str(value).strip()
-    if not candidate or len(candidate) > 80 or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" for char in candidate):
+    if (
+        not candidate
+        or len(candidate) > 80
+        or any(
+            char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+            for char in candidate
+        )
+    ):
         raise ValueError("PROVIDER_PROFILE_ID_INVALID")
     return candidate

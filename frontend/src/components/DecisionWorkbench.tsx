@@ -527,6 +527,7 @@ function BinningDecision({
                 className={manualColumn === column ? "active" : ""}
                 key={column}
                 onClick={() => load(column)}
+                title={`查看并调整 ${column} 的分箱结果`}
               >
                 <strong>{column}</strong>
                 <span>
