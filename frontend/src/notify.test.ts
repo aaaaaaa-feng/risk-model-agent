@@ -7,7 +7,7 @@ const toastSpies = vi.hoisted(() => ({
 
 vi.mock("sonner", () => ({ toast: toastSpies }));
 
-import { notify } from "./lib/notify";
+import { notify } from "@/shared/lib/notify";
 
 describe("错误提示", () => {
   beforeEach(() => vi.clearAllMocks());

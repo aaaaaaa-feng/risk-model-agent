@@ -15,7 +15,7 @@ from app.core.database import JSON_COLUMNS, SCHEMA_VERSION, Database, new_id, no
 from app.core.config import MAX_ARCHIVE_BYTES
 from app.core.paths import AppPaths, PROJECT_MARKER_FILE, get_paths
 from app.core.security import decrypt_file_payload, encrypt_file_payload, sha256_file
-from app.evaluation.manifest import canonical_hash
+from app.governance.manifest import canonical_hash
 
 from .catalog import CatalogService, serialize_project_resources
 

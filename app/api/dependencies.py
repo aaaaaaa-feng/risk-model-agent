@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from app.runtime import AppContext
+from app.bootstrap import AppContext
 
 
 def context(request: Request) -> AppContext:

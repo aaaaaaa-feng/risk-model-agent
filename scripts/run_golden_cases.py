@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 
 from app.core.config import SettingsStore  # noqa: E402
 from app.core.paths import AppPaths  # noqa: E402
-from app.runtime import AppContext  # noqa: E402
+from app.bootstrap import AppContext  # noqa: E402
 from app.workers.demo import install_demo_project  # noqa: E402
 
 
@@ -61,9 +61,7 @@ def main() -> int:
                 for item in state.get("screening", {}).get("excluded", [])
                 if item.get("column") in {"FPD7", "MOB30"}
             ),
-            "oot_used_for_selection": state.get("model_result", {}).get(
-                "oot_used_for_selection"
-            ),
+            "oot_used_for_selection": state.get("model_result", {}).get("oot_used_for_selection"),
         }
         result["passed"] = (
             result["status"] == "succeeded"

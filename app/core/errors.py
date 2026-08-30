@@ -49,6 +49,7 @@ _MESSAGES = {
     "TIME_COLUMN_REQUIRED": "时间外推切分需要可用的时间字段。",
     "NO_FEATURES_AFTER_SCREENING": "筛选后没有可入模变量，请调整可恢复规则或检查数据。",
     "NO_AVAILABLE_MODELS": "当前资源和配置下没有可运行的候选模型，请调整模型组合或资源设置。",
+    "MODEL_SELECTION_UNAVAILABLE": "所选候选模型在当前环境中不可用，请重新选择已安装且可加载的模型。",
     "NO_SUCCESSFUL_MODELS": "候选模型均未成功完成训练，请检查数据、变量和资源设置后重试。",
     "TRAIN_CLASS_COUNT_TOO_SMALL": "训练集正负样本不足，请调整样本切分或 Y 标签有效样本。",
     "MISSING_REQUIRED_FIELDS": "评分数据缺少模型必需字段，请按模型字段契约补齐后重试。",

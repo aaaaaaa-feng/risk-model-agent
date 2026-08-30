@@ -27,7 +27,9 @@ jobs:
           - name: macOS 13+ Apple Silicon
             os: macos-14
             artifact: risk-model-agent-macos-apple-silicon
-            artifact_path: dist/risk-model-agent
+            artifact_path: |
+              dist/risk-model-agent
+              dist/package-size-report.json
           - name: Windows 10/11 x64
             os: windows-latest
             artifact: risk-model-agent-windows-x64-installer
@@ -54,6 +56,23 @@ jobs:
       - run: python -m pip install ".[package]"
       - run: python scripts/verify_packaging.py
       - run: python -m PyInstaller packaging/risk_model_agent.spec --noconfirm --clean
+      - name: 审计冻结目录体积与依赖边界
+        shell: bash
+        run: >-
+          python scripts/audit_package_size.py
+          --bundle dist/risk-model-agent
+          --output dist/package-size-report.json
+          --enforce
+      - name: 验证 macOS 冻结包全部算法与 Notebook 契约
+        if: runner.os == 'macOS'
+        timeout-minutes: 3
+        shell: bash
+        run: ./dist/risk-model-agent/risk-model-agent --internal-package-self-test
+      - name: 验证 Windows 冻结包全部算法与 Notebook 契约
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        shell: pwsh
+        run: .\dist\risk-model-agent\risk-model-agent.exe --internal-package-self-test
       - name: Smoke test macOS package
         if: runner.os == 'macOS'
         shell: bash
@@ -112,6 +131,18 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\scripts\compile_windows_installer.ps1
+      - name: 执行 Windows 安装包体积硬门禁
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          python scripts/audit_package_size.py
+          --bundle dist/risk-model-agent
+          --installer dist/installer
+          --output dist/installer/package-size-report.json
+          --baseline-kib 239176
+          --maximum-mib 180
+          --minimum-reduction-percent 25
+          --enforce
       - name: Install, launch, model, score and uninstall Windows installer
         if: runner.os == 'Windows'
         shell: pwsh

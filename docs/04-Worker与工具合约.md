@@ -45,7 +45,7 @@ Worker 是本地确定性 Python 执行层，不是 Agent。它接受结构化�
 
 ## 6. Notebook 合约
 
-Notebook 是本地 `.ipynb`，使用项目级 Kernel。预置 Pandas、Polars、DuckDB、Scikit-learn、XGBoost、LightGBM、CatBoost。用户可逐单元格执行或导入已有 Notebook。
+Notebook 是本地 `.ipynb`，使用项目级 Kernel。预置 Pandas、NumPy、DuckDB、Scikit-learn、XGBoost、LightGBM、CatBoost。用户可逐单元格执行或导入已有 Notebook。为避免重复列式计算引擎显著放大离线安装包，V1.1 起不再内置 Polars。
 
 导入 Notebook 输出前必须校验：文件位于项目目录、粒度与行数合理、重复/膨胀、所有候选 Y 的分布、字段契约和父版本血缘。Notebook 默认联网且不是安全沙箱。
 

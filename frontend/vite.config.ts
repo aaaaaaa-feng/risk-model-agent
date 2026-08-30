@@ -14,6 +14,20 @@ export default defineConfig({
     outDir: "dist",
     sourcemap: false,
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.indexOf("node_modules") < 0) return undefined;
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id))
+            return "vendor-react";
+          if (/react-markdown|remark-|micromark|mdast|hast|unified/.test(id))
+            return "vendor-markdown";
+          if (id.indexOf("lucide-react") >= 0) return "vendor-icons";
+          if (/radix-ui|class-variance-authority|tailwind-merge|clsx/.test(id)) return "vendor-ui";
+          return "vendor";
+        },
+      },
+    },
   },
   server: {
     proxy: {

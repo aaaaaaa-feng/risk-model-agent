@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from app.core.workspace import WorkspaceManager, WorkspacePickerError, pick_workspace_directory
-from app.runtime import AppContext
+from app.bootstrap import AppContext
 
 from .dependencies import context
 

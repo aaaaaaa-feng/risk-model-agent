@@ -8,13 +8,13 @@ from typing import Any, Callable
 
 import httpx
 
-from app.agents.prompts import CONNECTIVITY_PROMPT
 from app.core.config import Settings, SettingsStore
 from app.core.errors import normalize_error_code, public_error_message
 from app.core.paths import AppPaths
 from app.core.security import sanitize_safe_evidence, sha256_bytes, validate_safe_evidence
 
 from .profiles import ProviderProfileStore
+from .prompts import CONNECTIVITY_PROMPT
 from .secrets import SecretStore
 
 

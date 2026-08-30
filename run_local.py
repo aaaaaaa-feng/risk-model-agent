@@ -21,6 +21,10 @@ def main() -> None:
 
         IPKernelApp.launch_instance()
         return
+    if sys.argv[1:] == ["--internal-package-self-test"]:
+        from app.packaging.self_test import main as self_test_main
+
+        raise SystemExit(self_test_main())
 
     from app.main import run
 

@@ -19,7 +19,7 @@ from app.core.paths import AppPaths
 
 from .adapter import run_eval_case
 from .contracts import EvalResult, EvalRun, EvalSuite
-from .manifest import compare_manifests
+from app.governance.manifest import compare_manifests
 
 
 HARNESS_SCHEMA = "risk-agent-eval-harness/v1"

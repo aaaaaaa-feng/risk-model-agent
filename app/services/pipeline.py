@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 import pandas as pd
-from pydantic import BaseModel, Field
 
 from app.agents.codegen import (
     extract_generated_spec,
@@ -16,16 +15,14 @@ from app.agents.codegen import (
 )
 from app.agents.evidence import build_safe_evidence
 from app.agents.prompts import CODE_REPAIR_PROMPT, MODEL_PLAN_PROMPT
-from app.agents.reviewer import (
-    IndependentReviewer,
-    review_blocks_progress,
-    review_is_approved,
-)
+from app.agents.reviewer import IndependentReviewer
 from app.core.config import SettingsStore
 from app.core.database import Database, new_id, now_iso
 from app.core.paths import AppPaths, get_paths
 from app.core.security import sha256_bytes, sha256_file
-from app.evaluation.tracing import TraceService
+from app.domain.pipeline import PIPELINE_STEPS, partition_model_proposals
+from app.domain.reviews import review_blocks_progress, review_is_approved
+from app.governance.tracing import TraceService
 from app.providers.gateway import ProviderGateway
 from app.tooling.registry import ToolRegistry
 from app.workers.binning import apply_manual_binning, fit_binning
@@ -47,11 +44,7 @@ from app.workers.splitting import freeze_target_samples, split_dataset
 
 from .artifacts import ArtifactService
 from .catalog import CatalogService
-
-
-class RunToolInput(BaseModel):
-    run_id: str = Field(min_length=4)
-    state: dict[str, Any]
+from .pipeline_contracts import RunToolInput
 
 
 class RunPipeline:
@@ -81,68 +74,12 @@ class RunPipeline:
         self._register_tools()
 
     def _register_tools(self) -> None:
-        tools: list[tuple[str, str, str, Callable[[str, dict[str, Any]], dict[str, Any]]]] = [
-            (
-                "prepare_target",
-                "target_confirmation",
-                "冻结 0/1 有效样本并提出 Y 证据",
-                self.prepare_target,
-            ),
-            ("diagnose_data", "data_diagnosis", "本地数据质量、粒度和泄漏诊断", self.diagnose),
-            ("apply_cleaning", "cleaning", "按已确认动作生成新的清洗数据版本", self.clean),
-            ("propose_split", "split", "推荐 Train/Test/OOT 与客户隔离方案", self.propose_split),
-            ("execute_split", "split", "执行并校验样本切分", self.execute_split),
-            (
-                "screen_features",
-                "screening",
-                "Train-only 缺失率、IV、相关性与泄漏筛选",
-                self.screen,
-            ),
-            (
-                "finalize_screening",
-                "screening",
-                "应用有理由的人工变量恢复",
-                self.finalize_screening,
-            ),
-            ("fit_binning", "binning", "Train-only 自动单调分箱", self.bin_features),
-            ("finalize_binning", "binning", "验证人工分箱并使下游产物失效", self.finalize_binning),
-            ("propose_models", "model_plan", "按资源与 Provider 建议候选模型", self.propose_models),
-            (
-                "finalize_model_plan",
-                "model_plan",
-                "应用用户确认的模型与评分参数",
-                self.finalize_model_plan,
-            ),
-            (
-                "generate_and_review_code",
-                "code_review",
-                "主 Agent 生成 Notebook，独立 Reviewer 闭环审核",
-                self.generate_and_review_code,
-            ),
-            (
-                "train_and_review",
-                "training",
-                "本地训练、校准、选型与独立执行质检",
-                self.train_and_review,
-            ),
-            (
-                "build_and_review_report",
-                "reporting",
-                "生成唯一结构化报告并独立质检",
-                self.build_and_review_report,
-            ),
-            (
-                "write_artifacts",
-                "reporting",
-                "导出 Web/Excel/HTML/模型包与评分入口",
-                self.write_artifacts,
-            ),
-        ]
-        for name, stage, description, handler in tools:
+        for spec in PIPELINE_STEPS:
+            handler = getattr(self, spec.handler)
             self.registry.register(
-                name,
-                stage,
-                description,
+                spec.tool_name,
+                spec.stage,
+                spec.description,
                 RunToolInput,
                 lambda value, target=handler: target(value.run_id, value.state),
             )
@@ -432,12 +369,15 @@ class RunPipeline:
         settings = SettingsStore(self.paths).load()
         resource = plan_resources(len(frame), len(frame.columns), settings.memory_budget_mb)
         availability = available_models()
-        configured = [
-            name for name in (settings.default_models or []) if availability.get(name, False)
+        requested_defaults = list(dict.fromkeys(settings.default_models or []))
+        configured = [name for name in requested_defaults if availability.get(name, False)]
+        unavailable_defaults = [
+            name for name in requested_defaults if not availability.get(name, False)
         ]
         models = list(dict.fromkeys(configured or recommend_models(resource)))
         plan = {
             "models": models,
+            "unavailable_models": unavailable_defaults,
             "search_budget": 0,
             "search_budget_max": 12,
             "resource_plan": resource.as_dict(),
@@ -465,10 +405,11 @@ class RunPipeline:
                 {"planning_material": safe, "deterministic_recommendation": models},
                 purpose="main_agent_model_plan",
             )
-            proposed = payload.get("models", []) if payload else []
-            valid = [
-                name for name in proposed if name in available_models() and available_models()[name]
-            ]
+            current_availability = available_models()
+            valid, rejected = partition_model_proposals(
+                payload.get("models", []) if payload else [], current_availability
+            )
+            plan["llm_rejected_models"] = rejected
             if valid:
                 plan["models"] = list(dict.fromkeys(["dummy", *valid]))
                 plan["source"] = "llm_reviewed_and_locally_validated"
@@ -501,10 +442,14 @@ class RunPipeline:
         plan = {**state["model_plan"]}
         if "models" in edits:
             availability = available_models()
-            models = [name for name in edits["models"] if availability.get(name, False)]
-            if not models:
+            requested = list(dict.fromkeys(edits["models"]))
+            unavailable = [name for name in requested if not availability.get(name, False)]
+            if unavailable:
+                raise ValueError("MODEL_SELECTION_UNAVAILABLE")
+            if not requested:
                 raise ValueError("NO_AVAILABLE_MODELS")
-            plan["models"] = list(dict.fromkeys(models))
+            plan["models"] = requested
+            plan["unavailable_models"] = []
         if "score" in edits:
             plan["score"] = {**plan["score"], **edits["score"]}
         if "search_budget" in edits:
@@ -691,7 +636,7 @@ class RunPipeline:
         return {
             "model_result": result,
             "execution_review": final_review,
-            "effective_models": models,
+            "effective_models": list(bundles),
             "worker_bundle_manifest_sha256": bundle_manifest_sha256,
         }
 

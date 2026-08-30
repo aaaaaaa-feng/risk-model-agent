@@ -10,8 +10,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from app.agents.reviewer import review_is_approved
 from app.core.security import sha256_file
+from app.domain.reviews import review_is_approved
 
 
 REPORT_SCHEMA = "risk-model-report/v1"

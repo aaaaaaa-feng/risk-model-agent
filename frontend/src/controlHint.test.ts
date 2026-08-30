@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
-import { controlHint } from "./lib/controlHint";
+import { controlHint } from "@/shared/lib/controlHint";
 
 describe("按钮悬停说明", () => {
   it("优先使用 aria-label 作为图标按钮说明", () => {

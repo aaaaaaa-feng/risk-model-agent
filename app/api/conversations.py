@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.database import new_id, now_iso
-from app.runtime import AppContext
+from app.bootstrap import AppContext
 
 from .dependencies import context
 
