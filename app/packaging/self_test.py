@@ -225,7 +225,8 @@ def run_package_self_test() -> dict[str, Any]:
 def main() -> int:
     report = run_package_self_test()
     stream = sys.stdout if report["status"] == "passed" else sys.stderr
-    print(json.dumps(report, ensure_ascii=False, sort_keys=True), file=stream)
+    # 冻结程序可能运行在 Windows CP1252 控制台；ASCII 转义后仍是完整可解析的 JSON。
+    print(json.dumps(report, ensure_ascii=True, sort_keys=True), file=stream)
     return 0 if report["status"] == "passed" else 1
 
 
