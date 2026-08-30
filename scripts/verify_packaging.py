@@ -32,11 +32,26 @@ def main() -> int:
         "frontend/package.json",
         "frontend/package-lock.json",
         "frontend/src/App.tsx",
+        "app/api/capabilities.py",
+        "app/bootstrap/context.py",
+        "app/domain/pipeline.py",
+        "app/governance/manifest.py",
+        "app/governance/tracing.py",
+        "app/notebooks/runtime.py",
+        "app/orchestration/contracts.py",
+        "app/orchestration/graph.py",
+        "app/orchestration/process_runner.py",
+        "app/services/pipeline_contracts.py",
         "app/workers/package_runtime.py",
+        "app/workers/model_adapters.py",
+        "app/workers/model_builders.py",
+        "app/packaging/self_test.py",
         "app/evaluation/adapter.py",
         "app/evaluation/harness.py",
         "scripts/run_harness.py",
         "scripts/build_offline_bundle.py",
+        "scripts/audit_package_size.py",
+        ".github/workflows/package.yml",
     ]
     missing = [path for path in required_files if not (ROOT / path).is_file()]
     spec = (
@@ -51,6 +66,9 @@ def main() -> int:
         (ROOT / "packaging/windows_installer.iss").read_text(encoding="utf-8")
         if not missing
         else ""
+    )
+    package_workflow = (
+        (ROOT / ".github/workflows/package.yml").read_text(encoding="utf-8") if not missing else ""
     )
     project_version_match = re.search(
         r'^version = "([0-9]+\.[0-9]+\.[0-9]+)"$', pyproject, re.MULTILINE
@@ -67,7 +85,7 @@ def main() -> int:
         installer_fallback_match.group(1) if installer_fallback_match else ""
     )
     contract = {
-        "schema_version": "risk-packaging-contract/v1",
+        "schema_version": "risk-packaging-contract/v2",
         "required_files": len(required_files),
         "missing_files": missing,
         "spec_has_onedir_collect": "COLLECT(" in spec,
@@ -75,12 +93,51 @@ def main() -> int:
         "spec_has_standalone_package_runtime": (
             '(str(ROOT / "app" / "workers" / "package_runtime.py"), "app/workers")' in spec
         ),
-        "spec_has_notebook_libraries": all(
-            name in spec for name in ('"polars"', '"duckdb"', '"debugpy"')
+        "spec_has_offline_capabilities": all(
+            name in spec
+            for name in (
+                '"duckdb"',
+                '"ipykernel_launcher"',
+                '"xgboost.sklearn"',
+                '"lightgbm.sklearn"',
+                '"catboost.core"',
+                '"app.workers.model_builders"',
+                '"app.notebooks.runtime"',
+                '"app.packaging.self_test"',
+                '"skops.io.old._general_v0"',
+                '"skops.io.old._numpy_v0"',
+                '"skops.io.old._numpy_v1"',
+            )
         ),
+        "spec_uses_precise_collection": "collect_all" not in spec
+        and 'collect_dynamic_libs("xgboost")' in spec
+        and 'collect_dynamic_libs("lightgbm")' in spec
+        and 'collect_submodules("skops.io")' in spec,
+        "spec_excludes_unused_modules": all(
+            f'"{name}"' in spec
+            for name in (
+                "polars",
+                "matplotlib",
+                "plotly",
+                "PIL",
+                "dask",
+                "distributed",
+                "debugpy",
+                "jedi",
+                "uvloop",
+                "watchfiles",
+                "httptools",
+                "tkinter",
+            )
+        ),
+        "runtime_dependencies_are_slim": '"polars' not in pyproject.lower()
+        and '"uvicorn[standard]' not in pyproject.lower()
+        and '"duckdb' in pyproject.lower(),
         "launcher_dispatches_kernel": "IPKernelApp.launch_instance()"
         in (ROOT / "run_local.py").read_text(encoding="utf-8"),
         "launcher_supports_frozen_workers": "multiprocessing.freeze_support()"
+        in (ROOT / "run_local.py").read_text(encoding="utf-8"),
+        "launcher_dispatches_package_self_test": "--internal-package-self-test"
         in (ROOT / "run_local.py").read_text(encoding="utf-8"),
         "spec_has_launcher": "run_local.py" in spec,
         "spec_has_evaluation_adapter": "app.evaluation.adapter" in spec,
@@ -104,6 +161,26 @@ def main() -> int:
         "windows_installer_has_localized_messages": (
             "languages\\ChineseSimplified.isl" in installer
         ),
+        "windows_installer_uses_lzma2": "Compression=lzma2/ultra64" in installer
+        and "SolidCompression=yes" in installer,
+        "package_ci_has_size_gate": all(
+            value in package_workflow
+            for value in (
+                "scripts/audit_package_size.py",
+                "--baseline-kib 239176",
+                "--maximum-mib 180",
+                "--minimum-reduction-percent 25",
+                "--enforce",
+                "dist/installer/package-size-report.json",
+            )
+        ),
+        "package_ci_runs_frozen_self_test": all(
+            value in package_workflow
+            for value in (
+                "./dist/risk-model-agent/risk-model-agent --internal-package-self-test",
+                ".\\dist\\risk-model-agent\\risk-model-agent.exe --internal-package-self-test",
+            )
+        ),
     }
     contract["valid"] = not missing and all(
         bool(contract[key])
@@ -111,9 +188,13 @@ def main() -> int:
             "spec_has_onedir_collect",
             "spec_has_local_assets",
             "spec_has_standalone_package_runtime",
-            "spec_has_notebook_libraries",
+            "spec_has_offline_capabilities",
+            "spec_uses_precise_collection",
+            "spec_excludes_unused_modules",
+            "runtime_dependencies_are_slim",
             "launcher_dispatches_kernel",
             "launcher_supports_frozen_workers",
+            "launcher_dispatches_package_self_test",
             "spec_has_launcher",
             "spec_has_evaluation_adapter",
             "has_local_evaluation_harness",
@@ -126,6 +207,9 @@ def main() -> int:
             "windows_installer_keeps_user_data",
             "windows_installer_has_uninstall_entry",
             "windows_installer_has_localized_messages",
+            "windows_installer_uses_lzma2",
+            "package_ci_has_size_gate",
+            "package_ci_runs_frozen_self_test",
         )
     )
     print(json.dumps(contract, ensure_ascii=False, indent=2, sort_keys=True))

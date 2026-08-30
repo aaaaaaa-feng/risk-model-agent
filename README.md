@@ -90,6 +90,16 @@ Windows 使用 `scripts/build_windows.ps1`，它会依次构建前端、PyInstal
 
 安装程序输出到 `dist\installer\RiskModelAgent-<version>-windows-x64-setup.exe`，同时生成 SHA-256 校验文件。它采用当前用户安装，不要求管理员权限，包含开始菜单、可选桌面快捷方式和标准卸载入口。卸载只移除应用程序，默认保留 `%LOCALAPPDATA%\RiskModelAgent` 中的项目、配置、密钥和模型数据。
 
+完整离线包保留 Pandas、DuckDB、Notebook 和全部建模算法，不再重复打包 Polars。打包配置只收集模型训练必需的原生库，并排除产品未使用的分布式训练、调试、代码补全和 Python 绘图模块。可使用以下命令在本地生成体积与依赖清单：
+
+```bash
+python scripts/audit_package_size.py --bundle dist/risk-model-agent --output dist/package-size-report.json --enforce
+```
+
+Windows CI 对最终 `.exe` 同时执行两道硬门禁：安装包不超过 180 MiB，并且相对 239176 KiB 基线至少缩小 25%。体积清单 `package-size-report.json` 与安装包一起发布；未通过门禁时不会上传候选产物。
+
+冻结包还会在启动 Web 服务前执行内部离线自检：使用固定种子小样本逐一构建、拟合和预测全部八种模型，并验证 DuckDB、Jupyter Client、IPyKernel 和 nbformat 契约。该自检不联网、不启动项目、不写入用户工作区；任一能力失败都会阻断打包产物。
+
 GitHub Actions 会在 Windows Runner 上真实执行“构建安装器 → 静默安装 → 启动本地服务 → Notebook/建模/报告/评分整链路 → 静默卸载 → 验证用户数据仍保留”。未配置 Authenticode 代码签名证书，因此当前安装程序仍属于未签名候选版，可能触发 Windows SmartScreen；签名和真实用户电脑验收完成前，不宣传为正式发行版。
 
 ## 本地数据与升级
