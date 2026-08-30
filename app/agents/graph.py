@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 
 from app.core.config import SettingsStore
 from app.core.database import Database, new_id, now_iso
+from app.core.errors import normalize_error_code
 from app.core.paths import AppPaths, get_paths
 from app.evaluation.manifest import MANIFEST_SCHEMA, build_run_manifest
 from app.evaluation.tracing import TraceService
@@ -470,7 +471,7 @@ class RunEngine:
                 self.traces.finish_span(
                     span["id"],
                     "failed",
-                    error_code=str(exc).split(":", 1)[0][:160] or type(exc).__name__,
+                    error_code=normalize_error_code(exc, "WORKER_EXECUTION_FAILED"),
                     error_type=type(exc).__name__,
                     evidence={"tool_result": "failed"},
                 )
@@ -811,7 +812,7 @@ class RunEngine:
             run = self.catalog.require("runs", run_id)
         except KeyError:
             return
-        code = str(error).split(":", 1)[0][:160] or type(error).__name__
+        code = normalize_error_code(error, "RUN_EXECUTION_FAILED")
         if run.get("target_task_id"):
             self.database.update(
                 "target_tasks", run["target_task_id"], {"status": "failed", "updated_at": timestamp}

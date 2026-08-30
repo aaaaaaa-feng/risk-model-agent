@@ -14,13 +14,15 @@ const SelectValue = SelectPrimitive.Value;
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, title, "aria-label": ariaLabel, ...props }, ref) => (
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
       "flex h-10 w-full items-center justify-between rounded-lg border border-[var(--line-strong)] bg-background px-3.5 py-2 text-sm focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-muted-foreground/70 [&>span]:line-clamp-1",
       className,
     )}
+    title={title || (typeof ariaLabel === "string" ? ariaLabel : "展开并选择一个选项")}
+    aria-label={ariaLabel}
     {...props}
   >
     {children}

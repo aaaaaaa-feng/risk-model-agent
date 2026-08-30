@@ -15,7 +15,7 @@ RadioGroup.displayName = RadioGroupPrimitive.Root.displayName;
 const RadioGroupItem = React.forwardRef<
   React.ElementRef<typeof RadioGroupPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof RadioGroupPrimitive.Item>
->(({ className, ...props }, ref) => {
+>(({ className, title, "aria-label": ariaLabel, ...props }, ref) => {
   return (
     <RadioGroupPrimitive.Item
       ref={ref}
@@ -23,6 +23,8 @@ const RadioGroupItem = React.forwardRef<
         "aspect-square h-[17px] w-[17px] rounded-full border border-[var(--line-strong)] bg-background text-[var(--blue)] focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-[var(--blue)]",
         className,
       )}
+      title={title || (typeof ariaLabel === "string" ? ariaLabel : "选择此配置")}
+      aria-label={ariaLabel}
       {...props}
     >
       <RadioGroupPrimitive.Indicator className="flex items-center justify-center">

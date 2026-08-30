@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.core.errors import normalize_error_code, public_error_message
 from app.evaluation.manifest import verify_manifest
 from app.evaluation.tracing import TraceService
 from app.runtime import AppContext
@@ -31,7 +32,7 @@ class DecisionResolve(BaseModel):
 
 @router.post("/runs", status_code=202)
 def create_run(payload: RunCreate, ctx: AppContext = Depends(context)) -> dict[str, Any]:
-    return {"run": ctx.engine.create_run(**payload.model_dump())}
+    return {"run": _public_run(ctx.engine.create_run(**payload.model_dump()))}
 
 
 @router.get("/projects/{project_id}/runs")
@@ -39,11 +40,11 @@ def list_runs(project_id: str, ctx: AppContext = Depends(context)) -> dict[str, 
     ctx.catalog.get_project(project_id)
     return {
         "runs": [
-            {key: value for key, value in item.items() if key != "state"}
+            _public_run({key: value for key, value in item.items() if key != "state"})
             for item in ctx.database.list("runs", {"project_id": project_id}, limit=5000)
         ],
         "legacy_runs": [
-            item
+            _public_legacy_run(item)
             for item in ctx.database.list("legacy_records", {"record_type": "run"}, limit=5000)
             if (item.get("metadata") or {}).get("v1_project_id") == project_id
         ],
@@ -58,7 +59,7 @@ def get_run(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
         for item in ctx.database.list("decisions", {"run_id": run_id}, limit=500)
         if item["status"] == "pending"
     ]
-    return {"run": run, "pending_decisions": pending}
+    return {"run": _public_run(run), "pending_decisions": pending}
 
 
 @router.get("/runs/{run_id}/decisions")
@@ -75,7 +76,7 @@ def resolve_decision(
     ctx: AppContext = Depends(context),
 ) -> dict[str, Any]:
     return {
-        "run": ctx.engine.resume(run_id, decision_id, payload.approved, payload.edits)
+        "run": _public_run(ctx.engine.resume(run_id, decision_id, payload.approved, payload.edits))
     }
 
 
@@ -88,10 +89,7 @@ def list_checkpoints(
     ctx.catalog.require("runs", run_id)
     values = ctx.database.list("checkpoints", {"run_id": run_id}, order_by="seq ASC", limit=5000)
     if not include_state:
-        values = [
-            {key: value for key, value in item.items() if key != "state"}
-            for item in values
-        ]
+        values = [{key: value for key, value in item.items() if key != "state"} for item in values]
     return {"checkpoints": values}
 
 
@@ -123,7 +121,7 @@ async def stream_events(
         try:
             cursor = max(cursor, int(last_event_id))
         except ValueError:
-            raise HTTPException(400, "Last-Event-ID 必须是整数事件序号。")
+            raise HTTPException(400, detail={"code": "EVENT_CURSOR_INVALID"})
 
     async def generate() -> AsyncIterator[str]:
         current = cursor
@@ -131,7 +129,9 @@ async def stream_events(
         while True:
             values = [
                 item
-                for item in ctx.database.list("events", {"run_id": run_id}, order_by="seq ASC", limit=5000)
+                for item in ctx.database.list(
+                    "events", {"run_id": run_id}, order_by="seq ASC", limit=5000
+                )
                 if int(item["seq"]) > current
             ]
             for item in values:
@@ -152,7 +152,11 @@ async def stream_events(
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
 
 
@@ -171,7 +175,7 @@ def run_manifest(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, A
     ctx.catalog.require("runs", run_id)
     records = ctx.database.list("run_manifests", {"run_id": run_id}, limit=1)
     if not records:
-        raise HTTPException(404, "Run manifest 不存在。")
+        raise HTTPException(404, detail={"code": "RUN_MANIFEST_NOT_FOUND"})
     record = records[0]
     manifest = verify_manifest(record.get("payload") or {}, str(record["manifest_hash"]))
     return {
@@ -187,11 +191,11 @@ def run_manifest(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, A
 @router.get("/runs/{run_id}/trace-bundle")
 def trace_bundle(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
     ctx.catalog.require("runs", run_id)
-    return TraceService(ctx.database).bundle(run_id)
+    return _public_trace_bundle(TraceService(ctx.database).bundle(run_id))
 
 
 def _event(item: dict[str, Any]) -> dict[str, Any]:
-    evidence = item.get("evidence", {})
+    evidence = _public_error_fields(item.get("evidence", {}), "RUN_EXECUTION_FAILED")
     return {
         "id": item["id"],
         "run_id": item["run_id"],
@@ -210,3 +214,55 @@ def _event(item: dict[str, Any]) -> dict[str, Any]:
         "evidence": evidence,
         "hidden_chain_of_thought_included": False,
     }
+
+
+def _public_run(run: dict[str, Any]) -> dict[str, Any]:
+    """Sanitize legacy and current Run failures before they leave the API."""
+
+    value = dict(run)
+    if value.get("error"):
+        code = normalize_error_code(value["error"], "RUN_EXECUTION_FAILED")
+        value["error"] = code
+        value["error_message"] = public_error_message(code)
+    return value
+
+
+def _public_legacy_run(record: dict[str, Any]) -> dict[str, Any]:
+    value = dict(record)
+    metadata = dict(value.get("metadata") or {})
+    if metadata.get("error"):
+        code = normalize_error_code(metadata["error"], "RUN_EXECUTION_FAILED")
+        metadata["error"] = code
+        metadata["error_message"] = public_error_message(code)
+    value["metadata"] = metadata
+    return value
+
+
+def _public_error_fields(value: Any, fallback: str) -> Any:
+    if not isinstance(value, dict):
+        return value
+    result = dict(value)
+    if result.get("error_code"):
+        code = normalize_error_code(result["error_code"], fallback)
+        result["error_code"] = code
+        result["error_message"] = public_error_message(code)
+    return result
+
+
+def _public_trace_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    value = dict(bundle)
+    value["run"] = _public_run(dict(value.get("run") or {}))
+    value["spans"] = [
+        _public_error_fields(item, "RUN_EXECUTION_FAILED") for item in value.get("spans") or []
+    ]
+    value["events"] = [
+        {
+            **item,
+            "evidence": _public_error_fields(
+                item.get("evidence") or {},
+                "RUN_EXECUTION_FAILED",
+            ),
+        }
+        for item in value.get("events") or []
+    ]
+    return value

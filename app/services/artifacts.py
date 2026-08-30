@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 
 from app.core.database import Database, new_id, now_iso
+from app.core.errors import normalize_error_code
 from app.core.paths import AppPaths, get_paths
 from app.core.security import sha256_file
 from app.workers.binning import bin_report
@@ -180,7 +181,11 @@ class ArtifactService:
         run = self.catalog.require("runs", model["run_id"])
         if asset["project_id"] != run["project_id"]:
             raise ValueError("CROSS_PROJECT_SCORING_FORBIDDEN")
-        frame = read_table(Path(asset["stored_path"]), asset.get("sheet"))
+        try:
+            frame = read_table(Path(asset["stored_path"]), asset.get("sheet"))
+        except Exception as exc:
+            code = normalize_error_code(exc, "SCORE_INPUT_READ_FAILED")
+            raise ValueError(code) from exc
         artifact_path = Path(model["artifact_path"])
         if not artifact_path.is_file() or sha256_file(artifact_path) != model["checksum"]:
             raise ValueError("MODEL_ARTIFACT_CHECKSUM_MISMATCH")

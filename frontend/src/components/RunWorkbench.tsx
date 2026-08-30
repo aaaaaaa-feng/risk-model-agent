@@ -1,5 +1,6 @@
 import { formatMetric } from "../lib/format";
-import { runStageLabel } from "../lib/labels";
+import { runStageLabel, statusLabel } from "../lib/labels";
+import { eventSummary, translateError } from "../lib/errors";
 import { Badge, statusVariant } from "@/components/ui/badge";
 import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
@@ -31,19 +32,26 @@ export function RunWorkbench({
     : undefined;
   const conditional =
     run.status === "succeeded" && champion && champion.test_monotonicity?.absolute !== true;
-  if (run.status === "failed" || run.status === "blocked")
+  if (run.status === "failed" || run.status === "blocked") {
+    const failure = translateError(
+      { code: run.error || "USER_REJECTED", message: events.at(-1)?.summary },
+      { context: "model" },
+    );
     return (
       <div className="run-workbench">
         <div className="error-panel">
-          <span className="eyebrow">{run.status.toUpperCase()}</span>
+          <span className="eyebrow">{run.status === "failed" ? "执行异常" : "安全停止"}</span>
           <h2>{run.status === "failed" ? "当前 Run 执行失败" : "当前 Run 已安全停止"}</h2>
           <p>其他 Y 任务不受影响；错误码和最后证据保留在事件记录中。</p>
-          <strong>{run.error || "USER_REJECTED"}</strong>
-          <p>{events.at(-1)?.summary}</p>
+          <strong title={failure.code ? `诊断码：${failure.code}` : undefined}>
+            {failure.summary}
+          </strong>
+          {failure.action && <p>{failure.action}</p>}
           {onRetry && <Button onClick={onRetry}>基于同一 Y 新建 Run</Button>}
         </div>
       </div>
     );
+  }
   return (
     <div className="run-workbench">
       {run.status === "succeeded" && (
@@ -101,7 +109,7 @@ export function RunWorkbench({
                       <strong>{item.candidate}</strong>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
+                      <Badge variant={statusVariant(item.status)}>{statusLabel(item.status)}</Badge>
                     </TableCell>
                     <TableCell>{item.calibration || "—"}</TableCell>
                     <TableCell>{formatMetric(item.test_metrics?.roc_auc)}</TableCell>
@@ -133,12 +141,17 @@ export function RunWorkbench({
             <div key={event.id}>
               <time>{new Date(event.time).toLocaleTimeString()}</time>
               <span>{event.agent}</span>
-              <p>{event.summary}</p>
+              <p>{eventSummary(event.status, event.summary, eventErrorCode(event))}</p>
             </div>
           ))}
       </div>
     </div>
   );
+}
+
+function eventErrorCode(event: RunEvent): string | undefined {
+  const value = event.evidence?.error_code;
+  return typeof value === "string" ? value : undefined;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

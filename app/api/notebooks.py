@@ -197,6 +197,9 @@ def execute_cell(
             "network_status": _network_status(ctx),
             "security_boundary": "user_code_not_sandboxed",
         }
+    except TimeoutError as exc:
+        ctx.database.update("notebooks", notebook_id, {"status": "error", "updated_at": now_iso()})
+        raise ValueError("NOTEBOOK_EXECUTION_TIMEOUT") from exc
     except Exception:
         ctx.database.update("notebooks", notebook_id, {"status": "error", "updated_at": now_iso()})
         raise
@@ -207,7 +210,13 @@ def execute_all(
     notebook_id: str, timeout_seconds: int = 300, ctx: AppContext = Depends(context)
 ) -> dict[str, Any]:
     record = ctx.catalog.require("notebooks", notebook_id)
-    results = ctx.notebooks.execute_all(record["project_id"], Path(record["path"]), timeout_seconds)
+    try:
+        results = ctx.notebooks.execute_all(
+            record["project_id"], Path(record["path"]), timeout_seconds
+        )
+    except TimeoutError as exc:
+        ctx.database.update("notebooks", notebook_id, {"status": "error", "updated_at": now_iso()})
+        raise ValueError("NOTEBOOK_EXECUTION_TIMEOUT") from exc
     status = "error" if any(item["status"] == "failed" for item in results) else "idle"
     ctx.database.update("notebooks", notebook_id, {"status": status, "updated_at": now_iso()})
     return {

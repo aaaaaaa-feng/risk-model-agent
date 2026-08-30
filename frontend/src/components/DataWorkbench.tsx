@@ -1,6 +1,7 @@
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { errorMessage } from "../lib/format";
+import { statusLabel } from "../lib/labels";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { Badge, statusVariant } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -303,8 +304,9 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                 className={cn(
                   buttonVariants(),
                   "file-button",
-                  busy === "upload" && "pointer-events-none opacity-50",
+                  busy === "upload" && "cursor-not-allowed opacity-50",
                 )}
+                title="从本机选择一个或多个 CSV / Excel 文件导入当前项目"
               >
                 {busy === "upload" ? "导入中…" : "选择本地文件"}
                 <input
@@ -458,6 +460,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
               className="fallback-card"
               onClick={executeJoin}
               disabled={!steps.length || busy === "join"}
+              title="按当前关联键执行多表关联并运行粒度与样本膨胀校验"
             >
               <b>1-2</b>
               <strong>执行可视化关联</strong>
@@ -467,12 +470,17 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
               className="fallback-card"
               onClick={() => createNotebook(true)}
               disabled={!steps.length}
+              title="让 Agent 生成可逐单元格核对的关联 Notebook 草稿"
             >
               <b>3</b>
               <strong>Agent 生成 Notebook</strong>
               <span>逐单元格核对并运行关联草稿</span>
             </button>
-            <button className="fallback-card" onClick={() => createNotebook(false)}>
+            <button
+              className="fallback-card"
+              onClick={() => createNotebook(false)}
+              title="创建空白 Notebook，由用户手工编写关联代码"
+            >
               <b>4</b>
               <strong>用户手写 Notebook</strong>
               <span>最末级兜底，不需要离开产品</span>
@@ -571,7 +579,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                   />
                   <strong>{task.target_column}</strong>
                   <span>{task.valid_sample_count.toLocaleString()} 有效样本</span>
-                  <Badge variant={statusVariant(task.status)}>{task.status}</Badge>
+                  <Badge variant={statusVariant(task.status)}>{statusLabel(task.status)}</Badge>
                 </label>
               ))}
               <Button disabled={!selectedTasks.length || busy === "runs"} onClick={startRuns}>
@@ -707,6 +715,7 @@ interface NotebookCell {
 
 interface NotebookOutput {
   text?: string;
+  ename?: string;
   evalue?: string;
   data?: Record<string, unknown>;
 }
@@ -754,7 +763,10 @@ function NotebookEditor({
       copy.cells[index].execution_count = result.execution.execution_count;
       setDocument(copy);
       if (result.execution.status !== "succeeded") {
-        notify("单元格执行失败", true);
+        notify(
+          errorMessage({ code: "NOTEBOOK_CELL_EXECUTION_FAILED" }, { context: "notebook" }),
+          true,
+        );
       }
     } catch (e) {
       notify(errorMessage(e), true);
@@ -796,8 +808,9 @@ function NotebookEditor({
           <div className="nb-gutter">[{cell.execution_count ?? " "}]</div>
           {cell.cell_type === "code" ? (
             <>
-              <Textarea
+              <NotebookSource
                 value={cell.source}
+                ariaLabel={`第 ${index + 1} 个代码单元格`}
                 onChange={(e) => {
                   const copy = structuredClone(document);
                   copy.cells[index].source = e.target.value;
@@ -805,7 +818,12 @@ function NotebookEditor({
                 }}
                 spellCheck={false}
               />
-              <button className="cell-run" onClick={() => execute(index)} disabled={Boolean(busy)}>
+              <button
+                className="cell-run"
+                onClick={() => execute(index)}
+                disabled={Boolean(busy)}
+                title={`运行第 ${index + 1} 个 Notebook 单元格`}
+              >
                 ▶ 运行
               </button>
               {cell.outputs && cell.outputs.length > 0 && (
@@ -814,7 +832,15 @@ function NotebookEditor({
                     .map(
                       (item) =>
                         (item as NotebookOutput).text ||
-                        (item as NotebookOutput).evalue ||
+                        ((item as NotebookOutput).evalue || (item as NotebookOutput).ename
+                          ? errorMessage(
+                              {
+                                code: (item as NotebookOutput).ename,
+                                message: (item as NotebookOutput).evalue,
+                              },
+                              { context: "notebook" },
+                            )
+                          : "") ||
                         JSON.stringify((item as NotebookOutput).data || {}),
                     )
                     .join("\n")}
@@ -822,8 +848,9 @@ function NotebookEditor({
               )}
             </>
           ) : (
-            <Textarea
+            <NotebookSource
               value={cell.source}
+              ariaLabel={`第 ${index + 1} 个 Markdown 单元格`}
               onChange={(e) => {
                 const copy = structuredClone(document);
                 copy.cells[index].source = e.target.value;
@@ -847,6 +874,45 @@ function NotebookEditor({
         </Button>
       </div>
     </div>
+  );
+}
+
+function NotebookSource({
+  value,
+  ariaLabel,
+  onChange,
+  spellCheck,
+}: {
+  value: string;
+  ariaLabel: string;
+  onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
+  spellCheck?: boolean;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    const resize = () => {
+      element.style.height = "auto";
+      element.style.height = `${element.scrollHeight + 2}px`;
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, [value]);
+
+  return (
+    <Textarea
+      ref={ref}
+      className="nb-source"
+      rows={1}
+      aria-label={ariaLabel}
+      value={value}
+      onChange={onChange}
+      spellCheck={spellCheck}
+    />
   );
 }
 

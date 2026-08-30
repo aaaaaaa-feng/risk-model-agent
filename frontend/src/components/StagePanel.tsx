@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { reviewLabel, statusLabel } from "../lib/labels";
+import { eventSummary } from "../lib/errors";
 import { Badge, statusVariant } from "@/components/ui/badge";
 import {
   BUSINESS_STAGES,
   businessStageIndex,
+  businessSubstageIndex,
   nextAction,
   stageLabel,
-  techStageIndex,
 } from "../lib/stages";
 import type { Decision, Run, RunEvent } from "../types";
 
@@ -48,7 +49,7 @@ export function StagePanel({
 
   const groupIndex = businessStageIndex(run.stage);
   const group = groupIndex >= 0 ? BUSINESS_STAGES[groupIndex] : null;
-  const currentIndex = Math.max(0, techStageIndex(run.stage));
+  const currentIndex = Math.max(0, businessSubstageIndex(run.stage));
   const latest = events.at(-1);
   const review = decision?.payload?.summary?.review || decision?.review;
 
@@ -82,6 +83,9 @@ export function StagePanel({
           className="panel-toggle"
           type="button"
           aria-expanded={expanded}
+          title={
+            expanded ? "收起 Agent、Reviewer 和本地工具详情" : "展开 Agent、Reviewer 和本地工具详情"
+          }
           onClick={() => setExpanded((v) => !v)}
         >
           {expanded ? "收起阶段详情" : "展开阶段详情"}
@@ -94,7 +98,9 @@ export function StagePanel({
       )}
       {expanded && (
         <div className="panel-detail">
-          <p className="panel-latest">{latest?.summary || "等待节点事件"}</p>
+          <p className="panel-latest">
+            {eventSummary(latest?.status, latest?.summary, eventErrorCode(latest))}
+          </p>
           <ul className="audit-list compact">
             <li>
               <span>主 Agent</span>
@@ -125,8 +131,7 @@ export function StagePanel({
           </ul>
           {group && (
             <ol className="stage-substeps" aria-label={`${group.label}子步骤`}>
-              {group.substages.map((stage) => {
-                const index = techStageIndex(stage);
+              {group.substages.map((stage, index) => {
                 const state =
                   index < currentIndex ? "done" : index === currentIndex ? "active" : "";
                 return (
@@ -147,9 +152,9 @@ export function StagePanel({
                   <div key={event.id}>
                     <time>{new Date(event.time).toLocaleTimeString()}</time>
                     <b>
-                      {event.agent} · {event.status}
+                      {event.agent} · {statusLabel(event.status)}
                     </b>
-                    <p>{event.summary}</p>
+                    <p>{eventSummary(event.status, event.summary, eventErrorCode(event))}</p>
                   </div>
                 ))}
             </div>
@@ -158,4 +163,9 @@ export function StagePanel({
       )}
     </section>
   );
+}
+
+function eventErrorCode(event: RunEvent | undefined): string | undefined {
+  const value = event?.evidence?.error_code;
+  return typeof value === "string" ? value : undefined;
 }

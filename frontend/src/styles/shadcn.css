@@ -25,7 +25,7 @@
   --color-accent: var(--blue-soft);
   --color-accent-foreground: var(--blue-text);
   --color-destructive: var(--red);
-  --color-destructive-foreground: var(--paper);
+  --color-destructive-foreground: var(--output-text);
   --color-border: var(--line);
   --color-input: var(--line-strong);
   --color-ring: var(--blue);

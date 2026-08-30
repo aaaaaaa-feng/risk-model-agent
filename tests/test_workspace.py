@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import base64
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.core.paths import AppPaths, read_workspace_pointer, workspace_marker_path
-from app.core.workspace import WorkspaceManager
+from app.core.workspace import WorkspaceManager, WorkspacePickerError, pick_workspace_directory
 from app.main import create_app
 
 
@@ -33,7 +36,9 @@ def test_workspace_manager_allows_first_selection_with_existing_control_projects
     assert not (tmp_path / "first-workspace" / "projects" / "old-project").exists()
 
 
-def test_workspace_manager_does_not_switch_configured_workspace_with_projects_or_active_runs(tmp_path: Path):
+def test_workspace_manager_does_not_switch_configured_workspace_with_projects_or_active_runs(
+    tmp_path: Path,
+):
     paths = AppPaths(tmp_path / "control").ensure()
     manager = WorkspaceManager()
     selected = manager.select(paths, str(tmp_path / "configured-workspace"))
@@ -70,3 +75,95 @@ def test_workspace_api_switches_context_and_project_folder_is_self_describing(tm
         blocked = client.post("/api/v1/workspace/select", json={"path": str(tmp_path / "another")})
         assert blocked.status_code == 409
         assert blocked.json()["error"]["code"] == "WORKSPACE_SWITCH_REQUIRES_EMPTY_CURRENT_PROJECTS"
+
+
+def test_workspace_api_returns_actionable_error_for_unwritable_directory(
+    tmp_path: Path, monkeypatch
+):
+    def not_writable(_root: Path) -> None:
+        raise PermissionError("access denied")
+
+    monkeypatch.setattr(
+        WorkspaceManager,
+        "_assert_writable",
+        staticmethod(not_writable),
+    )
+    app = create_app(AppPaths(tmp_path / "control").ensure(), auto_migrate=False)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/workspace/select",
+            json={"path": str(tmp_path / "read-only")},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "WORKSPACE_PATH_NOT_WRITABLE"
+    assert "不可写" in response.json()["error"]["message"]
+
+
+def test_windows_picker_is_sta_owned_topmost_and_keeps_unicode_path(monkeypatch):
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("app.core.workspace.platform.system", lambda: "Windows")
+    monkeypatch.setattr("app.core.workspace.shutil.which", lambda _: "powershell.exe")
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout=r"D:\\风控建模", stderr="")
+
+    monkeypatch.setattr("app.core.workspace.subprocess.run", fake_run)
+
+    assert pick_workspace_directory() == r"D:\\风控建模"
+    command = captured["command"]
+    assert isinstance(command, list)
+    assert "-STA" in command
+    encoded = command[command.index("-EncodedCommand") + 1]
+    script = base64.b64decode(encoded).decode("utf-16-le")
+    assert "$owner.TopMost = $true" in script
+    assert "$dialog.ShowDialog($owner)" in script
+    assert "$null = $owner.Activate()" in script
+    assert captured["kwargs"]["timeout"] == 60
+    assert captured["kwargs"]["encoding"] == "utf-8"
+
+
+def test_windows_picker_distinguishes_cancel_from_startup_failure(monkeypatch):
+    monkeypatch.setattr("app.core.workspace.platform.system", lambda: "Windows")
+    monkeypatch.setattr("app.core.workspace.shutil.which", lambda _: "powershell.exe")
+    monkeypatch.setattr(
+        "app.core.workspace.subprocess.run",
+        lambda *_, **__: SimpleNamespace(returncode=2, stdout="", stderr=""),
+    )
+    assert pick_workspace_directory() is None
+
+    monkeypatch.setattr(
+        "app.core.workspace.subprocess.run",
+        lambda *_, **__: SimpleNamespace(returncode=1, stdout="", stderr="failed"),
+    )
+    with pytest.raises(WorkspacePickerError, match="WORKSPACE_NATIVE_PICKER_FAILED"):
+        pick_workspace_directory()
+
+
+def test_native_picker_timeout_returns_actionable_api_error(tmp_path: Path, monkeypatch):
+    def timeout_picker():
+        raise WorkspacePickerError("WORKSPACE_NATIVE_PICKER_TIMEOUT")
+
+    monkeypatch.setattr("app.api.workspace.pick_workspace_directory", timeout_picker)
+    app = create_app(AppPaths(tmp_path / "control").ensure(), auto_migrate=False)
+    with TestClient(app) as client:
+        response = client.post("/api/v1/workspace/native-picker", json={})
+
+    assert response.status_code == 504
+    assert response.json()["error"]["code"] == "WORKSPACE_NATIVE_PICKER_TIMEOUT"
+    assert "超时" in response.json()["error"]["message"]
+
+
+def test_picker_subprocess_timeout_has_specific_error(monkeypatch):
+    monkeypatch.setattr("app.core.workspace.platform.system", lambda: "Darwin")
+    monkeypatch.setattr("app.core.workspace.shutil.which", lambda _: "osascript")
+
+    def fake_run(*_, **__):
+        raise subprocess.TimeoutExpired(cmd=["osascript"], timeout=60)
+
+    monkeypatch.setattr("app.core.workspace.subprocess.run", fake_run)
+    with pytest.raises(WorkspacePickerError, match="WORKSPACE_NATIVE_PICKER_TIMEOUT"):
+        pick_workspace_directory()

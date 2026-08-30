@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { notify } from "@/lib/notify";
+import { errorMessage } from "@/lib/errors";
 import type { WorkspaceStatus } from "../types";
 
 interface Props {
@@ -29,12 +30,7 @@ export function WorkspaceSetup({ workspace, onSelected, onClose }: Props) {
       );
       if (result.path) setPath(result.path);
     } catch (error) {
-      notify(
-        error instanceof Error
-          ? `${error.message}；也可以直接输入路径`
-          : "系统选择器不可用，请直接输入路径",
-        true,
-      );
+      notify(errorMessage(error, { context: "workspace" }), true);
     } finally {
       setBusy("");
     }
@@ -42,7 +38,7 @@ export function WorkspaceSetup({ workspace, onSelected, onClose }: Props) {
 
   const save = async () => {
     if (!path.trim()) {
-      notify("请先选择或输入工作文件夹", true);
+      notify("还没有选择工作文件夹。请先选择或输入一个本机文件夹。", true);
       return;
     }
     setBusy("save");
@@ -52,7 +48,7 @@ export function WorkspaceSetup({ workspace, onSelected, onClose }: Props) {
       });
       onSelected(result.workspace);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "工作文件夹设置失败", true);
+      notify(errorMessage(error, { context: "workspace" }), true);
     } finally {
       setBusy("");
     }

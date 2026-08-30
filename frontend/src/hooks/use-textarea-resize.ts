@@ -1,10 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import type { ComponentProps } from "react";
 
-export function useTextareaResize(
-  value: ComponentProps<"textarea">["value"],
-  rows = 1,
-) {
+export function useTextareaResize(value: ComponentProps<"textarea">["value"], rows = 1) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useLayoutEffect(() => {

@@ -36,7 +36,10 @@ class BackupRestore(BaseModel):
 def get_report(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
     artifact = _artifact(ctx, run_id, "report_json")
     path = _verified_path(artifact)
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("REPORT_READ_FAILED") from exc
 
 
 @router.get("/reports/{run_id}/html")

@@ -42,7 +42,7 @@ export const confirmLabel: Record<string, string> = {
   confirm_models: "确认方案并开始训练",
 };
 
-export function statusLabel(status: string | undefined, fallback = status): string {
+export function statusLabel(status: string | undefined, fallback?: string): string {
   const map: Record<string, string> = {
     queued: "排队中",
     running: "运行中",
@@ -51,8 +51,22 @@ export function statusLabel(status: string | undefined, fallback = status): stri
     succeeded: "已完成",
     failed: "失败",
     blocked: "已停止",
+    ready: "已就绪",
+    trained: "训练完成",
+    skipped: "已跳过",
+    started: "已开始",
+    completed: "已完成",
+    delta: "生成中",
+    waiting: "等待中",
+    pending: "待处理",
+    active: "使用中",
+    archived: "已归档",
+    available: "可用",
+    unavailable: "不可用",
+    pass: "已通过",
+    conditional_pass: "有条件通过",
   };
-  return map[status || ""] || fallback || "未知";
+  return map[(status || "").toLowerCase()] || fallback || "状态未知";
 }
 
 export function monotonicLabel(rates: number[], monotonic: boolean | undefined): string {

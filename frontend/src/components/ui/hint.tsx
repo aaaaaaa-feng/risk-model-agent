@@ -13,6 +13,7 @@ export function Hint({ text, label = "查看说明" }: { text: string; label?: s
         type="button"
         className="hint-trigger"
         aria-label={label}
+        title={text}
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >

@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { notify } from "@/lib/notify";
+import { errorMessage, translateError } from "@/lib/errors";
 import { Hint } from "@/components/ui/hint";
 import type { Decision, Run } from "../types";
 
@@ -103,7 +104,7 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
       await api.post(`/runs/${run.id}/decisions/${decision.id}`, { approved, edits: payloadEdits });
       onResolved();
     } catch (error) {
-      notify(error instanceof Error ? error.message : "提交失败", true);
+      notify(errorMessage(error, { context: "decision" }), true);
     } finally {
       setBusy(false);
     }
@@ -207,9 +208,16 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
             {review.issues?.length ? (
               <ul>
                 {review.issues.map((issue, index) => (
-                  <li key={index}>
-                    <b>{issue.code || "REVIEW"}</b>
-                    <span>{issue.message || JSON.stringify(issue)}</span>
+                  <li key={index} title={issue.code ? `诊断码：${issue.code}` : undefined}>
+                    <b>Reviewer 建议</b>
+                    <span>
+                      {
+                        translateError(
+                          { code: issue.code, message: issue.message },
+                          { context: "review" },
+                        ).text
+                      }
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -264,9 +272,18 @@ function DataDecision({
       {(summary.issues || []).length === 0 && <p className="success-line">没有数据质量阻断。</p>}
       <div className="issue-list">
         {(summary.issues || []).map((item, index) => (
-          <div key={index} className={`issue ${item.severity}`}>
-            <b>{item.code}</b>
-            <span>{item.message}</span>
+          <div
+            key={index}
+            className={`issue ${item.severity}`}
+            title={item.code ? `诊断码：${item.code}` : undefined}
+          >
+            <b>数据质量提示</b>
+            <span>
+              {
+                translateError({ code: item.code, message: item.message }, { context: "review" })
+                  .text
+              }
+            </span>
           </div>
         ))}
       </div>
@@ -527,6 +544,7 @@ function BinningDecision({
                 className={manualColumn === column ? "active" : ""}
                 key={column}
                 onClick={() => load(column)}
+                title={`查看并调整 ${column} 的分箱结果`}
               >
                 <strong>{column}</strong>
                 <span>

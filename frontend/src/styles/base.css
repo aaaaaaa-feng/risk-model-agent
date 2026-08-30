@@ -20,7 +20,12 @@ input,
 select,
 textarea {
   font: inherit;
-  color: inherit;
+}
+
+input,
+select,
+textarea {
+  color: var(--ink);
 }
 
 button,

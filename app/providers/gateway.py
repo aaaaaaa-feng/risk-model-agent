@@ -10,9 +10,11 @@ import httpx
 
 from app.agents.prompts import CONNECTIVITY_PROMPT
 from app.core.config import Settings, SettingsStore
+from app.core.errors import normalize_error_code, public_error_message
 from app.core.paths import AppPaths
 from app.core.security import sanitize_safe_evidence, sha256_bytes, validate_safe_evidence
 
+from .profiles import ProviderProfileStore
 from .secrets import SecretStore
 
 
@@ -57,6 +59,7 @@ class ProviderGateway:
         request_callback: Callable[[str, dict[str, Any], str], str | None] | None = None,
         result_callback: Callable[[str, ProviderResult], None] | None = None,
         paths: AppPaths | None = None,
+        profile_id: str | None = None,
     ):
         self.settings = settings or SettingsStore().load()
         self._api_key_override = (api_key or "").strip()
@@ -68,8 +71,14 @@ class ProviderGateway:
         # Each active Provider profile has its own namespaced secret.  The
         # explicit api_key override remains useful for the connection-test
         # endpoint and never gets persisted by the gateway.
-        self._secrets = SecretStore(paths, profile_id=self.settings.provider)
-        if not self._api_key_override:
+        active_profile_id = profile_id or ProviderProfileStore(paths).active_profile_id(
+            self.settings
+        )
+        self._secrets = SecretStore(
+            paths,
+            profile_id=active_profile_id or self.settings.provider,
+        )
+        if not self._api_key_override and profile_id is None:
             # A worker can start before the settings page is opened after an
             # upgrade.  Migrate the legacy single-key slot lazily as a second
             # line of defence so that existing users never lose access.
@@ -103,20 +112,26 @@ class ProviderGateway:
 
     def status(self) -> dict[str, Any]:
         active = self.enabled
+        if active:
+            connection_state = "ready"
+            message = "API 已配置并启用；仅允许 SafeEvidence 出站。"
+        elif not self.configured:
+            connection_state = "not_configured"
+            message = "API 未连接：配置不完整，当前只使用明确标注的本地降级。"
+        else:
+            connection_state = "disabled"
+            message = "LLM 已关闭：API 配置已保存，当前只使用明确标注的本地降级。"
         return {
             "configured": self.configured,
             "enabled": active,
+            "connection_state": connection_state,
             "provider": self.settings.provider,
             "api_format": self.api_format,
             "endpoint": self.endpoint() if self.settings.base_url else "",
             "model": self.settings.model,
             "reviewer_model": self.settings.reviewer_model or self.settings.model,
             "mode": "external-enabled" if active else "deterministic-fallback",
-            "message": (
-                "外部 API 已启用；仅允许 SafeEvidence 出站。"
-                if active
-                else "外部 API 未启用，使用本地确定性降级。"
-            ),
+            "message": message,
         }
 
     def _body(
@@ -188,13 +203,13 @@ class ProviderGateway:
     ) -> ProviderResult:
         started = time.monotonic()
         if not self.configured or (not self.settings.llm_enabled and not allow_disabled_for_test):
-            return ProviderResult(
-                False,
+            result = ProviderResult(
+                ok=False,
                 error_code="PROVIDER_DISABLED",
-                error_message="Provider 未启用或配置不完整",
                 error_type="ConfigurationError",
                 duration_ms=max(0, int((time.monotonic() - started) * 1000)),
             )
+            return self._finalize_result(result, started, not _defer_result_callback)
         selected_model = model or self.settings.model
         try:
             safe_evidence = sanitize_safe_evidence(evidence)
@@ -213,7 +228,6 @@ class ProviderGateway:
             result = ProviderResult(
                 False,
                 error_code="DLP_BLOCK",
-                error_message=str(exc),
                 error_type=type(exc).__name__,
                 model=selected_model,
                 payload_hash=sha256_bytes(b"provider-blocked-request/v1"),
@@ -235,7 +249,6 @@ class ProviderGateway:
                 result = ProviderResult(
                     False,
                     error_code="PROVIDER_BUDGET_EXCEEDED",
-                    error_message=reason,
                     error_type="BudgetError",
                     model=selected_model,
                     payload_hash=payload_hash,
@@ -291,7 +304,6 @@ class ProviderGateway:
             result = ProviderResult(
                 False,
                 error_code=code,
-                error_message=f"HTTP {exc.response.status_code}",
                 model=selected_model,
                 payload_hash=payload_hash,
                 provider_request_id=provider_request_id,
@@ -304,7 +316,6 @@ class ProviderGateway:
             result = ProviderResult(
                 False,
                 error_code="PROVIDER_REQUEST_FAILED",
-                error_message=str(exc)[:300],
                 model=selected_model,
                 payload_hash=payload_hash,
                 provider_request_id=provider_request_id,
@@ -316,7 +327,6 @@ class ProviderGateway:
             result = ProviderResult(
                 False,
                 error_code="PROVIDER_REQUEST_FAILED",
-                error_message=type(exc).__name__,
                 model=selected_model,
                 payload_hash=payload_hash,
                 provider_request_id=provider_request_id,
@@ -364,7 +374,6 @@ class ProviderGateway:
         except (ValueError, json.JSONDecodeError) as exc:
             result.ok = False
             result.error_code = "PROVIDER_SCHEMA_INVALID"
-            result.error_message = str(exc)[:300]
             result.error_type = type(exc).__name__
             self._finalize_result(result, started, True)
             return None, result
@@ -373,6 +382,12 @@ class ProviderGateway:
         self, result: ProviderResult, started: float, notify: bool
     ) -> ProviderResult:
         result.duration_ms = max(result.duration_ms, int((time.monotonic() - started) * 1000))
+        if not result.ok:
+            result.error_code = normalize_error_code(
+                result.error_code,
+                "PROVIDER_REQUEST_FAILED",
+            )
+            result.error_message = public_error_message(result.error_code)
         if result.content and not result.response_hash:
             result.response_hash = sha256_bytes(result.content.encode("utf-8"))
         if notify and result.provider_request_id and self._result_callback:

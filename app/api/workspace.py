@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
-from app.core.workspace import WorkspaceManager, pick_workspace_directory
+from app.core.workspace import WorkspaceManager, WorkspacePickerError, pick_workspace_directory
 from app.runtime import AppContext
 
 from .dependencies import context
@@ -37,8 +38,18 @@ def get_workspace(ctx: AppContext = Depends(context)) -> dict[str, Any]:
 
 
 @router.post("/workspace/native-picker")
-def native_picker() -> dict[str, Any]:
-    selected = pick_workspace_directory()
+async def native_picker() -> dict[str, Any]:
+    # A desktop dialog may stay open until the bounded anti-hang timeout.
+    # Keep it outside the ASGI event loop so health checks and the rest of the
+    # local UI remain responsive while the user makes a selection.
+    try:
+        selected = await run_in_threadpool(pick_workspace_directory)
+    except WorkspacePickerError as exc:
+        status_code = 504 if exc.code == "WORKSPACE_NATIVE_PICKER_TIMEOUT" else 503
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": exc.code, "message": exc.public_message},
+        ) from exc
     return {"path": selected, "cancelled": selected is None}
 
 
