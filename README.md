@@ -90,7 +90,7 @@ Windows 使用 `scripts/build_windows.ps1`，它会依次构建前端、PyInstal
 
 安装程序输出到 `dist\installer\RiskModelAgent-<version>-windows-x64-setup.exe`，同时生成 SHA-256 校验文件。它采用当前用户安装，不要求管理员权限，包含开始菜单、可选桌面快捷方式和标准卸载入口。卸载只移除应用程序，默认保留 `%LOCALAPPDATA%\RiskModelAgent` 中的项目、配置、密钥和模型数据。
 
-完整离线包保留 Pandas、DuckDB、Notebook 和全部建模算法，不再重复打包 Polars。打包配置只收集模型训练必需的原生库，并排除产品未使用的分布式训练、调试、代码补全和 Python 绘图模块。可使用以下命令在本地生成体积与依赖清单：
+完整离线包保留 Pandas、DuckDB、Notebook 和全部建模算法，不再重复打包 Polars。打包配置只收集模型训练必需的原生库，并排除产品未使用的分布式训练、调试、代码补全和 Python 绘图模块。桌面版暂将 XGBoost 限定在 `<3.2`：3.2 的 Windows 原生库显著增大，而当前 V1 未使用其新增能力；解除上限前必须重新通过八模型冻结自检、完整评分冒烟和安装包体积门禁。可使用以下命令在本地生成体积与依赖清单：
 
 ```bash
 python scripts/audit_package_size.py --bundle dist/risk-model-agent --output dist/package-size-report.json --enforce

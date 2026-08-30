@@ -133,6 +133,7 @@ def main() -> int:
         "runtime_dependencies_are_slim": '"polars' not in pyproject.lower()
         and '"uvicorn[standard]' not in pyproject.lower()
         and '"duckdb' in pyproject.lower(),
+        "xgboost_package_size_guard": '"xgboost>=2.0,<3.2"' in pyproject.lower(),
         "launcher_dispatches_kernel": "IPKernelApp.launch_instance()"
         in (ROOT / "run_local.py").read_text(encoding="utf-8"),
         "launcher_supports_frozen_workers": "multiprocessing.freeze_support()"
@@ -192,6 +193,7 @@ def main() -> int:
             "spec_uses_precise_collection",
             "spec_excludes_unused_modules",
             "runtime_dependencies_are_slim",
+            "xgboost_package_size_guard",
             "launcher_dispatches_kernel",
             "launcher_supports_frozen_workers",
             "launcher_dispatches_package_self_test",
