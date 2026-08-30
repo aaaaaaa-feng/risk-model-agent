@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { providerConnectionState, providerModelUpdatePayload } from "./lib/provider-state";
-import type { Settings } from "./types";
+import {
+  providerConnectionState,
+  providerModelUpdatePayload,
+  type Settings,
+} from "@/features/settings";
 
 function settings(overrides: Partial<Settings> = {}): Settings {
   return {

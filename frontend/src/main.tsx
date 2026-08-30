@@ -1,8 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
-import { AppErrorBoundary } from "./components/AppErrorBoundary";
-import { initializeLocalSession } from "./api";
+import { AppErrorBoundary } from "./app/AppErrorBoundary";
+import { initializeLocalSession } from "./shared/api/client";
 import "./styles/index.css";
 
 async function bootstrap() {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { isCurrentSelection, mergeEventsForRun } from "./runState";
-import type { RunEvent } from "./types";
+import { isCurrentSelection, mergeEventsForRun } from "@/features/runs/model/runState";
+import type { RunEvent } from "@/features/runs";
 
 function event(id: string, runId: string, sequence: number): RunEvent {
   return {

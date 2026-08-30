@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ApiError } from "./api";
-import { errorMessage, eventSummary, translateError } from "./lib/errors";
+import { ApiError } from "@/shared/api/client";
+import { errorMessage, eventSummary, translateError } from "@/shared/lib/errors";
 
 const containsChinese = (value: string) => /[\u3400-\u9fff]/.test(value);
 

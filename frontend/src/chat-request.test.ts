@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isAbortError, isCurrentChatRequest, parseConversationEvent } from "./lib/chat-request";
+import {
+  isAbortError,
+  isCurrentChatRequest,
+  parseConversationEvent,
+} from "@/features/chat/lib/chatRequest";
 
 describe("project-scoped chat requests", () => {
   it("rejects an old load or stream after the project or request generation changes", () => {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError } from "./api";
+import { httpClient, ApiError } from "@/shared/api/client";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -15,14 +15,14 @@ describe("API 错误边界", () => {
       ),
     );
 
-    const error = await api.get("/projects").catch((value: unknown) => value);
+    const error = await httpClient.get("/projects").catch((value: unknown) => value);
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ status: 422, code: "VALIDATION_ERROR", message: "" });
   });
 
   it("将 fetch 连接失败收敛为可翻译的稳定错误码", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
-    const error = await api.get("/health").catch((value: unknown) => value);
+    const error = await httpClient.get("/health").catch((value: unknown) => value);
     expect(error).toMatchObject({ status: 0, code: "NETWORK_UNREACHABLE", message: "" });
   });
 
@@ -40,7 +40,7 @@ describe("API 错误边界", () => {
       ),
     );
 
-    const file = await api.download("/reports/run-1/html");
+    const file = await httpClient.download("/reports/run-1/html");
     expect(file.filename).toBe("risk-report.html");
     expect(file.contentType).toBe("text/html");
     expect(await file.blob.text()).toBe("report");

@@ -4,7 +4,7 @@ import {
   RUN_EVENT_MAX_RETRIES,
   runEventRetryDelay,
   runEventStreamUrl,
-} from "./hooks/useRunEvents";
+} from "@/features/runs/model/useRunEvents";
 
 const validEvent = {
   id: "event-1",
