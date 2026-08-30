@@ -32,7 +32,7 @@ from app.bootstrap import AppContext
 from app.workers.model_adapters import available_models
 
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.1.0"
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 logger = logging.getLogger(__name__)
 
