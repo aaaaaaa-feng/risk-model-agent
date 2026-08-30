@@ -1,30 +1,15 @@
 from __future__ import annotations
 
-import queue
-import threading
 import time
-from dataclasses import dataclass
+import threading
 from pathlib import Path
 from typing import Any
 
 from app.core.paths import AppPaths, get_paths
 
+from .runtime import JupyterNotebookRuntime, KernelSession, NotebookRuntime
 
-@dataclass
-class KernelSession:
-    manager: Any
-    client: Any
-    execution_count: int = 0
-
-
-class _BundledLocalProvisionerEntryPoint:
-    """Stable entry-point adapter for frozen builds with metadata shims."""
-
-    @staticmethod
-    def load() -> Any:
-        from jupyter_client.provisioning.local_provisioner import LocalProvisioner
-
-        return LocalProvisioner
+__all__ = ["KernelSession", "NotebookManager"]
 
 
 class NotebookManager:
@@ -35,11 +20,14 @@ class NotebookManager:
     permissions of the desktop application.
     """
 
-    def __init__(self, paths: AppPaths | None = None):
+    def __init__(
+        self,
+        paths: AppPaths | None = None,
+        runtime: NotebookRuntime | None = None,
+    ):
         self.paths = paths or get_paths()
-        self._sessions: dict[str, KernelSession] = {}
+        self.runtime = runtime or JupyterNotebookRuntime()
         self._locks: dict[str, threading.RLock] = {}
-        self._global_lock = threading.RLock()
 
     def notebook_dir(self, project_id: str) -> Path:
         target = self.paths.project_dir(project_id) / "notebooks"
@@ -63,9 +51,7 @@ class NotebookManager:
             nbformat.v4.new_markdown_cell(
                 f"# {name}\n\n此 Notebook 在本机项目级 Kernel 中执行。执行后生成的数据仍需通过粒度、重复、样本膨胀、Y 与血缘检查。"
             ),
-            nbformat.v4.new_code_cell(
-                "import pandas as pd\nimport numpy as np\nimport polars as pl\nimport duckdb"
-            ),
+            nbformat.v4.new_code_cell("import pandas as pd\nimport numpy as np\nimport duckdb"),
         ]
         path = self.notebook_dir(project_id) / f"{notebook_id}.ipynb"
         nbformat.write(notebook, path)
@@ -90,34 +76,37 @@ class NotebookManager:
     ) -> dict[str, Any]:
         lock = self._locks.setdefault(project_id, threading.RLock())
         with lock:
-            nbformat = _nbformat()
-            notebook = nbformat.read(path, as_version=4)
-            if cell_index < 0 or cell_index >= len(notebook.cells):
-                raise ValueError("NOTEBOOK_CELL_NOT_FOUND")
-            cell = notebook.cells[cell_index]
-            if cell.cell_type != "code":
-                raise ValueError("NOTEBOOK_CELL_NOT_CODE")
-            session = self._session(project_id)
-            message_id = session.client.execute(cell.source, store_history=True, allow_stdin=False)
-            try:
-                outputs, execution_count, status = self._collect(
-                    session.client, message_id, timeout_seconds
-                )
-            except TimeoutError:
-                # A timed-out cell must not keep consuming resources or block all
-                # later cells in the persistent project kernel.
-                self.shutdown_project(project_id)
-                raise
-            cell.outputs = outputs
-            cell.execution_count = execution_count
-            session.execution_count = max(session.execution_count, execution_count or 0)
-            nbformat.write(notebook, path)
-            return {
-                "cell_index": cell_index,
-                "execution_count": execution_count,
-                "status": status,
-                "outputs": [dict(item) for item in outputs],
-            }
+            return self._execute_cell(project_id, path, cell_index, timeout_seconds)
+
+    def _execute_cell(
+        self,
+        project_id: str,
+        path: Path,
+        cell_index: int,
+        timeout_seconds: int,
+    ) -> dict[str, Any]:
+        nbformat = _nbformat()
+        notebook = nbformat.read(path, as_version=4)
+        if cell_index < 0 or cell_index >= len(notebook.cells):
+            raise ValueError("NOTEBOOK_CELL_NOT_FOUND")
+        cell = notebook.cells[cell_index]
+        if cell.cell_type != "code":
+            raise ValueError("NOTEBOOK_CELL_NOT_CODE")
+        execution = self.runtime.execute(
+            project_id,
+            self.notebook_dir(project_id),
+            str(cell.source),
+            timeout_seconds,
+        )
+        cell.outputs = execution.outputs
+        cell.execution_count = execution.execution_count
+        nbformat.write(notebook, path)
+        return {
+            "cell_index": cell_index,
+            "execution_count": execution.execution_count,
+            "status": execution.status,
+            "outputs": [dict(item) for item in execution.outputs],
+        }
 
     def execute_all(
         self, project_id: str, path: Path, timeout_seconds: int = 300
@@ -129,90 +118,22 @@ class NotebookManager:
             if cell.cell_type == "code"
         ]
 
-    def _session(self, project_id: str) -> KernelSession:
-        with self._global_lock:
-            existing = self._sessions.get(project_id)
-            if existing and existing.manager.is_alive():
-                return existing
-            try:
-                from jupyter_client import KernelManager
-                from jupyter_client.provisioning.factory import KernelProvisionerFactory
-            except ImportError as exc:  # pragma: no cover - dependency contract
-                raise RuntimeError("JUPYTER_CLIENT_DEPENDENCY_REQUIRED") from exc
-            provisioners = KernelProvisionerFactory.instance().provisioners
-            provisioners["local-provisioner"] = _BundledLocalProvisionerEntryPoint()
-            manager = KernelManager(kernel_name="python3")
-            manager.start_kernel(cwd=str(self.notebook_dir(project_id)))
-            client = manager.blocking_client()
-            client.start_channels()
-            client.wait_for_ready(timeout=30)
-            session = KernelSession(manager, client)
-            self._sessions[project_id] = session
-            return session
-
     @staticmethod
     def _collect(
         client: Any, message_id: str, timeout_seconds: int
     ) -> tuple[list[Any], int | None, str]:
-        nbformat = _nbformat()
-        outputs: list[Any] = []
-        execution_count: int | None = None
-        status = "succeeded"
-        deadline = time.monotonic() + timeout_seconds
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError("NOTEBOOK_CELL_TIMEOUT")
-            try:
-                message = client.get_iopub_msg(timeout=remaining)
-            except queue.Empty as exc:
-                raise TimeoutError("NOTEBOOK_CELL_TIMEOUT") from exc
-            if message.get("parent_header", {}).get("msg_id") != message_id:
-                continue
-            message_type = message["header"]["msg_type"]
-            content = message["content"]
-            if message_type == "status" and content.get("execution_state") == "idle":
-                break
-            if message_type == "execute_input":
-                execution_count = content.get("execution_count")
-            elif message_type == "stream":
-                outputs.append(
-                    nbformat.v4.new_output("stream", name=content["name"], text=content["text"])
-                )
-            elif message_type in {"display_data", "execute_result"}:
-                outputs.append(
-                    nbformat.v4.new_output(
-                        message_type,
-                        data=content.get("data", {}),
-                        metadata=content.get("metadata", {}),
-                        execution_count=content.get("execution_count"),
-                    )
-                )
-            elif message_type == "error":
-                status = "failed"
-                outputs.append(
-                    nbformat.v4.new_output(
-                        "error",
-                        ename=content.get("ename", "Error"),
-                        evalue=content.get("evalue", ""),
-                        traceback=content.get("traceback", []),
-                    )
-                )
-        return outputs, execution_count, status
+        return JupyterNotebookRuntime._collect(
+            client,
+            message_id,
+            timeout_seconds,
+            clock=time.monotonic,
+        )
 
     def shutdown_project(self, project_id: str) -> None:
-        with self._global_lock:
-            session = self._sessions.pop(project_id, None)
-        if session:
-            try:
-                session.client.stop_channels()
-                session.manager.shutdown_kernel(now=True)
-            except Exception:
-                pass
+        self.runtime.shutdown_project(project_id)
 
     def shutdown_all(self) -> None:
-        for project_id in list(self._sessions):
-            self.shutdown_project(project_id)
+        self.runtime.shutdown_all()
 
 
 def _nbformat() -> Any:

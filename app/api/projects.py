@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from app.core.config import MAX_UPLOAD_BYTES
 from app.core.database import new_id
 from app.core.errors import normalize_error_code, public_error_message
-from app.runtime import AppContext
+from app.bootstrap import AppContext
 from app.workers.io import SUPPORTED_SUFFIXES, safe_file_name
 from app.workers.io import read_table
 from app.workers.profiling import infer_type

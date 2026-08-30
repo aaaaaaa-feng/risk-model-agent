@@ -30,7 +30,7 @@ def _pipeline_process_entry(
     state: dict[str, Any],
     output_path: str,
 ) -> None:
-    """Spawn target: construct only deterministic services, never another engine."""
+    """子进程入口：只组装一次应用服务，不再创建编排引擎。"""
     from app.core.database import Database
     from app.services.artifacts import ArtifactService
     from app.services.catalog import CatalogService
@@ -120,9 +120,7 @@ class WorkerProcessRunner:
         settings = SettingsStore(self.paths).load()
         memory_limit = max(512, int(settings.memory_budget_mb)) * 1024**2
         timeout = max(1, WORKER_TIMEOUT_SECONDS)
-        working = Path(
-            tempfile.mkdtemp(prefix=f"risk-worker-{label}-", dir=self.paths.root)
-        )
+        working = Path(tempfile.mkdtemp(prefix=f"risk-worker-{label}-", dir=self.paths.root))
         output = working / "result.json"
         process = multiprocessing.get_context("spawn").Process(
             target=target,

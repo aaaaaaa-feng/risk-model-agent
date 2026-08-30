@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.core.database import new_id, now_iso
 from app.core.config import SettingsStore
-from app.runtime import AppContext
+from app.bootstrap import AppContext
 from app.workers.io import read_table
 from app.workers.profiling import diagnose_frame, normalize_binary, profile_frame
 

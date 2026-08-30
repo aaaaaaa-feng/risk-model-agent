@@ -8,7 +8,7 @@ import pytest
 from app.core.config import Settings, SettingsStore
 from app.evaluation.adapter import _provider_settings, run_eval_case
 from app.evaluation.fakes import ScriptedProviderFactory
-from app.evaluation.manifest import canonical_hash, compare_manifests, verify_manifest
+from app.governance.manifest import canonical_hash, compare_manifests, verify_manifest
 from app.providers.gateway import ProviderGateway
 
 

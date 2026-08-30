@@ -13,7 +13,7 @@ from app.core.errors import normalize_error_code, public_error_message
 from app.providers.gateway import ProviderGateway
 from app.providers.profiles import ProviderProfileStore
 from app.providers.secrets import SecretStore
-from app.runtime import AppContext
+from app.bootstrap import AppContext
 
 from .dependencies import context
 

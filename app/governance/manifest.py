@@ -9,9 +9,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from app.agents.prompts import prompt_manifest
+from app.agents.prompts import PROMPTS as AGENT_PROMPTS
 from app.core.config import Settings
 from app.core.security import sha256_bytes, sha256_file
+from app.domain.prompts import build_prompt_manifest
+from app.providers.prompts import PROMPTS as PROVIDER_PROMPTS
 from app.tooling.registry import ToolRegistry
 
 
@@ -55,7 +57,7 @@ def build_run_manifest(
     started_at: str,
     evaluation_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    prompts = prompt_manifest()
+    prompts = build_prompt_manifest((*AGENT_PROMPTS, *PROVIDER_PROMPTS))
     tool_manifest = registry.manifest()
     lineage = dataset.get("lineage") or {}
     dataset_hash = str(lineage.get("output_sha256") or "")

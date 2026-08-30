@@ -25,11 +25,11 @@ def __getattr__(name: str):
 
         return EvaluationHarness
     if name in {"MANIFEST_SCHEMA", "compare_manifests"}:
-        from .manifest import MANIFEST_SCHEMA, compare_manifests
+        from app.governance.manifest import MANIFEST_SCHEMA, compare_manifests
 
         return {"MANIFEST_SCHEMA": MANIFEST_SCHEMA, "compare_manifests": compare_manifests}[name]
     if name in {"TRACE_SCHEMA", "TraceService"}:
-        from .tracing import TRACE_SCHEMA, TraceService
+        from app.governance.tracing import TRACE_SCHEMA, TraceService
 
         return {"TRACE_SCHEMA": TRACE_SCHEMA, "TraceService": TraceService}[name]
     raise AttributeError(name)

@@ -28,8 +28,8 @@ from app.core.errors import (
     value_error_status,
 )
 from app.core.paths import AppPaths, get_paths, is_synced_path
-from app.runtime import AppContext
-from app.workers.modeling import available_models
+from app.bootstrap import AppContext
+from app.workers.model_adapters import available_models
 
 
 APP_VERSION = "1.0.2"

@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 import pandas as pd
 
-from app.services.catalog import CatalogService
-
-
 DEMO_SEED = 20260821
+
+
+class DemoCatalog(Protocol):
+    """安装演示数据所需的最小目录能力。"""
+
+    def __getattr__(self, name: str) -> Any: ...
 
 
 def generate_demo_tables(rows: int = 1_200, seed: int = DEMO_SEED) -> dict[str, pd.DataFrame]:
@@ -102,7 +105,9 @@ def generate_demo_tables(rows: int = 1_200, seed: int = DEMO_SEED) -> dict[str, 
             "device_risk_index": device_risk.round(5),
             "account_age_days": account_age_days,
             "contact_stability": contact_stability.round(5),
-            "sparse_external_value": np.where(rng.random(rows) < 0.18, rng.normal(size=rows), np.nan),
+            "sparse_external_value": np.where(
+                rng.random(rows) < 0.18, rng.normal(size=rows), np.nan
+            ),
         }
     )
     descriptions = {
@@ -141,7 +146,7 @@ def generate_demo_tables(rows: int = 1_200, seed: int = DEMO_SEED) -> dict[str, 
 
 
 def install_demo_project(
-    catalog: CatalogService,
+    catalog: DemoCatalog,
     *,
     name: str = "多表风控建模演示",
     mode: str = "semi_trusted",
@@ -169,17 +174,28 @@ def install_demo_project(
         for key, path in source_files.items():
             tables[key].to_csv(path, index=False, encoding="utf-8-sig")
         base = catalog.register_asset(
-            project["id"], workbook, workbook.name, "base", "放款订单",
+            project["id"],
+            workbook,
+            workbook.name,
+            "base",
+            "放款订单",
             {"synthetic_demo": True},
         )
         dictionary = catalog.register_asset(
-            project["id"], workbook, workbook.name, "dictionary", "字段说明",
+            project["id"],
+            workbook,
+            workbook.name,
+            "dictionary",
+            "字段说明",
             {"synthetic_demo": True},
         )
         assets = [base]
         for key in ("demographics", "bureau", "device"):
             asset = catalog.register_asset(
-                project["id"], source_files[key], source_files[key].name, "feature",
+                project["id"],
+                source_files[key],
+                source_files[key].name,
+                "feature",
                 metadata={"synthetic_demo": True},
             )
             assets.append(asset)
@@ -217,9 +233,7 @@ def install_demo_project(
             },
         ],
     )
-    plan, dataset = catalog.execute_join_plan(
-        plan["id"], ["FPD0", "FPD7", "MOB30"], "customer_id"
-    )
+    plan, dataset = catalog.execute_join_plan(plan["id"], ["FPD0", "FPD7", "MOB30"], "customer_id")
     tasks = [
         catalog.create_target_task(project["id"], dataset["id"], target)
         for target in ("FPD0", "FPD7", "MOB30")

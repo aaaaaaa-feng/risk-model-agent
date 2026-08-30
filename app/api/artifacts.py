@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from app.core.config import MAX_ARCHIVE_BYTES
 from app.core.database import new_id
 from app.core.security import sha256_file
-from app.runtime import AppContext
+from app.bootstrap import AppContext
 
 from .dependencies import context
 

@@ -15,11 +15,13 @@ os.environ.setdefault("RISK_AGENT_OPEN_BROWSER", "0")
 
 from app.core.config import SettingsStore  # noqa: E402
 from app.core.paths import AppPaths  # noqa: E402
-from app.runtime import AppContext  # noqa: E402
+from app.bootstrap import AppContext  # noqa: E402
 from app.workers.demo import install_demo_project  # noqa: E402
 
 
-def wait_for_run(context: AppContext, run_id: str, states: set[str], timeout: float = 180) -> dict[str, Any]:
+def wait_for_run(
+    context: AppContext, run_id: str, states: set[str], timeout: float = 180
+) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         run = context.catalog.require("runs", run_id)

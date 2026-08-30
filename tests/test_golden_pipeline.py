@@ -49,6 +49,11 @@ def test_full_agent_reviewer_worker_pipeline(golden):
         "regularized_logistic": "trained",
         "xgboost": "trained",
     }
+    assert state["effective_models"] == [
+        item["candidate"]
+        for item in state["model_result"]["candidates"]
+        if item["status"] == "trained"
+    ]
     excluded = {item["column"]: item["reason"] for item in state["screening"]["excluded"]}
     assert excluded["FPD7"] == "OTHER_TARGET"
     assert excluded["MOB30"] == "OTHER_TARGET"

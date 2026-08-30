@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.agents.graph import RunEngine
 from app.core.database import Database
 from app.core.paths import AppPaths, get_paths
 from app.evaluation.harness import EvaluationHarness
 from app.notebooks.manager import NotebookManager
+from app.orchestration.graph import RunEngine
 from app.services.archives import ArchiveService, BackupService
 from app.services.artifacts import ArtifactService
 from app.services.catalog import CatalogService

@@ -7,7 +7,7 @@ from typing import Any
 
 from app.core.database import Database, new_id, now_iso
 from app.core.security import sanitize_safe_evidence, sha256_bytes
-from app.evaluation.manifest import verify_manifest
+from app.governance.manifest import verify_manifest
 
 
 TRACE_SCHEMA = "risk-agent-trace/v1"

@@ -9,9 +9,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.errors import normalize_error_code, public_error_message
-from app.evaluation.manifest import verify_manifest
-from app.evaluation.tracing import TraceService
-from app.runtime import AppContext
+from app.governance.manifest import verify_manifest
+from app.governance.tracing import TraceService
+from app.bootstrap import AppContext
 
 from .dependencies import context
 

@@ -6,15 +6,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-from app.agents.graph import RunEngine
 from app.core.config import SettingsStore
 from app.core.database import Database
 from app.core.paths import AppPaths
 from app.core.security import sha256_file
 from app.evaluation.contracts import EvalCase, EvalResult
 from app.evaluation.fakes import ScriptedProviderFactory
-from app.evaluation.manifest import canonical_hash
-from app.evaluation.tracing import TraceService
+from app.governance.manifest import canonical_hash
+from app.governance.tracing import TraceService
+from app.orchestration.graph import RunEngine
 from app.services.artifacts import ArtifactService
 from app.services.catalog import CatalogService
 from app.services.pipeline import RunPipeline

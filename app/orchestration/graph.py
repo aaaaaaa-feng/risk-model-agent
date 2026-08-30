@@ -5,129 +5,19 @@ import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any
 
 from app.core.config import SettingsStore
 from app.core.database import Database, new_id, now_iso
 from app.core.errors import normalize_error_code
 from app.core.paths import AppPaths, get_paths
-from app.evaluation.manifest import MANIFEST_SCHEMA, build_run_manifest
-from app.evaluation.tracing import TraceService
+from app.domain.reviews import review_blocks_progress, review_requires_revision
+from app.governance.manifest import MANIFEST_SCHEMA, build_run_manifest
+from app.governance.tracing import TraceService
 from app.services.catalog import CatalogService
 from app.services.pipeline import RunPipeline
-from app.workers.process_runner import WorkerProcessRunner
-
-from .reviewer import review_blocks_progress, review_requires_revision
-
-
-class RunState(TypedDict, total=False):
-    run_id: str
-    project_id: str
-    target_task_id: str
-    mode: str
-    halted: bool
-    target: str
-    target_evidence: dict[str, Any]
-    target_gate: dict[str, Any]
-    target_review: dict[str, Any]
-    target_decision: dict[str, Any]
-    profile: dict[str, Any]
-    diagnostics: dict[str, Any]
-    cleaning_plan: dict[str, Any]
-    cleaning_result: dict[str, Any]
-    data_gate: dict[str, Any]
-    data_review: dict[str, Any]
-    data_decision: dict[str, Any]
-    working_dataset_version_id: str
-    split_plan: dict[str, Any]
-    split: dict[str, Any]
-    split_gate: dict[str, Any]
-    split_review: dict[str, Any]
-    split_decision: dict[str, Any]
-    screening: dict[str, Any]
-    screening_gate: dict[str, Any]
-    screening_review: dict[str, Any]
-    screening_decision: dict[str, Any]
-    binning: dict[str, Any]
-    binning_gate: dict[str, Any]
-    binning_review: dict[str, Any]
-    binning_decision: dict[str, Any]
-    model_plan: dict[str, Any]
-    model_gate: dict[str, Any]
-    model_plan_review: dict[str, Any]
-    model_decision: dict[str, Any]
-    model_result: dict[str, Any]
-    report: dict[str, Any]
-    report_review: dict[str, Any]
-    execution_review: dict[str, Any]
-    code_review: dict[str, Any]
-    generated_code_path: str
-    field_aliases: dict[str, str]
-    effective_models: list[str]
-    model_version_id: str
-    package_manifest: dict[str, Any]
-    worker_bundle_manifest_sha256: str
-    artifact_ids: list[str]
-    trace_id: str
-    root_span_id: str
-
-
-TOOL_NODES = [
-    (
-        "prepare_target",
-        "target_confirmation",
-        "main_agent",
-        "prepare_target",
-        "已检查 Y 与有效样本",
-    ),
-    ("diagnose", "data_diagnosis", "main_agent", "diagnose_data", "已完成建模前诊断"),
-    ("clean", "cleaning", "local_worker", "apply_cleaning", "已生成清洗数据版本"),
-    ("propose_split", "split", "main_agent", "propose_split", "已提出样本切分方案"),
-    ("execute_split", "split", "local_worker", "execute_split", "已完成 Train/Test/OOT 切分"),
-    ("screen", "screening", "local_worker", "screen_features", "已完成 Train-only 变量筛选"),
-    ("finalize_screen", "screening", "main_agent", "finalize_screening", "已冻结最终入模变量"),
-    ("bin_features", "binning", "local_worker", "fit_binning", "已完成自动单调分箱"),
-    ("finalize_binning", "binning", "main_agent", "finalize_binning", "已冻结分箱版本"),
-    ("propose_models", "model_plan", "main_agent", "propose_models", "已提出候选模型与评分方案"),
-    ("finalize_models", "model_plan", "main_agent", "finalize_model_plan", "已冻结建模方案"),
-    (
-        "code_review",
-        "code_review",
-        "reviewer_agent",
-        "generate_and_review_code",
-        "代码已完成独立质检",
-    ),
-    (
-        "train_review",
-        "training",
-        "reviewer_agent",
-        "train_and_review",
-        "训练、校准与执行质检已完成",
-    ),
-    (
-        "report_review",
-        "reporting",
-        "reviewer_agent",
-        "build_and_review_report",
-        "结构化报告已完成独立质检",
-    ),
-    (
-        "write_artifacts",
-        "reporting",
-        "local_worker",
-        "write_artifacts",
-        "报告、模型包与评分入口已生成",
-    ),
-]
-
-GATES = {
-    "confirm_target": ("target_confirmation", "target_gate", "target_decision"),
-    "confirm_data": ("data_diagnosis", "data_gate", "data_decision"),
-    "confirm_split": ("split", "split_gate", "split_decision"),
-    "confirm_screening": ("screening", "screening_gate", "screening_decision"),
-    "confirm_binning": ("binning", "binning_gate", "binning_decision"),
-    "confirm_models": ("model_plan", "model_gate", "model_decision"),
-}
+from app.orchestration.process_runner import WorkerProcessRunner
+from app.orchestration.contracts import GATES, TOOL_NODES, RunState, node_position
 
 
 class RunEngine:
@@ -172,8 +62,17 @@ class RunEngine:
         from langgraph.graph import END, START, StateGraph
 
         builder = StateGraph(RunState)
-        for node, stage, agent, tool, summary in TOOL_NODES:
-            builder.add_node(node, self._tool_node(node, stage, agent, tool, summary))
+        for step in TOOL_NODES:
+            builder.add_node(
+                step.graph_node,
+                self._tool_node(
+                    step.graph_node,
+                    step.stage,
+                    step.agent,
+                    step.tool_name,
+                    step.summary,
+                ),
+            )
         for node, (stage, details_key, output_key) in GATES.items():
             builder.add_node(node, self._gate_node(node, stage, details_key, output_key))
         builder.add_node("complete", self._complete_node)
@@ -477,7 +376,7 @@ class RunEngine:
                 )
                 raise
             merged = _jsonable({**state, **update})
-            progress = (_node_position(node) + 1) / len(TOOL_NODES)
+            progress = (node_position(node) + 1) / len(TOOL_NODES)
             completed_span = self.traces.finish_span(
                 span["id"],
                 "succeeded",
@@ -866,13 +765,6 @@ class RunEngine:
                 connection.close()
             except sqlite3.Error:
                 pass
-
-
-def _node_position(node: str) -> int:
-    for index, item in enumerate(TOOL_NODES):
-        if item[0] == node:
-            return index
-    return 0
 
 
 def _gate_review(state: RunState, stage: str) -> dict[str, Any]:
