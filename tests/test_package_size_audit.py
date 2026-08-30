@@ -1,13 +1,36 @@
+import json
 from pathlib import Path
 
 import pytest
 
+import scripts.audit_package_size as package_size_audit
 from scripts.audit_package_size import (
     InstallerPolicy,
     PackageAuditError,
     create_report,
     resolve_installer,
 )
+
+
+class _Cp1252Console:
+    """模拟 Windows 旧代码页，写入不可编码字符时立即失败。"""
+
+    encoding = "cp1252"
+
+    def __init__(self) -> None:
+        self.fragments: list[str] = []
+
+    def write(self, value: str) -> int:
+        value.encode(self.encoding)
+        self.fragments.append(value)
+        return len(value)
+
+    def flush(self) -> None:
+        return None
+
+    @property
+    def text(self) -> str:
+        return "".join(self.fragments)
 
 
 def _write(path: Path, size: int) -> Path:
@@ -85,3 +108,55 @@ def test_installer_directory_must_contain_exactly_one_candidate(tmp_path: Path):
 
     with pytest.raises(PackageAuditError, match="必须唯一"):
         resolve_installer(installer_dir)
+
+
+def test_package_audit_keeps_utf8_report_and_supports_cp1252_stdout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    bundle = tmp_path / "中文目录" / "risk-model-agent"
+    _write(bundle / "risk-model-agent.exe", 10)
+    output = tmp_path / "中文报告.json"
+    console = _Cp1252Console()
+    monkeypatch.setattr(package_size_audit.sys, "stdout", console)
+
+    exit_code = package_size_audit.main(
+        ["--bundle", str(bundle), "--output", str(output), "--enforce"]
+    )
+
+    assert exit_code == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert "中文目录" in report["bundle"]["path"]
+    assert report["valid"] is True
+    assert "schema_version" in console.text
+    assert "\\u" in console.text
+    console.text.encode("cp1252")
+
+
+def test_package_audit_help_supports_cp1252_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    console = _Cp1252Console()
+    monkeypatch.setattr(package_size_audit.sys, "stdout", console)
+
+    with pytest.raises(SystemExit) as raised:
+        package_size_audit.main(["--help"])
+
+    assert raised.value.code == 0
+    assert "--bundle" in console.text
+    assert "\\u" in console.text
+    console.text.encode("cp1252")
+
+
+def test_package_audit_argument_error_supports_cp1252_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    console = _Cp1252Console()
+    monkeypatch.setattr(package_size_audit.sys, "stderr", console)
+
+    with pytest.raises(SystemExit) as raised:
+        package_size_audit.main(["--baseline-kib", "not-a-number"])
+
+    assert raised.value.code == 2
+    assert "--baseline-kib" in console.text
+    console.text.encode("cp1252")

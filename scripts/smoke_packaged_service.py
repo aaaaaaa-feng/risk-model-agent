@@ -41,9 +41,7 @@ def request_json(
 def upload_csv(base_url: str, project_id: str, source: Path) -> dict[str, Any]:
     boundary = f"----risk-model-agent-{uuid.uuid4().hex}"
     parts = [
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="kind"\r\n\r\n'
-        "score_input\r\n",
+        f'--{boundary}\r\nContent-Disposition: form-data; name="kind"\r\n\r\nscore_input\r\n',
         f"--{boundary}\r\n"
         'Content-Disposition: form-data; name="file"; filename="packaged-score-input.csv"\r\n'
         "Content-Type: text/csv\r\n\r\n",
@@ -191,7 +189,8 @@ def main() -> None:
                 "score_rows": job["rows"],
                 "score_column": job["metadata"]["score_column"],
             },
-            ensure_ascii=False,
+            # 结果可能包含中文质检结论，ASCII 转义可兼容 Windows 旧代码页。
+            ensure_ascii=True,
         )
     )
 

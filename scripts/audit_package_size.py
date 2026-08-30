@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import sys
-from typing import Iterable
+from typing import Iterable, TextIO
 
 
 KIB = 1024
@@ -196,8 +196,36 @@ def write_report(report: dict[str, object], output: Path) -> None:
     temporary.replace(output)
 
 
+def _console_safe_text(value: str, stream: TextIO) -> str:
+    """按当前控制台编码降级文本，避免 Windows 旧代码页直接崩溃。"""
+
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        value.encode(encoding)
+    except LookupError:
+        encoding = "ascii"
+    except UnicodeEncodeError:
+        pass
+    else:
+        return value
+    return value.encode(encoding, errors="backslashreplace").decode(encoding)
+
+
+def _print_console(value: str, *, stream: TextIO) -> None:
+    print(_console_safe_text(value, stream), file=stream)
+
+
+class _ConsoleSafeArgumentParser(argparse.ArgumentParser):
+    """让帮助和参数错误也遵守同一控制台编码边界。"""
+
+    def _print_message(self, message: str, file: TextIO | None = None) -> None:
+        if message:
+            stream = file or sys.stderr
+            stream.write(_console_safe_text(message, stream))
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="审计本地冻结目录与 Windows 安装包体积。")
+    parser = _ConsoleSafeArgumentParser(description="审计本地冻结目录与 Windows 安装包体积。")
     parser.add_argument("--bundle", type=Path, default=Path("dist/risk-model-agent"))
     parser.add_argument("--installer", type=Path)
     parser.add_argument("--output", type=Path, default=Path("dist/package-size-report.json"))
@@ -211,10 +239,10 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.baseline_kib <= 0 or args.maximum_mib <= 0:
-        print("体积基线和上限必须大于 0。", file=sys.stderr)
+        _print_console("体积基线和上限必须大于 0。", stream=sys.stderr)
         return 2
     if not 0 <= args.minimum_reduction_percent < 100:
-        print("缩减比例必须位于 0 到 100 之间。", file=sys.stderr)
+        _print_console("缩减比例必须位于 0 到 100 之间。", stream=sys.stderr)
         return 2
     try:
         report = create_report(
@@ -228,12 +256,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         write_report(report, args.output)
     except (OSError, PackageAuditError) as exc:
-        print(f"打包体积审计失败：{exc}", file=sys.stderr)
+        _print_console(f"打包体积审计失败：{exc}", stream=sys.stderr)
         return 2
-    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-    print(f"体积报告已生成：{args.output.resolve()}")
+    # 控制台 JSON 使用 ASCII 转义保持可解析；UTF-8 报告文件仍保留原始中文。
+    _print_console(
+        json.dumps(report, ensure_ascii=True, indent=2, sort_keys=True),
+        stream=sys.stdout,
+    )
+    _print_console(f"体积报告已生成：{args.output.resolve()}", stream=sys.stdout)
     if args.enforce and not report["valid"]:
-        print("打包体积或依赖边界未通过门禁。", file=sys.stderr)
+        _print_console("打包体积或依赖边界未通过门禁。", stream=sys.stderr)
         return 1
     return 0
 
