@@ -471,6 +471,7 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
                 'New-ItemProperty -Path $LegacyRegistryPath -Name "Publisher"',
                 'New-ItemProperty -Path $LegacyRegistryPath -Name "InstallLocation"',
                 "Get-ProductUninstallEntries",
+                "if (-not (Test-Path $RegistryRoot -PathType Container))",
                 "Get-ProductShortcuts",
                 "Assert-NoVisibleBackendTerminal",
                 "Wait-ForDesktopWindow",

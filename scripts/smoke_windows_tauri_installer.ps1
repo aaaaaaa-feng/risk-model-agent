@@ -431,6 +431,9 @@ function Get-CurrentRunLogs {
 
 function Get-ProductUninstallEntries {
     $RegistryRoot = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall"
+    if (-not (Test-Path $RegistryRoot -PathType Container)) {
+        return @()
+    }
     return @(
         Get-ChildItem -Path $RegistryRoot -ErrorAction Stop |
             ForEach-Object { Get-ItemProperty -Path $_.PSPath -ErrorAction Stop } |
