@@ -25,6 +25,7 @@ def main() -> int:
         "scripts/build_mac.sh",
         "scripts/build_windows.ps1",
         "scripts/compile_windows_installer.ps1",
+        "scripts/smoke_windows_service.ps1",
         "scripts/smoke_windows_installer.ps1",
         "scripts/smoke_packaged_service.py",
         "scripts/start_mac.command",
@@ -74,6 +75,11 @@ def main() -> int:
     )
     windows_installer_smoke = (
         (ROOT / "scripts/smoke_windows_installer.ps1").read_text(encoding="utf-8")
+        if not missing
+        else ""
+    )
+    windows_service_smoke = (
+        (ROOT / "scripts/smoke_windows_service.ps1").read_text(encoding="utf-8")
         if not missing
         else ""
     )
@@ -197,8 +203,19 @@ def main() -> int:
             for value in (
                 "stale-upgrade-marker.txt",
                 "Test-Path $StaleHttpToolsMarker",
+                "scripts\\smoke_windows_service.ps1",
+            )
+        ),
+        "windows_runtime_smoke_isolated_and_fail_closed": all(
+            value in windows_service_smoke
+            for value in (
+                "TcpListener",
+                "-RedirectStandardOutput $RuntimeStdout",
                 "-RedirectStandardError $RuntimeStderr",
-                "HttpRequestParser",
+                "WaitForExit",
+                "if ($LASTEXITCODE -ne 0)",
+                "HttpParser",
+                "Traceback",
             )
         ),
         "windows_installer_uses_lzma2": "Compression=lzma2/ultra64" in installer
@@ -221,14 +238,8 @@ def main() -> int:
                 ".\\dist\\risk-model-agent\\risk-model-agent.exe --internal-package-self-test",
             )
         ),
-        "package_ci_fails_closed_on_windows_runtime_errors": all(
-            value in package_workflow
-            for value in (
-                "-RedirectStandardError $runtimeStderr",
-                "if ($LASTEXITCODE -ne 0)",
-                "HttpRequestParser",
-                "module 'httptools' has no attribute",
-            )
+        "package_ci_uses_shared_windows_runtime_smoke": (
+            ".\\scripts\\smoke_windows_service.ps1" in package_workflow
         ),
     }
     contract["valid"] = not missing and all(
@@ -261,10 +272,11 @@ def main() -> int:
             "windows_installer_has_localized_messages",
             "windows_installer_removes_stale_httptools",
             "windows_installer_smoke_covers_stale_httptools",
+            "windows_runtime_smoke_isolated_and_fail_closed",
             "windows_installer_uses_lzma2",
             "package_ci_has_size_gate",
             "package_ci_runs_frozen_self_test",
-            "package_ci_fails_closed_on_windows_runtime_errors",
+            "package_ci_uses_shared_windows_runtime_smoke",
         )
     )
     print(json.dumps(contract, ensure_ascii=False, indent=2, sort_keys=True))
