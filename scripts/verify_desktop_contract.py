@@ -505,6 +505,7 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
                 "真实 1.1.2 卸载器被替换",
                 "Get-ProductShortcutFingerprint",
                 "Resolve-ComparableExistingPath",
+                "[AllowEmptyString()][string]$Path",
                 "Get-Item -LiteralPath $Path -Force",
                 "$LegacyInstallLog",
                 "CommonPrograms",

@@ -501,7 +501,7 @@ function Get-ProductShortcutFingerprint {
 }
 
 function Resolve-ComparableExistingPath {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Path)
 
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         return ""
