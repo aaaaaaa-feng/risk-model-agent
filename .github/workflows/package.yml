@@ -78,6 +78,7 @@ jobs:
       - run: python scripts/verify_desktop_contract.py
       - run: python -m PyInstaller packaging/risk_model_agent.spec --noconfirm --clean
       - name: 生成并固定 PyInstaller 后端完整性清单
+        if: runner.os == 'Windows'
         run: python scripts/create_backend_manifest.py
       - name: 审计冻结目录体积与依赖边界
         shell: bash
