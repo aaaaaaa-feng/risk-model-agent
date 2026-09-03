@@ -618,8 +618,26 @@ function Assert-RejectedTauriMigration {
     if ($Result.ExitCode -eq 0) {
         throw "$Scenario 时 Tauri NSIS 仍返回成功，迁移边界已失效。"
     }
-    if ((Test-Path $InstallDirectory) -or (Test-Path $TauriRegistryPath) -or (@(Get-ProductShortcuts).Count -gt 0)) {
+
+    # NSIS 可能在 PREINSTALL Hook 返回 Abort 前先创建空的安装目录。
+    # 空目录不代表新客户端已被发布，但任何文件、卸载项或快捷方式都必须仍按失败处理。
+    $UnexpectedInstallItems = @()
+    if (Test-Path -LiteralPath $InstallDirectory) {
+        if (-not (Test-Path -LiteralPath $InstallDirectory -PathType Container)) {
+            throw "$Scenario 虽被拒绝，但新客户端安装路径被写入为文件。"
+        }
+        $UnexpectedInstallItems = @(
+            Get-ChildItem -LiteralPath $InstallDirectory -Force -ErrorAction Stop
+        )
+    }
+    if ($UnexpectedInstallItems.Count -gt 0 -or (Test-Path $TauriRegistryPath) -or (@(Get-ProductShortcuts).Count -gt 0)) {
         throw "$Scenario 虽被拒绝，但已写入新客户端目录、卸载项或快捷方式。"
+    }
+    if (Test-Path -LiteralPath $InstallDirectory -PathType Container) {
+        Remove-Item -LiteralPath $InstallDirectory -Force
+        if (Test-Path -LiteralPath $InstallDirectory) {
+            throw "$Scenario 留下的空安装目录无法安全清理。"
+        }
     }
 }
 

@@ -467,6 +467,8 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
                 "Join-Path $env:LOCALAPPDATA $ProductName",
                 "New-Item -Path $LegacyRegistryPath",
                 "Assert-RejectedTauriMigration",
+                "$UnexpectedInstallItems.Count -gt 0",
+                "Remove-Item -LiteralPath $InstallDirectory -Force",
                 'New-ItemProperty -Path $LegacyRegistryPath -Name "DisplayName"',
                 'New-ItemProperty -Path $LegacyRegistryPath -Name "Publisher"',
                 'New-ItemProperty -Path $LegacyRegistryPath -Name "InstallLocation"',
