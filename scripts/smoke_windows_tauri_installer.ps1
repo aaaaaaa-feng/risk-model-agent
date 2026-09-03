@@ -92,6 +92,7 @@ $RunToken = [Guid]::NewGuid().ToString("N")
 $InstallDirectory = Join-Path $env:LOCALAPPDATA $ProductName
 $LegacyInstallDirectory = Join-Path $env:LOCALAPPDATA "Programs\RiskModelAgent"
 $LegacyRuntimeDataDirectory = Join-Path $TemporaryRoot "RMA-Inno-Data-$RunToken"
+$LegacyInstallLog = Join-Path $TemporaryRoot "RMA-Inno-Install-$RunToken.log"
 $DataDirectory = $LegacyRuntimeDataDirectory
 $MigrationEvidencePath = Join-Path $LegacyRuntimeDataDirectory "migration-evidence-$RunToken.json"
 $WorkspaceSelectionDirectory = Join-Path $TemporaryRoot "风控 项目工作区-$RunToken"
@@ -499,15 +500,30 @@ function Get-ProductShortcutFingerprint {
     ) -join "`n"
 }
 
+function Resolve-ComparableExistingPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return ""
+    }
+    return (Get-Item -LiteralPath $Path -Force -ErrorAction Stop).FullName.TrimEnd("\")
+}
+
 function Test-ShortcutTargetsPath {
     param(
         [Parameter(Mandatory = $true)][object[]]$Shortcuts,
         [Parameter(Mandatory = $true)][string]$TargetPath
     )
 
+    $ComparableTarget = Resolve-ComparableExistingPath -Path $TargetPath
     return @(
         $Shortcuts | Where-Object {
-            [string]::Equals($_.TargetPath, $TargetPath, [System.StringComparison]::OrdinalIgnoreCase)
+            $ComparableShortcutTarget = Resolve-ComparableExistingPath -Path ([string]$_.TargetPath)
+            $ComparableShortcutTarget -and [string]::Equals(
+                $ComparableShortcutTarget,
+                $ComparableTarget,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
         }
     ).Count -gt 0
 }
@@ -777,7 +793,8 @@ try {
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
-        "/SP-"
+        "/SP-",
+        "/LOG=$LegacyInstallLog"
     ) -Wait -PassThru
     if ($LegacyInstallResult.ExitCode -ne 0) {
         throw "真实 1.1.2 Inno 安装失败，退出码 $($LegacyInstallResult.ExitCode)。"
@@ -804,7 +821,15 @@ try {
         throw "真实 1.1.2 安装后未形成唯一、版本正确的旧卸载项。"
     }
     if (-not (Test-ShortcutTargetsPath -Shortcuts $LegacyShortcuts -TargetPath $LegacyExecutable)) {
-        throw "真实 1.1.2 安装后未找到指向固定白名单主程序的开始菜单或桌面入口。"
+        Get-Content -LiteralPath $LegacyInstallLog -ErrorAction SilentlyContinue |
+            Select-String -Pattern "shortcut|icon|program group|快捷|图标" |
+            Select-Object -First 20 |
+            ForEach-Object { Write-Host "[1.1.2 安装日志] $($_.Line)" }
+        $LegacyShortcutEvidence = @(
+            $LegacyShortcuts |
+                ForEach-Object { "$($_.Path) => $($_.TargetPath)" }
+        ) -join "; "
+        throw "真实 1.1.2 安装后未找到指向固定白名单主程序的开始菜单或桌面入口。已识别快捷方式=$($LegacyShortcuts.Count)：$LegacyShortcutEvidence。"
     }
     $LegacyShortcutFingerprint = Get-ProductShortcutFingerprint
 
