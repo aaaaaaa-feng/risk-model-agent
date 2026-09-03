@@ -321,15 +321,197 @@ function Wait-ForLocalService {
     throw "冻结后端未在 $TimeoutSeconds 秒内就绪；最后一次探测：$LastProbe"
 }
 
+function Initialize-NativeWindowProbe {
+    if ("RiskModelAgentSmoke.NativeWindowProbe" -as [type]) { return }
+
+    $Source = @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace RiskModelAgentSmoke
+{
+    public sealed class WindowSnapshot
+    {
+        public long Handle { get; set; }
+        public long OwnerHandle { get; set; }
+        public int ProcessId { get; set; }
+        public bool Visible { get; set; }
+        public string ClassName { get; set; }
+        public string Title { get; set; }
+    }
+
+    public static class NativeWindowProbe
+    {
+        private const uint WM_CLOSE = 0x0010;
+        private const uint GW_OWNER = 4;
+        private delegate bool EnumWindowsCallback(IntPtr window, IntPtr state);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr state);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr window);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern int GetClassName(IntPtr window, StringBuilder className, int capacity);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern int GetWindowText(IntPtr window, StringBuilder title, int capacity);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetWindow(IntPtr window, uint command);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+        public static WindowSnapshot[] Enumerate(int[] processIds)
+        {
+            HashSet<uint> expected = new HashSet<uint>();
+            foreach (int processId in processIds)
+            {
+                if (processId > 0) expected.Add((uint)processId);
+            }
+
+            List<WindowSnapshot> windows = new List<WindowSnapshot>();
+            bool completed = EnumWindows(delegate(IntPtr window, IntPtr state)
+            {
+                uint processId;
+                GetWindowThreadProcessId(window, out processId);
+                if (!expected.Contains(processId)) return true;
+
+                StringBuilder className = new StringBuilder(256);
+                StringBuilder title = new StringBuilder(512);
+                GetClassName(window, className, className.Capacity);
+                GetWindowText(window, title, title.Capacity);
+                windows.Add(new WindowSnapshot
+                {
+                    Handle = window.ToInt64(),
+                    OwnerHandle = GetWindow(window, GW_OWNER).ToInt64(),
+                    ProcessId = (int)processId,
+                    Visible = IsWindowVisible(window),
+                    ClassName = className.ToString(),
+                    Title = title.ToString()
+                });
+                return true;
+            }, IntPtr.Zero);
+            if (!completed)
+            {
+                throw new ExternalException("EnumWindows failed.", Marshal.GetLastWin32Error());
+            }
+            return windows.ToArray();
+        }
+
+        public static bool RequestClose(long handle, int expectedProcessId)
+        {
+            if (handle == 0 || expectedProcessId <= 0) return false;
+            IntPtr window = new IntPtr(handle);
+            uint processId;
+            GetWindowThreadProcessId(window, out processId);
+            if (processId != (uint)expectedProcessId || !IsWindowVisible(window)) return false;
+            StringBuilder className = new StringBuilder(256);
+            GetClassName(window, className, className.Capacity);
+            if (!string.Equals(className.ToString(), "#32770", StringComparison.Ordinal)) return false;
+            return PostMessage(window, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+        }
+    }
+}
+'@
+    Add-Type -TypeDefinition $Source -Language CSharp -ErrorAction Stop
+}
+
+function Get-NativeWindowSnapshots {
+    param([Parameter(Mandatory = $true)][int[]]$ProcessIds)
+
+    Initialize-NativeWindowProbe
+    if ($ProcessIds.Count -eq 0) { return @() }
+    return @([RiskModelAgentSmoke.NativeWindowProbe]::Enumerate($ProcessIds))
+}
+
+function ConvertTo-DiagnosticFragment {
+    param(
+        [AllowNull()][object]$Value,
+        [int]$MaximumLength = 240
+    )
+
+    $Text = if ($null -eq $Value) { "<空>" } else { [string]$Value }
+    $Text = ($Text -replace '[\r\n\t]+', ' ').Trim()
+    if (-not $Text) { return "<空>" }
+    if ($Text.Length -gt $MaximumLength) {
+        return $Text.Substring(0, $MaximumLength) + "…"
+    }
+    return $Text
+}
+
+function Get-NativePickerDiagnostics {
+    param(
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$BackendProcess,
+        [Parameter(Mandatory = $true)][System.Management.Automation.Job]$PickerJob,
+        [AllowEmptyString()][string]$BackendLogPath = ""
+    )
+
+    $ProcessSummary = "<无>"
+    $WindowSummary = "<无>"
+    try {
+        $Descendants = @(Get-DescendantProcesses -RootProcessId $BackendProcess.Id)
+        if ($Descendants.Count -gt 0) {
+            $ProcessParts = foreach ($Descendant in $Descendants) {
+                $RuntimeProcess = Get-Process -Id $Descendant.ProcessId -ErrorAction SilentlyContinue
+                $MainHandle = if ($RuntimeProcess) { [long]$RuntimeProcess.MainWindowHandle } else { -1 }
+                "pid=$($Descendant.ProcessId),ppid=$($Descendant.ParentProcessId),name=$($Descendant.Name),session=$($Descendant.SessionId),main=$MainHandle"
+            }
+            $ProcessSummary = ConvertTo-DiagnosticFragment `
+                -Value ($ProcessParts -join " | ") `
+                -MaximumLength 2000
+            $Windows = @(Get-NativeWindowSnapshots -ProcessIds @($Descendants.ProcessId))
+            if ($Windows.Count -gt 0) {
+                $WindowParts = foreach ($Window in $Windows) {
+                    $SafeClass = ConvertTo-DiagnosticFragment -Value $Window.ClassName -MaximumLength 80
+                    $SafeTitle = ConvertTo-DiagnosticFragment -Value $Window.Title -MaximumLength 120
+                    "pid=$($Window.ProcessId),hwnd=$($Window.Handle),owner=$($Window.OwnerHandle),visible=$($Window.Visible),class=$SafeClass,title=$SafeTitle"
+                }
+                $WindowSummary = ConvertTo-DiagnosticFragment `
+                    -Value ($WindowParts -join " | ") `
+                    -MaximumLength 2000
+            }
+        }
+    } catch {
+        $ProcessSummary = "诊断失败：$(ConvertTo-DiagnosticFragment -Value $_.Exception.Message)"
+        $WindowSummary = "<未取得>"
+    }
+
+    $Reason = $PickerJob.ChildJobs[0].JobStateInfo.Reason
+    $ReasonText = ConvertTo-DiagnosticFragment -Value $(
+        if ($Reason) { $Reason.Message } else { "<无>" }
+    )
+    $LogSummary = "<无日志>"
+    if ($BackendLogPath -and (Test-Path $BackendLogPath -PathType Leaf)) {
+        try {
+            $LogLines = @(Get-Content -LiteralPath $BackendLogPath -Tail 20 -ErrorAction Stop)
+            $LogSummary = ConvertTo-DiagnosticFragment -Value ($LogLines -join " | ") -MaximumLength 2000
+        } catch {
+            $LogSummary = "读取失败：$(ConvertTo-DiagnosticFragment -Value $_.Exception.Message)"
+        }
+    }
+
+    return "Job=$($PickerJob.State), reason=$ReasonText；派生进程=$ProcessSummary；顶层窗口=$WindowSummary；后端日志=$LogSummary"
+}
+
 function Invoke-NativePickerCancelSmoke {
     param(
         [Parameter(Mandatory = $true)][System.Diagnostics.Process]$BackendProcess,
-        [Parameter(Mandatory = $true)][string]$BaseUrl
+        [Parameter(Mandatory = $true)][string]$BaseUrl,
+        [Parameter(Mandatory = $true)][string]$BackendLogPath
     )
 
     # 请求必须在后台等待，因为被测 API 会一直阻塞到真实 Windows Forms
-    # 文件夹对话框返回。主脚本只对该后端派生的 PowerShell 窗口发送关闭，
-    # 不触碰 runner 上的其他窗口或进程。
+    # 文件夹对话框返回。FolderBrowserDialog 是带透明 owner 的模态顶层窗口，
+    # 进程的主窗口句柄可能始终为 0；因此按后端派生 PID 枚举 Win32 顶层窗口。
+    # 只关闭明确属于该 PowerShell 进程的标准对话框，不触碰 runner 其他窗口。
     $PickerJob = Start-Job -ScriptBlock {
         param([string]$TargetUrl)
         $Response = Invoke-RestMethod `
@@ -345,43 +527,104 @@ function Invoke-NativePickerCancelSmoke {
         $Deadline = [DateTime]::UtcNow.AddSeconds(20)
         $DialogClosed = $false
         while ([DateTime]::UtcNow -lt $Deadline) {
+            if ($PickerJob.State -notin @("NotStarted", "Running")) {
+                $Diagnostics = Get-NativePickerDiagnostics `
+                    -BackendProcess $BackendProcess `
+                    -PickerJob $PickerJob `
+                    -BackendLogPath $BackendLogPath
+                throw "系统文件夹选择器请求在观察到对话框前已结束。$Diagnostics"
+            }
             $BackendProcess.Refresh()
             if ($BackendProcess.HasExited) {
-                throw "打开系统文件夹选择器时，本地服务意外退出。"
+                $Diagnostics = Get-NativePickerDiagnostics `
+                    -BackendProcess $BackendProcess `
+                    -PickerJob $PickerJob `
+                    -BackendLogPath $BackendLogPath
+                throw "打开系统文件夹选择器时，本地服务意外退出。$Diagnostics"
             }
             $PickerChildren = @(
                 Get-DescendantProcesses -RootProcessId $BackendProcess.Id |
                     Where-Object { $_.Name -in @("powershell.exe", "pwsh.exe") }
             )
-            foreach ($PickerChild in $PickerChildren) {
-                $PickerProcess = Get-Process -Id $PickerChild.ProcessId -ErrorAction SilentlyContinue
-                if ($PickerProcess -and $PickerProcess.MainWindowHandle -ne 0) {
-                    if (-not $PickerProcess.CloseMainWindow()) {
-                        throw "系统文件夹选择器已经出现，但无法发送取消操作。"
-                    }
-                    $DialogClosed = $true
-                    break
+            $PickerWindows = if ($PickerChildren.Count -gt 0) {
+                @(Get-NativeWindowSnapshots -ProcessIds @($PickerChildren.ProcessId))
+            } else {
+                @()
+            }
+            $DialogWindows = @(
+                $PickerWindows |
+                    Where-Object { $_.Visible -and $_.ClassName -eq "#32770" }
+            )
+            if ($DialogWindows.Count -gt 1) {
+                $Diagnostics = Get-NativePickerDiagnostics `
+                    -BackendProcess $BackendProcess `
+                    -PickerJob $PickerJob `
+                    -BackendLogPath $BackendLogPath
+                throw "后端选择器进程出现多个可关闭对话框，已拒绝猜测目标。$Diagnostics"
+            }
+            if ($DialogWindows.Count -eq 1) {
+                if (-not [RiskModelAgentSmoke.NativeWindowProbe]::RequestClose(
+                    [long]$DialogWindows[0].Handle,
+                    [int]$DialogWindows[0].ProcessId
+                )) {
+                    $Diagnostics = Get-NativePickerDiagnostics `
+                        -BackendProcess $BackendProcess `
+                        -PickerJob $PickerJob `
+                        -BackendLogPath $BackendLogPath
+                    throw "系统文件夹选择器已经出现，但发送取消操作失败。$Diagnostics"
                 }
+                $DialogClosed = $true
             }
             if ($DialogClosed) { break }
             Start-Sleep -Milliseconds 250
         }
         if (-not $DialogClosed) {
-            throw "系统文件夹选择器 20 秒内没有出现可关闭窗口，可能仍会在 Windows 首次选择时卡住。"
+            $Diagnostics = Get-NativePickerDiagnostics `
+                -BackendProcess $BackendProcess `
+                -PickerJob $PickerJob `
+                -BackendLogPath $BackendLogPath
+            throw "系统文件夹选择器 20 秒内没有出现可识别的标准对话框。$Diagnostics"
         }
 
         $Completed = Wait-Job -Job $PickerJob -Timeout 20
         if ($null -eq $Completed) {
-            throw "取消系统文件夹选择器后，API 20 秒内没有返回。"
+            $Diagnostics = Get-NativePickerDiagnostics `
+                -BackendProcess $BackendProcess `
+                -PickerJob $PickerJob `
+                -BackendLogPath $BackendLogPath
+            throw "取消系统文件夹选择器后，API 20 秒内没有返回。$Diagnostics"
         }
         if ($PickerJob.State -ne "Completed") {
-            $Reason = $PickerJob.ChildJobs[0].JobStateInfo.Reason
-            throw "系统文件夹选择器请求失败：$Reason"
+            $Diagnostics = Get-NativePickerDiagnostics `
+                -BackendProcess $BackendProcess `
+                -PickerJob $PickerJob `
+                -BackendLogPath $BackendLogPath
+            throw "系统文件夹选择器请求失败。$Diagnostics"
         }
-        $PayloadText = @(Receive-Job -Job $PickerJob -ErrorAction Stop)[-1]
-        $Payload = $PayloadText | ConvertFrom-Json
+        $PayloadLines = @(Receive-Job -Job $PickerJob -ErrorAction Stop)
+        if ($PayloadLines.Count -eq 0) {
+            $Diagnostics = Get-NativePickerDiagnostics `
+                -BackendProcess $BackendProcess `
+                -PickerJob $PickerJob `
+                -BackendLogPath $BackendLogPath
+            throw "系统文件夹选择器 API 完成但没有返回结果。$Diagnostics"
+        }
+        $PayloadText = $PayloadLines[-1]
+        try {
+            $Payload = $PayloadText | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            $Diagnostics = Get-NativePickerDiagnostics `
+                -BackendProcess $BackendProcess `
+                -PickerJob $PickerJob `
+                -BackendLogPath $BackendLogPath
+            throw "系统文件夹选择器 API 返回了无法解析的结果。$Diagnostics"
+        }
         if ($Payload.cancelled -ne $true -or $null -ne $Payload.path) {
-            throw "系统文件夹选择器取消后没有返回 cancelled=true。"
+            $Diagnostics = Get-NativePickerDiagnostics `
+                -BackendProcess $BackendProcess `
+                -PickerJob $PickerJob `
+                -BackendLogPath $BackendLogPath
+            throw "系统文件夹选择器取消后没有返回 cancelled=true。$Diagnostics"
         }
     } finally {
         if ($PickerJob.State -notin @("Completed", "Failed", "Stopped")) {
@@ -1002,7 +1245,8 @@ try {
     Wait-ForLocalService -Process $WorkspaceBackendProcess -BaseUrl $WorkspaceBaseUrl
     Invoke-NativePickerCancelSmoke `
         -BackendProcess $WorkspaceBackendProcess `
-        -BaseUrl $WorkspaceBaseUrl
+        -BaseUrl $WorkspaceBaseUrl `
+        -BackendLogPath $env:RISK_AGENT_BACKEND_LOG_PATH
     $WorkspaceBefore = Invoke-RestMethod "$WorkspaceBaseUrl/api/v1/workspace" -TimeoutSec 5
     if ($WorkspaceBefore.workspace.needs_setup -ne $true -or $WorkspaceBefore.workspace.configured -ne $false) {
         throw "首次启动没有返回 needs_setup=true，无法证明工作区选择流程。"

@@ -116,6 +116,12 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
         "$ClientProcess = Start-Process",
         smoke_process_launch + 1,
     )
+    picker_smoke_match = re.search(
+        r"function Invoke-NativePickerCancelSmoke\s*\{[\s\S]*?"
+        r"\n\}\n\nfunction Wait-ForCurrentRunLogMarker",
+        smoke_script,
+    )
+    picker_smoke_source = picker_smoke_match.group(0) if picker_smoke_match else ""
     obsolete_current_release_files = (
         "packaging/windows_installer.iss",
         "packaging/languages/ChineseSimplified.isl",
@@ -539,6 +545,33 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
                 "Stop-Process -Id $ClientProcess.Id -Force",
                 "Job Object",
             )
+        ),
+        "native_picker_smoke_enumerates_dialogs_and_reports_failures": (
+            bool(picker_smoke_source)
+            and all(
+                marker in smoke_script
+                for marker in (
+                    "Initialize-NativeWindowProbe",
+                    "EnumWindows",
+                    "GetWindowThreadProcessId",
+                    "PostMessage",
+                    "Get-NativePickerDiagnostics",
+                    "Get-Content -LiteralPath $BackendLogPath -Tail 20",
+                    "-BackendLogPath $env:RISK_AGENT_BACKEND_LOG_PATH",
+                )
+            )
+            and all(
+                marker in picker_smoke_source
+                for marker in (
+                    '$PickerJob.State -notin @("NotStarted", "Running")',
+                    "Get-NativeWindowSnapshots",
+                    '$_.ClassName -eq "#32770"',
+                    "NativeWindowProbe]::RequestClose",
+                    "cancelled -ne $true",
+                )
+            )
+            and "MainWindowHandle" not in picker_smoke_source
+            and "CloseMainWindow" not in picker_smoke_source
         ),
         "installed_smoke_uses_real_webview_session_without_production_bypass": (
             all(

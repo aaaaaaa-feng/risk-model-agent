@@ -185,6 +185,7 @@ def test_workspace_api_returns_actionable_error_for_unwritable_directory(
 
 def test_windows_picker_is_sta_owned_topmost_and_keeps_unicode_path(monkeypatch):
     captured: dict[str, object] = {}
+    selected_path = r"D:\\风控 建模"
 
     monkeypatch.setattr("app.core.workspace.platform.system", lambda: "Windows")
     monkeypatch.setattr("app.core.workspace.shutil.which", lambda _: "powershell.exe")
@@ -192,19 +193,29 @@ def test_windows_picker_is_sta_owned_topmost_and_keeps_unicode_path(monkeypatch)
     def fake_run(command, **kwargs):
         captured["command"] = command
         captured["kwargs"] = kwargs
-        return SimpleNamespace(returncode=0, stdout=r"D:\\风控建模", stderr="")
+        encoded_path = base64.b64encode(selected_path.encode("utf-8")).decode("ascii")
+        return SimpleNamespace(
+            returncode=0,
+            stdout=f"RMA_PICKER_V1:{encoded_path}",
+            stderr="",
+        )
 
     monkeypatch.setattr("app.core.workspace.subprocess.run", fake_run)
 
-    assert pick_workspace_directory() == r"D:\\风控建模"
+    assert pick_workspace_directory() == selected_path
     command = captured["command"]
     assert isinstance(command, list)
     assert "-STA" in command
     encoded = command[command.index("-EncodedCommand") + 1]
     script = base64.b64decode(encoded).decode("utf-16-le")
     assert "$owner.TopMost = $true" in script
+    assert "$owner.Opacity = 0.01" in script
     assert "$dialog.ShowDialog($owner)" in script
     assert "$null = $owner.Activate()" in script
+    assert "[Console]::OutputEncoding" not in script
+    assert "RMA_PICKER_V1:" in script
+    assert "[Convert]::ToBase64String" in script
+    assert "[System.Text.Encoding]::UTF8.GetBytes" in script
     assert captured["kwargs"]["timeout"] == 60
     assert captured["kwargs"]["encoding"] == "utf-8"
 
@@ -222,6 +233,18 @@ def test_windows_picker_distinguishes_cancel_from_startup_failure(monkeypatch):
         "app.core.workspace.subprocess.run",
         lambda *_, **__: SimpleNamespace(returncode=1, stdout="", stderr="failed"),
     )
+    with pytest.raises(WorkspacePickerError, match="WORKSPACE_NATIVE_PICKER_FAILED"):
+        pick_workspace_directory()
+
+
+def test_windows_picker_rejects_malformed_success_payload(monkeypatch):
+    monkeypatch.setattr("app.core.workspace.platform.system", lambda: "Windows")
+    monkeypatch.setattr("app.core.workspace.shutil.which", lambda _: "powershell.exe")
+    monkeypatch.setattr(
+        "app.core.workspace.subprocess.run",
+        lambda *_, **__: SimpleNamespace(returncode=0, stdout="not-a-picker-result", stderr=""),
+    )
+
     with pytest.raises(WorkspacePickerError, match="WORKSPACE_NATIVE_PICKER_FAILED"):
         pick_workspace_directory()
 
