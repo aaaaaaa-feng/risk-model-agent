@@ -2,7 +2,7 @@
 #define MyAppPublisher "Risk Model Agent"
 #define MyAppExeName "risk-model-agent.exe"
 #ifndef MyAppVersion
-  #define MyAppVersion "1.1.1"
+  #define MyAppVersion "1.1.2"
 #endif
 
 [Setup]
@@ -39,6 +39,11 @@ LicenseFile={#SourcePath}\..\LICENSE
 [Languages]
 Name: "chinesesimp"; MessagesFile: "{#SourcePath}\languages\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[InstallDelete]
+; 1.0.x 曾携带 httptools。升级只覆盖文件会留下没有 __init__.py 的原生目录，
+; Python 会把它识别成空命名空间并误导 Uvicorn 自动选择不可用的解析器。
+Type: filesandordirs; Name: "{app}\_internal\httptools"
 
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加快捷方式："; Flags: unchecked

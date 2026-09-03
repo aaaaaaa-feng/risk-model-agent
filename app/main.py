@@ -32,7 +32,7 @@ from app.bootstrap import AppContext
 from app.workers.model_adapters import available_models
 
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.1.2"
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 logger = logging.getLogger(__name__)
 
@@ -327,7 +327,16 @@ def run() -> None:
         import threading
 
         threading.Timer(1.2, lambda: webbrowser.open(f"http://{host}:{port}")).start()
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    # 桌面冻结包不携带 httptools/uvloop。显式固定内置实现，避免升级安装残留的
+    # 可选模块被 Uvicorn 自动探测为可用后，在真正解析请求时才失败。
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        http="h11",
+        loop="asyncio",
+    )
 
 
 if __name__ == "__main__":

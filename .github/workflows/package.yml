@@ -103,10 +103,17 @@ jobs:
         run: |
           $env:RISK_AGENT_DATA_DIR = Join-Path $env:RUNNER_TEMP "risk-model-agent-data"
           $env:RISK_AGENT_OPEN_BROWSER = "0"
-          $process = Start-Process -FilePath "dist\risk-model-agent\risk-model-agent.exe" -PassThru
+          $runtimeStdout = Join-Path $env:RUNNER_TEMP "risk-model-agent-bundle.stdout.log"
+          $runtimeStderr = Join-Path $env:RUNNER_TEMP "risk-model-agent-bundle.stderr.log"
+          Remove-Item $runtimeStdout, $runtimeStderr -Force -ErrorAction SilentlyContinue
+          $process = Start-Process -FilePath "dist\risk-model-agent\risk-model-agent.exe" -RedirectStandardOutput $runtimeStdout -RedirectStandardError $runtimeStderr -PassThru
           try {
             $ready = $false
             for ($attempt = 1; $attempt -le 90; $attempt++) {
+              if ($process.HasExited) {
+                Get-Content $runtimeStdout, $runtimeStderr -ErrorAction SilentlyContinue
+                throw "Windows bundle exited before readiness with code $($process.ExitCode)."
+              }
               try {
                 $health = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8765/api/v1/health
                 $root = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8765/
@@ -119,6 +126,9 @@ jobs:
             }
             if (-not $ready) { throw "Windows bundle did not pass the localhost smoke test." }
             python scripts/smoke_packaged_service.py
+            if ($LASTEXITCODE -ne 0) {
+              throw "Windows bundle modeling smoke failed with code $LASTEXITCODE."
+            }
           } finally {
             try {
               & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
@@ -126,6 +136,10 @@ jobs:
               Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             }
             $global:LASTEXITCODE = 0
+            if ((Test-Path $runtimeStderr) -and (Select-String -Path $runtimeStderr -Pattern "HttpRequestParser|module 'httptools' has no attribute" -Quiet)) {
+              Get-Content $runtimeStderr -ErrorAction SilentlyContinue
+              throw "Windows bundle selected an incomplete httptools parser."
+            }
           }
       - name: Build Windows installer
         if: runner.os == 'Windows'
