@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { readUiPreference, writeUiPreference } from "@/shared/lib/uiPreferences";
 
 const STORAGE_KEY = "risk-agent-chat-rail";
 
@@ -11,19 +12,15 @@ function autoMode(width: number): ChatRailMode {
 }
 
 function readStored(): ChatRailMode | null {
-  try {
-    const value = localStorage.getItem(STORAGE_KEY);
-    if (value === "full" || value === "narrow" || value === "collapsed") return value;
-  } catch {
-    // 隐私模式等场景下 localStorage 不可用，退化为自动策略
-  }
+  const value = readUiPreference(STORAGE_KEY);
+  if (value === "full" || value === "narrow" || value === "collapsed") return value;
   return null;
 }
 
 /**
  * 右侧 Agent 对话栏宽度状态。
  * - 三档：full 320px / narrow 260px / collapsed 0px（由 CSS 变量落到布局）；
- * - 用户手动切换后写入 localStorage；未手动切换时按视口宽度自动选择档位。
+ * - 用户手动切换后写入跨端口偏好层；未手动切换时按视口宽度自动选择档位。
  */
 export function useChatRailState(): {
   mode: ChatRailMode;
@@ -51,11 +48,7 @@ export function useChatRailState(): {
 
   const persist = useCallback((mode: ChatRailMode) => {
     setStored(mode);
-    try {
-      localStorage.setItem(STORAGE_KEY, mode);
-    } catch {
-      // 忽略持久化失败，内存态仍然生效
-    }
+    writeUiPreference(STORAGE_KEY, mode);
   }, []);
 
   const mode = stored ?? auto;

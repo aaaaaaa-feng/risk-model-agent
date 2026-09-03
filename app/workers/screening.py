@@ -35,7 +35,9 @@ def _bin_for_iv(series: pd.Series, max_bins: int = 10) -> pd.Series:
     return result.astype("object").where(series.notna(), "<MISSING>").astype(str)
 
 
-def calculate_iv(series: pd.Series, target: pd.Series, max_bins: int = 10) -> tuple[float, list[dict[str, Any]]]:
+def calculate_iv(
+    series: pd.Series, target: pd.Series, max_bins: int = 10
+) -> tuple[float, list[dict[str, Any]]]:
     valid = target.isin([0, 1])
     y = target.loc[valid].astype(int)
     bins = _bin_for_iv(series.loc[valid], max_bins)
@@ -66,7 +68,9 @@ def calculate_iv(series: pd.Series, target: pd.Series, max_bins: int = 10) -> tu
     return float(max(iv, 0)), rows
 
 
-def _base_reason(column: str, series: pd.Series, target: str, missing_threshold: float) -> str | None:
+def _base_reason(
+    column: str, series: pd.Series, target: str, missing_threshold: float
+) -> str | None:
     if column == target:
         return "TARGET"
     if is_pii_column(column):
@@ -106,8 +110,10 @@ def screen_features(
         if column in protected:
             reason = "OTHER_TARGET"
         else:
-            reason = "LEAKAGE" if column in leakage else _base_reason(
-                column, series, target, missing_threshold
+            reason = (
+                "LEAKAGE"
+                if column in leakage
+                else _base_reason(column, series, target, missing_threshold)
             )
         iv = None
         bins: list[dict[str, Any]] = []
@@ -144,7 +150,14 @@ def screen_features(
                 if pd.notna(value) and value > correlation_threshold:
                     drop = right if iv_values.get(left, 0) >= iv_values.get(right, 0) else left
                     correlated.add(drop)
-                    correlation_pairs.append({"left": left, "right": right, "correlation": float(value), "excluded": drop})
+                    correlation_pairs.append(
+                        {
+                            "left": left,
+                            "right": right,
+                            "correlation": float(value),
+                            "excluded": drop,
+                        }
+                    )
     for item in results:
         if item["column"] in correlated and item["status"] == "included":
             item.update(status="excluded", reason="HIGH_CORRELATION", recoverable=True)
@@ -180,8 +193,6 @@ def restore_features(
     screening["included"] = [
         item["column"] for item in screening["features"] if item["status"] == "included"
     ]
-    screening["excluded"] = [
-        item for item in screening["features"] if item["status"] == "excluded"
-    ]
+    screening["excluded"] = [item for item in screening["features"] if item["status"] == "excluded"]
     screening["restored"] = restored
     return screening

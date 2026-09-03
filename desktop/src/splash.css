@@ -1,0 +1,333 @@
+:root {
+  color: #eef3ef;
+  background: #101312;
+  font-family:
+    Inter, "SF Pro Display", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  overflow: hidden;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 82% 14%, rgb(86 190 123 / 12%), transparent 38%),
+    linear-gradient(145deg, #151a18 0%, #0d100f 100%);
+}
+
+button {
+  font: inherit;
+}
+
+.splash-shell {
+  min-height: 100vh;
+  padding: 42px 48px 30px;
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  grid-template-rows: auto 1fr auto auto;
+  column-gap: 22px;
+  border: 1px solid rgb(255 255 255 / 7%);
+}
+
+.brand-mark {
+  position: relative;
+  grid-row: 1 / span 2;
+  width: 52px;
+  height: 52px;
+  border: 1px solid rgb(134 218 160 / 42%);
+  border-radius: 14px;
+  background: #17201b;
+  box-shadow: 0 12px 36px rgb(0 0 0 / 22%);
+}
+
+.brand-mark__axis,
+.brand-mark__curve {
+  position: absolute;
+  inset: 0;
+}
+
+.brand-mark__axis::before,
+.brand-mark__axis::after {
+  content: "";
+  position: absolute;
+  background: rgb(218 235 222 / 34%);
+}
+
+.brand-mark__axis::before {
+  left: 14px;
+  bottom: 13px;
+  width: 25px;
+  height: 1px;
+}
+
+.brand-mark__axis::after {
+  left: 14px;
+  top: 13px;
+  width: 1px;
+  height: 26px;
+}
+
+.brand-mark__curve {
+  left: 15px;
+  top: 17px;
+  width: 24px;
+  height: 19px;
+  border-top: 2px solid #7dcc96;
+  border-right: 2px solid #7dcc96;
+  border-radius: 2px 13px 2px 0;
+  transform: skewY(-14deg);
+}
+
+.splash-copy {
+  align-self: start;
+}
+
+.eyebrow {
+  margin: 1px 0 8px;
+  color: #79c792;
+  font: 650 10px/1.2 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.18em;
+}
+
+h1 {
+  margin: 0;
+  font-size: 27px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.subtitle {
+  max-width: 440px;
+  margin: 10px 0 0;
+  color: #9fa9a2;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.startup-status {
+  grid-column: 2;
+  align-self: end;
+  margin: 44px 0 20px;
+}
+
+.status-indicator {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #c8d0cb;
+  font-size: 12px;
+}
+
+.status-indicator__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #76c68f;
+  box-shadow: 0 0 0 4px rgb(118 198 143 / 11%);
+}
+
+.status-indicator--starting .status-indicator__dot {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.status-indicator--ready .status-indicator__dot {
+  background: #83d09a;
+}
+
+.status-indicator--failed {
+  color: #ffc8be;
+}
+
+.status-indicator--failed .status-indicator__dot {
+  background: #ef7564;
+  box-shadow: 0 0 0 4px rgb(239 117 100 / 12%);
+}
+
+.status-indicator--stopped .status-indicator__dot {
+  background: #9ca49f;
+}
+
+.progress-track {
+  height: 2px;
+  margin-top: 12px;
+  overflow: hidden;
+  background: rgb(255 255 255 / 8%);
+}
+
+.progress-track__bar {
+  display: block;
+  width: 38%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, #78ca92, transparent);
+  animation: progress 1.5s ease-in-out infinite;
+}
+
+.progress-track__bar--failed {
+  width: 100%;
+  background: #9f463b;
+  animation: none;
+}
+
+.status-detail {
+  max-height: 74px;
+  margin: 12px 0 0;
+  overflow: auto;
+  color: #bfa9a4;
+  font: 11px/1.55 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  scrollbar-width: thin;
+}
+
+.failure-actions {
+  grid-column: 2;
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.button {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.button:focus-visible {
+  outline: 2px solid #8bd3a1;
+  outline-offset: 2px;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.button--primary {
+  color: #0c140f;
+  background: #83ce99;
+}
+
+.button--primary:hover:not(:disabled) {
+  background: #98d9aa;
+}
+
+.button--quiet {
+  color: #bdc8c0;
+  border-color: rgb(255 255 255 / 12%);
+  background: rgb(255 255 255 / 4%);
+}
+
+.button--quiet:hover:not(:disabled) {
+  border-color: rgb(137 205 158 / 34%);
+  background: rgb(137 205 158 / 8%);
+}
+
+footer {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 18px;
+  border-top: 1px solid rgb(255 255 255 / 7%);
+  color: #657069;
+  font: 9px/1.2 ui-monospace, "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 580px), (max-height: 380px) {
+  .splash-shell {
+    padding: 24px 28px 18px;
+    grid-template-columns: 46px 1fr;
+    column-gap: 16px;
+  }
+
+  .brand-mark {
+    width: 42px;
+    height: 42px;
+  }
+
+  .brand-mark__axis::before {
+    left: 11px;
+    bottom: 10px;
+    width: 20px;
+  }
+
+  .brand-mark__axis::after {
+    left: 11px;
+    top: 10px;
+    height: 22px;
+  }
+
+  .brand-mark__curve {
+    left: 12px;
+    top: 14px;
+    width: 20px;
+    height: 16px;
+  }
+
+  h1 {
+    font-size: 23px;
+  }
+
+  .subtitle {
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+
+  .startup-status {
+    margin: 18px 0 12px;
+  }
+
+  .failure-actions {
+    margin-bottom: 12px;
+  }
+
+  footer {
+    padding-top: 10px;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.86);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes progress {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(285%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-indicator--starting .status-indicator__dot,
+  .progress-track__bar {
+    animation: none;
+  }
+}

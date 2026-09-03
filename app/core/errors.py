@@ -70,6 +70,7 @@ _MESSAGES = {
     "WORKSPACE_PATH_REQUIRED": "请先选择或输入一个本机工作文件夹。",
     "WORKSPACE_PATH_TOO_BROAD": "不能把磁盘根目录或用户主目录直接设为工作文件夹，请新建一个专用文件夹后重试。",
     "WORKSPACE_PATH_NOT_DIRECTORY": "所选路径不是文件夹，请重新选择一个本机文件夹。",
+    "WORKSPACE_PATH_INSIDE_INSTALLATION": "工作文件夹不能位于程序安装目录内或包含安装目录，请选择文档盘中的独立文件夹。",
     "WORKSPACE_CONFIGURED_BY_ENVIRONMENT": "工作文件夹由启动环境固定，当前页面不能更换；请移除对应环境配置并重启应用。",
     "WORKSPACE_MARKER_INVALID": "所选文件夹的工作区标记无效，请选择其他文件夹；如需恢复原项目，请先保留该目录并查看应用日志。",
     "WORKSPACE_SWITCH_ACTIVE_RUNS": "当前工作区仍有运行中的任务，请等待任务结束后再更换文件夹。",

@@ -102,7 +102,11 @@ class SettingsStore:
         has_configured_key = raw.get("api_key_configured") is True or bool(
             os.getenv("RISK_AGENT_API_KEY", "").strip()
         )
-        if raw.get("llm_enabled") is False and has_configured_key and raw.get("_llm_enabled_explicit") is not True:
+        if (
+            raw.get("llm_enabled") is False
+            and has_configured_key
+            and raw.get("_llm_enabled_explicit") is not True
+        ):
             settings.llm_enabled = True
         if os.getenv("RISK_AGENT_API_KEY", "").strip():
             settings.api_key_configured = True

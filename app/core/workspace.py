@@ -19,6 +19,7 @@ from .paths import (
     WORKSPACE_SCHEMA,
     is_synced_path,
     read_workspace_pointer,
+    validate_workspace_root,
     workspace_marker_path,
     workspace_pointer_path,
 )
@@ -173,9 +174,7 @@ class WorkspaceManager:
         raw = str(requested_path or "").strip()
         if not raw or len(raw) > 4096:
             raise ValueError("WORKSPACE_PATH_REQUIRED")
-        candidate = Path(raw).expanduser().resolve()
-        if candidate in {Path(candidate.anchor), Path.home().resolve()}:
-            raise ValueError("WORKSPACE_PATH_TOO_BROAD")
+        candidate = validate_workspace_root(raw)
         if candidate.exists() and not candidate.is_dir():
             raise ValueError("WORKSPACE_PATH_NOT_DIRECTORY")
         return candidate

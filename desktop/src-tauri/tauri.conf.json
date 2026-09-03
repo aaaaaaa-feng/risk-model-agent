@@ -1,0 +1,74 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "风控建模 Agent",
+  "version": "1.2.0",
+  "identifier": "com.feng.riskmodelagent",
+  "mainBinaryName": "risk-model-agent-desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "splash",
+        "title": "正在启动·风控建模 Agent",
+        "url": "index.html",
+        "width": 560,
+        "height": 360,
+        "center": true,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "fullscreen": false,
+        "decorations": true,
+        "visible": true
+      },
+      {
+        "label": "main",
+        "title": "风控建模 Agent",
+        "url": "main.html",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 680,
+        "minHeight": 360,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "capabilities": ["splash-bootstrap"],
+      "freezePrototype": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "resources": {
+      "../../dist/risk-model-agent/": "backend/"
+    },
+    "shortDescription": "本地优先的风控建模 Agent",
+    "longDescription": "在本地完成数据准备、二分类建模、质检、报告和批量评分。",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false,
+        "compression": "lzma",
+        "startMenuFolder": "风控建模 Agent",
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    }
+  }
+}

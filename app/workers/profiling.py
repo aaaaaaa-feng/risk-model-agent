@@ -52,7 +52,9 @@ def target_candidate(series: pd.Series) -> dict[str, Any] | None:
         return None
     normalized = {str(item).strip().lower() for item in values.unique()[:20]}
     allowed = {"0", "1", "-1", "0.0", "1.0", "-1.0", "true", "false"}
-    if not normalized.issubset(allowed) or not ({"0", "1"} <= normalized or {"0.0", "1.0"} <= normalized):
+    if not normalized.issubset(allowed) or not (
+        {"0", "1"} <= normalized or {"0.0", "1.0"} <= normalized
+    ):
         return None
     counts = values.astype(str).value_counts().to_dict()
     return {"values": sorted(normalized), "counts": counts, "missing": int(series.isna().sum())}
@@ -81,7 +83,9 @@ def parse_data_dictionary(frame: pd.DataFrame) -> dict[str, Any]:
         missing_codes: list[str] = []
         if "missing_codes" in mapping and pd.notna(row.get(mapping["missing_codes"])):
             missing_codes = [
-                item.strip() for item in re.split(r"[,，;；|]", str(row[mapping["missing_codes"]])) if item.strip()
+                item.strip()
+                for item in re.split(r"[,，;；|]", str(row[mapping["missing_codes"]]))
+                if item.strip()
             ]
         fields[name] = {
             "description": str(row.get(mapping.get("description", ""), "") or "").strip(),
@@ -130,7 +134,11 @@ def profile_frame(
             else:
                 item["top_values"] = [
                     {"value": str(key), "count": int(value)}
-                    for key, value in series.fillna("<MISSING>").astype(str).value_counts().head(10).items()
+                    for key, value in series.fillna("<MISSING>")
+                    .astype(str)
+                    .value_counts()
+                    .head(10)
+                    .items()
                 ]
             details.append(item)
             if candidate:
@@ -160,9 +168,21 @@ def target_summary(frame: pd.DataFrame, target: str) -> dict[str, Any]:
     total = positives + negatives
     issues: list[dict[str, Any]] = []
     if not positives or not negatives:
-        issues.append({"code": "TARGET_SINGLE_CLASS", "severity": "blocking", "message": "Y 有效样本必须同时包含 0 和 1。"})
+        issues.append(
+            {
+                "code": "TARGET_SINGLE_CLASS",
+                "severity": "blocking",
+                "message": "Y 有效样本必须同时包含 0 和 1。",
+            }
+        )
     if total < 100:
-        issues.append({"code": "TARGET_TOO_SMALL", "severity": "warning", "message": "有效 Y 样本少于 100，模型结果仅适合流程验证。"})
+        issues.append(
+            {
+                "code": "TARGET_TOO_SMALL",
+                "severity": "warning",
+                "message": "有效 Y 样本少于 100，模型结果仅适合流程验证。",
+            }
+        )
     return {
         "target": target,
         "valid_count": total,
@@ -188,7 +208,9 @@ def normalize_binary(value: Any) -> float:
     return np.nan
 
 
-def diagnose_frame(frame: pd.DataFrame, target: str, time_column: str | None = None) -> dict[str, Any]:
+def diagnose_frame(
+    frame: pd.DataFrame, target: str, time_column: str | None = None
+) -> dict[str, Any]:
     profile = profile_frame(frame)
     target_info = target_summary(frame, target)
     issues = list(target_info["issues"])
@@ -203,32 +225,87 @@ def diagnose_frame(frame: pd.DataFrame, target: str, time_column: str | None = N
         )
     if time_column:
         if time_column not in frame:
-            issues.append({"code": "TIME_COLUMN_NOT_FOUND", "severity": "blocking", "message": "指定时间字段不存在。"})
+            issues.append(
+                {
+                    "code": "TIME_COLUMN_NOT_FOUND",
+                    "severity": "blocking",
+                    "message": "指定时间字段不存在。",
+                }
+            )
         else:
             parsed = pd.to_datetime(frame[time_column], errors="coerce")
             if parsed.notna().mean() < 0.8:
-                issues.append({"code": "TIME_PARSE_LOW", "severity": "blocking", "message": "时间字段可解析比例低于 80%。"})
+                issues.append(
+                    {
+                        "code": "TIME_PARSE_LOW",
+                        "severity": "blocking",
+                        "message": "时间字段可解析比例低于 80%。",
+                    }
+                )
     for item in profile["columns_detail"]:
         if item["missing_rate"] >= 0.95:
-            issues.append({"code": "ALMOST_EMPTY_COLUMN", "severity": "warning", "columns": [item["name"]], "message": "字段缺失率达到 95%。"})
-    return {"profile": profile, "target": {key: value for key, value in target_info.items() if key not in {"valid_mask", "normalized"}}, "issues": issues}
+            issues.append(
+                {
+                    "code": "ALMOST_EMPTY_COLUMN",
+                    "severity": "warning",
+                    "columns": [item["name"]],
+                    "message": "字段缺失率达到 95%。",
+                }
+            )
+    return {
+        "profile": profile,
+        "target": {
+            key: value
+            for key, value in target_info.items()
+            if key not in {"valid_mask", "normalized"}
+        },
+        "issues": issues,
+    }
 
 
-def cleaning_plan(frame: pd.DataFrame, target: str, time_column: str | None = None) -> dict[str, Any]:
+def cleaning_plan(
+    frame: pd.DataFrame, target: str, time_column: str | None = None
+) -> dict[str, Any]:
     diagnostics = diagnose_frame(frame, target, time_column)
     actions: list[dict[str, Any]] = []
     if diagnostics["profile"]["duplicate_rows"]:
-        actions.append({"id": "drop_exact_duplicates", "kind": "drop_duplicates", "recommended": True, "requires_confirmation": True})
+        actions.append(
+            {
+                "id": "drop_exact_duplicates",
+                "kind": "drop_duplicates",
+                "recommended": True,
+                "requires_confirmation": True,
+            }
+        )
     for item in diagnostics["profile"]["columns_detail"]:
         if item["missing_rate"] == 1:
-            actions.append({"id": f"drop_empty:{item['name']}", "kind": "drop_columns", "columns": [item["name"]], "recommended": True, "requires_confirmation": True})
+            actions.append(
+                {
+                    "id": f"drop_empty:{item['name']}",
+                    "kind": "drop_columns",
+                    "columns": [item["name"]],
+                    "recommended": True,
+                    "requires_confirmation": True,
+                }
+            )
         codes = item.get("dictionary", {}).get("missing_codes") or []
         if codes:
-            actions.append({"id": f"replace_missing:{item['name']}", "kind": "replace_missing_codes", "columns": [item["name"]], "codes": codes, "recommended": True, "requires_confirmation": True})
+            actions.append(
+                {
+                    "id": f"replace_missing:{item['name']}",
+                    "kind": "replace_missing_codes",
+                    "columns": [item["name"]],
+                    "codes": codes,
+                    "recommended": True,
+                    "requires_confirmation": True,
+                }
+            )
     return {"actions": actions, "diagnostics": diagnostics}
 
 
-def apply_cleaning(frame: pd.DataFrame, actions: Sequence[dict[str, Any]]) -> tuple[pd.DataFrame, dict[str, Any]]:
+def apply_cleaning(
+    frame: pd.DataFrame, actions: Sequence[dict[str, Any]]
+) -> tuple[pd.DataFrame, dict[str, Any]]:
     cleaned = frame.copy()
     applied: list[dict[str, Any]] = []
     for action in actions:

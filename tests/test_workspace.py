@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,7 +9,14 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.paths import AppPaths, read_workspace_pointer, workspace_marker_path
+from app.core.paths import (
+    WORKSPACE_POINTER_FILE,
+    WORKSPACE_SCHEMA,
+    AppPaths,
+    get_paths,
+    read_workspace_pointer,
+    workspace_marker_path,
+)
 from app.core.workspace import WorkspaceManager, WorkspacePickerError, pick_workspace_directory
 from app.main import create_app
 
@@ -47,6 +55,81 @@ def test_workspace_manager_does_not_switch_configured_workspace_with_projects_or
     with pytest.raises(ValueError, match="WORKSPACE_SWITCH_ACTIVE_RUNS"):
         manager.select(selected, str(tmp_path / "running"), active_run_count=1)
     assert not (tmp_path / "other" / ".risk-model-agent-workspace.json").exists()
+
+
+def test_workspace_rejects_the_desktop_installation_tree(tmp_path: Path, monkeypatch):
+    install_root = tmp_path / "Programs" / "风控建模 Agent"
+    install_root.mkdir(parents=True)
+    monkeypatch.setenv("RISK_AGENT_INSTALL_DIR", str(install_root))
+    manager = WorkspaceManager()
+    paths = AppPaths(tmp_path / "control").ensure()
+
+    for unsafe in (install_root, install_root / "data", install_root.parent):
+        with pytest.raises(ValueError, match="WORKSPACE_PATH_INSIDE_INSTALLATION"):
+            manager.select(paths, str(unsafe))
+
+    safe = manager.select(paths, str(tmp_path / "Documents" / "风控项目"))
+    assert safe.root == (tmp_path / "Documents" / "风控项目").resolve()
+
+
+def test_startup_rejects_install_tree_environment_overrides(tmp_path: Path, monkeypatch):
+    install_root = tmp_path / "Programs" / "风控建模 Agent"
+    install_root.mkdir(parents=True)
+    monkeypatch.setenv("RISK_AGENT_INSTALL_DIR", str(install_root))
+
+    for variable in ("RISK_AGENT_DATA_DIR", "RISK_AGENT_WORKSPACE_DIR"):
+        monkeypatch.delenv("RISK_AGENT_DATA_DIR", raising=False)
+        monkeypatch.delenv("RISK_AGENT_WORKSPACE_DIR", raising=False)
+        monkeypatch.setenv(variable, str(install_root / "data"))
+        with pytest.raises(ValueError, match="WORKSPACE_PATH_INSIDE_INSTALLATION"):
+            get_paths()
+
+
+def test_startup_ignores_unsafe_or_invalid_workspace_pointer(tmp_path: Path, monkeypatch):
+    control_root = tmp_path / "control"
+    install_root = tmp_path / "Programs" / "风控建模 Agent"
+    install_root.mkdir(parents=True)
+    control_root.mkdir()
+    monkeypatch.setenv("RISK_AGENT_INSTALL_DIR", str(install_root))
+    monkeypatch.delenv("RISK_AGENT_DATA_DIR", raising=False)
+    monkeypatch.delenv("RISK_AGENT_WORKSPACE_DIR", raising=False)
+    monkeypatch.setattr("app.core.paths._default_platform_data_dir", lambda: control_root)
+
+    unsafe = install_root / "project-data"
+    unsafe.mkdir()
+    workspace_marker_path(unsafe).write_text(
+        '{"schema_version":"risk-agent-workspace/v1"}', encoding="utf-8"
+    )
+    (control_root / WORKSPACE_POINTER_FILE).write_text(
+        json.dumps({"schema_version": WORKSPACE_SCHEMA, "path": str(unsafe)}),
+        encoding="utf-8",
+    )
+    assert get_paths().root == control_root.resolve()
+
+    safe = tmp_path / "Documents" / "workspace"
+    safe.mkdir(parents=True)
+    workspace_marker_path(safe).write_text('{"schema_version":"wrong"}', encoding="utf-8")
+    (control_root / WORKSPACE_POINTER_FILE).write_text(
+        json.dumps({"schema_version": WORKSPACE_SCHEMA, "path": str(safe)}),
+        encoding="utf-8",
+    )
+    assert get_paths().root == control_root.resolve()
+
+
+def test_startup_resolves_workspace_symlink_before_install_boundary(tmp_path: Path, monkeypatch):
+    install_root = tmp_path / "Programs" / "风控建模 Agent"
+    install_root.mkdir(parents=True)
+    alias = tmp_path / "Documents" / "workspace-link"
+    alias.parent.mkdir()
+    try:
+        alias.symlink_to(install_root, target_is_directory=True)
+    except OSError:
+        pytest.skip("当前文件系统不允许创建目录链接")
+    monkeypatch.setenv("RISK_AGENT_INSTALL_DIR", str(install_root))
+    monkeypatch.setenv("RISK_AGENT_DATA_DIR", str(alias))
+
+    with pytest.raises(ValueError, match="WORKSPACE_PATH_INSIDE_INSTALLATION"):
+        get_paths()
 
 
 def test_workspace_api_switches_context_and_project_folder_is_self_describing(tmp_path: Path):

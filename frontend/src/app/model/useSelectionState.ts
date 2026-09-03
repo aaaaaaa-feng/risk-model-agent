@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type { Project } from "@/features/projects";
+import { readUiPreference, writeUiPreference } from "@/shared/lib/uiPreferences";
 
 export type View = "workbench" | "report" | "history";
 
 export function useSelectionState(projects: Project[]) {
   const [selectedId, setSelectedId] = useState<string | null>(() =>
-    localStorage.getItem("risk-agent-project"),
+    readUiPreference("risk-agent-project"),
   );
   const [runId, setRunId] = useState<string | null>(null);
   const [view, setView] = useState<View>("workbench");
@@ -23,7 +24,7 @@ export function useSelectionState(projects: Project[]) {
   useEffect(() => {
     selectedRef.current = selectedId;
     if (selectedId) {
-      localStorage.setItem("risk-agent-project", selectedId);
+      writeUiPreference("risk-agent-project", selectedId);
       setDataMode(false);
     }
   }, [selectedId]);

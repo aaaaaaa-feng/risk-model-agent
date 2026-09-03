@@ -12,6 +12,7 @@ htmlcov/
 node_modules/
 dist/
 build/
+target/
 frontend/vite.config.js
 frontend/vite.config.d.ts
 runtime/

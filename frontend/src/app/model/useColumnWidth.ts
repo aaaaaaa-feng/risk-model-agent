@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
+import { readUiPreference, writeUiPreference } from "@/shared/lib/uiPreferences";
 
 interface Options {
   storageKey: string;
@@ -16,17 +17,13 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function readStored(key: string): number | null {
-  try {
-    const value = Number(localStorage.getItem(key));
-    return Number.isFinite(value) && value > 0 ? value : null;
-  } catch {
-    return null;
-  }
+  const value = Number(readUiPreference(key));
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 /**
  * 栏宽拖拽 hook：Pointer Events 实现拖拽，方向键微调（16px/格），
- * 双击分隔条恢复初始宽度；拖拽结束或键盘调整后写入 localStorage。
+ * 双击分隔条恢复初始宽度；拖拽结束或键盘调整后写入跨端口偏好层。
  */
 export function useColumnWidth({ storageKey, min, max, initial, invert = false }: Options) {
   const [width, setWidth] = useState(() => clamp(readStored(storageKey) ?? initial, min, max));
@@ -34,11 +31,7 @@ export function useColumnWidth({ storageKey, min, max, initial, invert = false }
 
   const persist = useCallback(
     (value: number) => {
-      try {
-        localStorage.setItem(storageKey, String(value));
-      } catch {
-        // 忽略持久化失败，内存态仍然生效
-      }
+      writeUiPreference(storageKey, String(value));
     },
     [storageKey],
   );

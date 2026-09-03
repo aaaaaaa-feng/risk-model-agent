@@ -3,10 +3,24 @@
 from __future__ import annotations
 
 import multiprocessing
+import os
 import sys
 
 
+def _ensure_frozen_stdio() -> None:
+    """为 Windows windowed 冻结进程提供无终端的安全输出目标。"""
+
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    target = os.getenv("RISK_AGENT_BACKEND_LOG_PATH") or os.devnull
+    if sys.stdout is None:
+        sys.stdout = open(target, "a", encoding="utf-8", buffering=1)  # noqa: SIM115
+    if sys.stderr is None:
+        sys.stderr = open(target, "a", encoding="utf-8", buffering=1)  # noqa: SIM115
+
+
 def main() -> None:
+    _ensure_frozen_stdio()
     # PyInstaller multiprocessing children must be dispatched before importing
     # the FastAPI application, which creates databases, thread pools and the
     # LangGraph runtime at module import time.

@@ -15,6 +15,37 @@ PROJECT_MARKER_FILE = ".risk-model-agent-project.json"
 WORKSPACE_SCHEMA = "risk-agent-workspace/v1"
 
 
+def validate_workspace_root(path: str | Path) -> Path:
+    """Resolve one workspace root and enforce the process-wide safety boundary.
+
+    This validator is intentionally shared by first-run selection and startup
+    resolution.  A pointer or environment override must never bypass the same
+    install-tree and broad-directory rules enforced by the API.
+    """
+
+    candidate = Path(path).expanduser().resolve()
+    if candidate in {Path(candidate.anchor), Path.home().resolve()}:
+        raise ValueError("WORKSPACE_PATH_TOO_BROAD")
+    install_directory = os.getenv("RISK_AGENT_INSTALL_DIR", "").strip()
+    if install_directory:
+        protected = Path(install_directory).expanduser().resolve()
+        if (
+            candidate == protected
+            or protected in candidate.parents
+            or candidate in protected.parents
+        ):
+            raise ValueError("WORKSPACE_PATH_INSIDE_INSTALLATION")
+    return candidate
+
+
+def _has_valid_workspace_marker(root: Path) -> bool:
+    try:
+        payload = json.loads(workspace_marker_path(root).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(payload, dict) and payload.get("schema_version") == WORKSPACE_SCHEMA
+
+
 def _default_platform_data_dir() -> Path:
     system = platform.system()
     if system == "Windows":
@@ -29,7 +60,7 @@ def _default_platform_data_dir() -> Path:
 def platform_data_dir() -> Path:
     override = os.getenv("RISK_AGENT_DATA_DIR", "").strip()
     if override:
-        return Path(override).expanduser().resolve()
+        return validate_workspace_root(override)
     return _default_platform_data_dir()
 
 
@@ -121,20 +152,25 @@ class AppPaths:
 def get_paths() -> AppPaths:
     explicit_data_dir = os.getenv("RISK_AGENT_DATA_DIR", "").strip()
     if explicit_data_dir:
-        root = Path(explicit_data_dir).expanduser().resolve()
+        root = validate_workspace_root(explicit_data_dir)
         return AppPaths(root, control_root=root).ensure()
 
     control_root = _default_platform_data_dir().resolve()
     explicit_workspace = os.getenv("RISK_AGENT_WORKSPACE_DIR", "").strip()
-    selected = Path(explicit_workspace).expanduser().resolve() if explicit_workspace else None
+    selected = validate_workspace_root(explicit_workspace) if explicit_workspace else None
     if selected is None:
         pointer = control_root / WORKSPACE_POINTER_FILE
         try:
             payload = json.loads(pointer.read_text(encoding="utf-8"))
-            candidate = Path(str(payload.get("path") or "")).expanduser().resolve()
+            if not isinstance(payload, dict) or payload.get("schema_version") != WORKSPACE_SCHEMA:
+                raise ValueError("WORKSPACE_POINTER_INVALID")
+            raw_candidate = str(payload.get("path") or "").strip()
+            if not raw_candidate:
+                raise ValueError("WORKSPACE_POINTER_INVALID")
+            candidate = validate_workspace_root(raw_candidate)
             # A moved/removed workspace is not silently recreated.  The app
             # remains on the control directory and the UI asks for a new one.
-            if candidate.is_dir() and workspace_marker_path(candidate).is_file():
+            if candidate.is_dir() and _has_valid_workspace_marker(candidate):
                 selected = candidate
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             selected = None
@@ -156,4 +192,8 @@ def read_workspace_pointer(paths: AppPaths | None = None) -> dict[str, Any] | No
         value = json.loads(pointer.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError):
         return None
-    return value if isinstance(value, dict) else None
+    if not isinstance(value, dict) or value.get("schema_version") != WORKSPACE_SCHEMA:
+        return None
+    if not str(value.get("path") or "").strip():
+        return None
+    return value

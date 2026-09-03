@@ -55,8 +55,12 @@ def build_safe_evidence(
         "target": {
             key: (target or {}).get(key)
             for key in (
-                "valid_count", "positive_count", "negative_count", "bad_rate",
-                "invalid_count", "missing_count",
+                "valid_count",
+                "positive_count",
+                "negative_count",
+                "bad_rate",
+                "invalid_count",
+                "missing_count",
             )
         },
         "fields": fields,

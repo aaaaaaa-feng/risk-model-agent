@@ -11,6 +11,8 @@ from pathlib import Path
 import re
 import sys
 
+from verify_desktop_contract import build_contract as build_desktop_contract
+
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -19,14 +21,16 @@ def main() -> int:
     required_files = [
         "run_local.py",
         "packaging/risk_model_agent.spec",
-        "packaging/windows_installer.iss",
-        "packaging/languages/ChineseSimplified.isl",
-        "packaging/languages/ChineseSimplified.LICENSE.txt",
         "scripts/build_mac.sh",
         "scripts/build_windows.ps1",
-        "scripts/compile_windows_installer.ps1",
         "scripts/smoke_windows_service.ps1",
-        "scripts/smoke_windows_installer.ps1",
+        "scripts/build_windows_tauri.ps1",
+        "scripts/collect_tauri_installer.ps1",
+        "scripts/smoke_windows_tauri_installer.ps1",
+        "scripts/prepare_legacy_inno_fixture.ps1",
+        "scripts/create_backend_manifest.py",
+        "scripts/read_webview_cookie.py",
+        "scripts/verify_desktop_contract.py",
         "scripts/smoke_packaged_service.py",
         "scripts/start_mac.command",
         "scripts/start_windows.ps1",
@@ -54,8 +58,16 @@ def main() -> int:
         "scripts/build_offline_bundle.py",
         "scripts/audit_package_size.py",
         ".github/workflows/package.yml",
+        ".github/workflows/ci.yml",
     ]
     missing = [path for path in required_files if not (ROOT / path).is_file()]
+    obsolete_current_release_files = [
+        "packaging/windows_installer.iss",
+        "packaging/languages/ChineseSimplified.isl",
+        "packaging/languages/ChineseSimplified.LICENSE.txt",
+        "scripts/compile_windows_installer.ps1",
+        "scripts/smoke_windows_installer.ps1",
+    ]
     spec = (
         (ROOT / "packaging/risk_model_agent.spec").read_text(encoding="utf-8")
         if not missing
@@ -65,24 +77,22 @@ def main() -> int:
     frontend_package = json.loads((ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
     package_source = (ROOT / "app" / "__init__.py").read_text(encoding="utf-8")
     main_source = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
-    installer = (
-        (ROOT / "packaging/windows_installer.iss").read_text(encoding="utf-8")
-        if not missing
-        else ""
-    )
+    launcher_source = (ROOT / "run_local.py").read_text(encoding="utf-8")
+    notebook_runtime_source = (ROOT / "app/notebooks/runtime.py").read_text(encoding="utf-8")
     package_workflow = (
         (ROOT / ".github/workflows/package.yml").read_text(encoding="utf-8") if not missing else ""
-    )
-    windows_installer_smoke = (
-        (ROOT / "scripts/smoke_windows_installer.ps1").read_text(encoding="utf-8")
-        if not missing
-        else ""
     )
     windows_service_smoke = (
         (ROOT / "scripts/smoke_windows_service.ps1").read_text(encoding="utf-8")
         if not missing
         else ""
     )
+    packaged_service_smoke = (
+        (ROOT / "scripts/smoke_packaged_service.py").read_text(encoding="utf-8")
+        if not missing
+        else ""
+    )
+    desktop_contract = build_desktop_contract(ROOT)
     project_version_match = re.search(
         r'^version = "([0-9]+\.[0-9]+\.[0-9]+)"$', pyproject, re.MULTILINE
     )
@@ -92,19 +102,16 @@ def main() -> int:
     package_version_match = re.search(
         r'^__version__ = "([0-9]+\.[0-9]+\.[0-9]+)"$', package_source, re.MULTILINE
     )
-    installer_fallback_match = re.search(
-        r'#define MyAppVersion "([0-9]+\.[0-9]+\.[0-9]+)"', installer
-    )
     project_version = project_version_match.group(1) if project_version_match else ""
     backend_version = backend_version_match.group(1) if backend_version_match else ""
     package_version = package_version_match.group(1) if package_version_match else ""
-    installer_fallback_version = (
-        installer_fallback_match.group(1) if installer_fallback_match else ""
-    )
     contract = {
         "schema_version": "risk-packaging-contract/v2",
         "required_files": len(required_files),
         "missing_files": missing,
+        "legacy_current_release_build_path_is_absent": not any(
+            (ROOT / path).exists() for path in obsolete_current_release_files
+        ),
         "spec_has_onedir_collect": "COLLECT(" in spec,
         "spec_has_local_assets": "frontend_dist" in spec and "frontend" in spec,
         "spec_has_standalone_package_runtime": (
@@ -164,13 +171,16 @@ def main() -> int:
         and '"duckdb' in pyproject.lower(),
         "server_uses_deterministic_uvicorn_backend": 'http="h11"' in main_source
         and 'loop="asyncio"' in main_source,
+        "windows_backend_and_notebook_are_windowless": (
+            'console=sys.platform != "win32"' in spec
+            and "_ensure_frozen_stdio" in launcher_source
+            and "RISK_AGENT_BACKEND_LOG_PATH" in launcher_source
+            and 'return {"creationflags": 0x0800_0000}' in notebook_runtime_source
+        ),
         "xgboost_package_size_guard": '"xgboost>=2.0,<3.2"' in pyproject.lower(),
-        "launcher_dispatches_kernel": "IPKernelApp.launch_instance()"
-        in (ROOT / "run_local.py").read_text(encoding="utf-8"),
-        "launcher_supports_frozen_workers": "multiprocessing.freeze_support()"
-        in (ROOT / "run_local.py").read_text(encoding="utf-8"),
-        "launcher_dispatches_package_self_test": "--internal-package-self-test"
-        in (ROOT / "run_local.py").read_text(encoding="utf-8"),
+        "launcher_dispatches_kernel": "IPKernelApp.launch_instance()" in launcher_source,
+        "launcher_supports_frozen_workers": "multiprocessing.freeze_support()" in launcher_source,
+        "launcher_dispatches_package_self_test": "--internal-package-self-test" in launcher_source,
         "spec_has_launcher": "run_local.py" in spec,
         "spec_has_evaluation_adapter": "app.evaluation.adapter" in spec,
         "has_local_evaluation_harness": (ROOT / "app/evaluation/harness.py").is_file(),
@@ -180,32 +190,7 @@ def main() -> int:
         "versions_are_consistent": bool(project_version)
         and project_version == str(frontend_package.get("version") or "")
         and project_version == backend_version
-        and project_version == package_version
-        and project_version == installer_fallback_version,
-        "windows_installer_is_per_user": (
-            "PrivilegesRequired=lowest" in installer
-            and "DefaultDirName={localappdata}\\Programs\\RiskModelAgent" in installer
-        ),
-        "windows_installer_is_x64": "ArchitecturesAllowed=x64compatible" in installer,
-        "windows_installer_keeps_user_data": not any(
-            line.strip().lower() == "[uninstalldelete]" for line in installer.splitlines()
-        ),
-        "windows_installer_has_uninstall_entry": "{uninstallexe}" in installer,
-        "windows_installer_has_localized_messages": (
-            "languages\\ChineseSimplified.isl" in installer
-        ),
-        "windows_installer_removes_stale_httptools": (
-            "[InstallDelete]" in installer
-            and 'Type: filesandordirs; Name: "{app}\\_internal\\httptools"' in installer
-        ),
-        "windows_installer_smoke_covers_stale_httptools": all(
-            value in windows_installer_smoke
-            for value in (
-                "stale-upgrade-marker.txt",
-                "Test-Path $StaleHttpToolsMarker",
-                "scripts\\smoke_windows_service.ps1",
-            )
-        ),
+        and project_version == package_version,
         "windows_runtime_smoke_isolated_and_fail_closed": all(
             value in windows_service_smoke
             for value in (
@@ -213,13 +198,23 @@ def main() -> int:
                 "-RedirectStandardOutput $RuntimeStdout",
                 "-RedirectStandardError $RuntimeStderr",
                 "WaitForExit",
-                "if ($LASTEXITCODE -ne 0)",
+                "Start-Process -FilePath $PythonExecutable",
+                "$SmokeProcess.ExitCode -ne 0",
+                "EvidenceOutputPath",
                 "HttpParser",
                 "Traceback",
             )
+        )
+        and all(
+            value in packaged_service_smoke
+            for value in (
+                "--evidence-output",
+                "risk-windows-migration-evidence/v1",
+                "/api/v1/providers/settings",
+                '"api_key_configured": False',
+                "temporary_path.replace(evidence_path)",
+            )
         ),
-        "windows_installer_uses_lzma2": "Compression=lzma2/ultra64" in installer
-        and "SolidCompression=yes" in installer,
         "package_ci_has_size_gate": all(
             value in package_workflow
             for value in (
@@ -235,12 +230,17 @@ def main() -> int:
             value in package_workflow
             for value in (
                 "./dist/risk-model-agent/risk-model-agent --internal-package-self-test",
-                ".\\dist\\risk-model-agent\\risk-model-agent.exe --internal-package-self-test",
+                "Start-Process",
+                ".\\dist\\risk-model-agent\\risk-model-agent.exe",
+                'ArgumentList @("--internal-package-self-test")',
+                "$SelfTest.ExitCode",
             )
         ),
         "package_ci_uses_shared_windows_runtime_smoke": (
             ".\\scripts\\smoke_windows_service.ps1" in package_workflow
         ),
+        "tauri_desktop_contract": desktop_contract,
+        "tauri_desktop_contract_is_valid": bool(desktop_contract.get("valid")),
     }
     contract["valid"] = not missing and all(
         bool(contract[key])
@@ -254,6 +254,7 @@ def main() -> int:
             "spec_excludes_optional_uvicorn_backends",
             "runtime_dependencies_are_slim",
             "server_uses_deterministic_uvicorn_backend",
+            "windows_backend_and_notebook_are_windowless",
             "xgboost_package_size_guard",
             "launcher_dispatches_kernel",
             "launcher_supports_frozen_workers",
@@ -265,18 +266,12 @@ def main() -> int:
             "spec_uses_repository_root",
             "pyinstaller_optional_dependency",
             "versions_are_consistent",
-            "windows_installer_is_per_user",
-            "windows_installer_is_x64",
-            "windows_installer_keeps_user_data",
-            "windows_installer_has_uninstall_entry",
-            "windows_installer_has_localized_messages",
-            "windows_installer_removes_stale_httptools",
-            "windows_installer_smoke_covers_stale_httptools",
+            "legacy_current_release_build_path_is_absent",
             "windows_runtime_smoke_isolated_and_fail_closed",
-            "windows_installer_uses_lzma2",
             "package_ci_has_size_gate",
             "package_ci_runs_frozen_self_test",
             "package_ci_uses_shared_windows_runtime_smoke",
+            "tauri_desktop_contract_is_valid",
         )
     )
     print(json.dumps(contract, ensure_ascii=False, indent=2, sort_keys=True))

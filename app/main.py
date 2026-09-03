@@ -14,13 +14,15 @@ from typing import Any, AsyncIterator
 from urllib.parse import urlsplit
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.router import router as api_router
+from app.bootstrap import AppContext
+from app.core.desktop_auth import DesktopAuth
 from app.core.errors import (
     http_error_code,
     normalize_error_code,
@@ -28,11 +30,10 @@ from app.core.errors import (
     value_error_status,
 )
 from app.core.paths import AppPaths, get_paths, is_synced_path
-from app.bootstrap import AppContext
 from app.workers.model_adapters import available_models
 
 
-APP_VERSION = "1.1.2"
+APP_VERSION = "1.2.0"
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ def create_app(
 ) -> FastAPI:
     context = AppContext.create(paths or get_paths())
     local_session_token = secrets.token_urlsafe(32)
+    desktop_auth = DesktopAuth.capture_environment()
     should_migrate = (
         auto_migrate
         if auto_migrate is not None
@@ -60,6 +62,8 @@ def create_app(
         active_context.engine.recover_incomplete()
         yield
         application.state.context.shutdown()
+        if getattr(application.state, "desktop_shutdown_requested", False):
+            logging.getLogger("uvicorn.error").info("desktop graceful shutdown completed")
 
     application = FastAPI(
         title="Risk Model Agent",
@@ -70,6 +74,7 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.context = context
+    application.state.desktop_mode = desktop_auth.enabled
     application.include_router(api_router, prefix="/api/v1")
 
     @application.exception_handler(KeyError)
@@ -164,6 +169,9 @@ def create_app(
                     }
                 },
             )
+        desktop_session_error = desktop_auth.business_session_error(request)
+        if desktop_session_error is not None:
+            return desktop_session_error
         browser_request = bool(origin or request.headers.get("sec-fetch-site"))
         if (
             request.method in MUTATING_METHODS
@@ -200,6 +208,12 @@ def create_app(
 
     @application.get("/api/v1/health", tags=["system"])
     def health() -> dict[str, Any]:
+        if desktop_auth.enabled:
+            # This route is intentionally reachable by the Rust supervisor and
+            # installer smoke before the WebView cookie exists. Keep it limited
+            # to non-sensitive process identity; workspace and Provider details
+            # remain behind the desktop session boundary.
+            return desktop_auth.minimal_health(APP_VERSION)
         active_context = application.state.context
         settings = active_context.pipeline._gateway("").settings
         return {
@@ -220,6 +234,43 @@ def create_app(
             "mcp": {"enabled": False, "boundary": "typed_tool_registry_only"},
             "raw_data_cloud_upload": False,
         }
+
+    @application.get("/api/v1/desktop/ready", include_in_schema=False)
+    def desktop_ready(request: Request) -> JSONResponse:
+        """证明随机端口上的服务就是本次桌面客户端启动的后端。"""
+
+        return desktop_auth.ready_response(request, APP_VERSION)
+
+    @application.get("/api/v1/desktop/bootstrap", include_in_schema=False)
+    def desktop_bootstrap(request: Request) -> Response:
+        """Exchange the one-use WebView bootstrap capability for an HttpOnly cookie."""
+
+        return desktop_auth.bootstrap_response(request)
+
+    @application.post("/api/v1/desktop/shutdown", include_in_schema=False)
+    def desktop_shutdown(request: Request, background_tasks: BackgroundTasks) -> JSONResponse:
+        """仅允许本次桌面客户端请求后端完成有界优雅退出。"""
+
+        auth_error = desktop_auth.shutdown_auth_error(request)
+        if auth_error is not None:
+            return auth_error
+        callback = getattr(application.state, "desktop_shutdown_callback", None)
+        if not callable(callback):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": {
+                        "code": "DESKTOP_SHUTDOWN_UNAVAILABLE",
+                        "message": "本地服务暂时无法安全停止，请稍后重试。",
+                    }
+                },
+            )
+        application.state.desktop_shutdown_requested = True
+        background_tasks.add_task(callback)
+        return JSONResponse(
+            status_code=202,
+            content={"status": "accepted", "shutdown": "graceful"},
+        )
 
     @application.get("/api/v1/session", include_in_schema=False)
     def local_session() -> JSONResponse:
@@ -329,14 +380,30 @@ def run() -> None:
         threading.Timer(1.2, lambda: webbrowser.open(f"http://{host}:{port}")).start()
     # 桌面冻结包不携带 httptools/uvloop。显式固定内置实现，避免升级安装残留的
     # 可选模块被 Uvicorn 自动探测为可用后，在真正解析请求时才失败。
-    uvicorn.run(
+    config = uvicorn.Config(
         app,
         host=host,
         port=port,
         log_level="info",
         http="h11",
         loop="asyncio",
+        # The one-use desktop bootstrap capability is carried in the first URL.
+        # Desktop access logs are therefore disabled fail-closed so query strings
+        # never reach the backend log. Browser/development mode keeps its current
+        # request logging behaviour.
+        access_log=not bool(getattr(app.state, "desktop_mode", False)),
     )
+    server = uvicorn.Server(config)
+
+    def request_desktop_shutdown() -> None:
+        server.should_exit = True
+
+    app.state.desktop_shutdown_callback = request_desktop_shutdown
+    app.state.desktop_shutdown_requested = False
+    try:
+        server.run()
+    finally:
+        app.state.desktop_shutdown_callback = None
 
 
 if __name__ == "__main__":
