@@ -64,6 +64,12 @@ class DesktopAuth:
         supplied_launch_token = os.environ.pop(DESKTOP_TOKEN_ENV, "")
         supplied_bootstrap_token = os.environ.pop(DESKTOP_BOOTSTRAP_TOKEN_ENV, "")
         launch_token = _valid_secret(supplied_launch_token)
+        if supplied_launch_token and launch_token is None:
+            raise RuntimeError("DESKTOP_STARTUP_TOKEN_INVALID")
+        if supplied_bootstrap_token and _valid_secret(supplied_bootstrap_token) is None:
+            raise RuntimeError("DESKTOP_BOOTSTRAP_TOKEN_INVALID")
+        if supplied_bootstrap_token and launch_token is None:
+            raise RuntimeError("DESKTOP_BOOTSTRAP_WITHOUT_STARTUP_TOKEN")
         bootstrap_token = _valid_secret(supplied_bootstrap_token) if launch_token else None
         return cls(launch_token, bootstrap_token)
 

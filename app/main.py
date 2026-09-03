@@ -43,9 +43,11 @@ def create_app(
     *,
     auto_migrate: bool | None = None,
 ) -> FastAPI:
+    # 先捕获并清除桌面进程凭据，再构造任何可能在未来启动 Worker 的上下文。
+    # 这样即使 AppContext 后续增加初始化副作用，也不会继承控制令牌。
+    desktop_auth = DesktopAuth.capture_environment()
     context = AppContext.create(paths or get_paths())
     local_session_token = secrets.token_urlsafe(32)
-    desktop_auth = DesktopAuth.capture_environment()
     should_migrate = (
         auto_migrate
         if auto_migrate is not None

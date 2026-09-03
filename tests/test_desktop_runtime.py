@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.desktop_auth import (
@@ -127,26 +128,42 @@ def test_desktop_shutdown_requires_token_and_runs_callback(app_paths, monkeypatc
     assert accepted.json() == {"status": "accepted", "shutdown": "graceful"}
 
 
-def test_invalid_desktop_token_keeps_browser_mode_compatible(app_paths, monkeypatch):
+def test_invalid_desktop_token_fails_closed_before_context_creation(app_paths, monkeypatch):
     monkeypatch.setenv(DESKTOP_TOKEN_ENV, "not-a-32-byte-hex-token")
     monkeypatch.setenv(DESKTOP_BOOTSTRAP_TOKEN_ENV, BOOTSTRAP_TOKEN)
-    application = create_app(app_paths, auto_migrate=False)
+
+    with pytest.raises(RuntimeError, match="DESKTOP_STARTUP_TOKEN_INVALID"):
+        create_app(app_paths, auto_migrate=False)
 
     assert DESKTOP_TOKEN_ENV not in os.environ
     assert DESKTOP_BOOTSTRAP_TOKEN_ENV not in os.environ
-    with TestClient(application) as client:
-        session = client.get("/api/v1/session")
-        health = client.get("/api/v1/health")
-        ready = client.get(
-            "/api/v1/desktop/ready",
-            headers={"x-risk-agent-desktop-token": "not-a-32-byte-hex-token"},
-        )
 
-    assert session.status_code == 200
-    assert session.json()["request_token"]
-    assert "data_directory" in health.json()
-    assert "desktop" not in health.json()
-    assert ready.status_code == 404
+
+@pytest.mark.parametrize(
+    ("launch_token", "bootstrap_token", "error_code"),
+    [
+        (DESKTOP_TOKEN, "invalid-bootstrap", "DESKTOP_BOOTSTRAP_TOKEN_INVALID"),
+        ("", BOOTSTRAP_TOKEN, "DESKTOP_BOOTSTRAP_WITHOUT_STARTUP_TOKEN"),
+    ],
+)
+def test_invalid_desktop_bootstrap_environment_fails_closed(
+    app_paths,
+    monkeypatch,
+    launch_token: str,
+    bootstrap_token: str,
+    error_code: str,
+) -> None:
+    if launch_token:
+        monkeypatch.setenv(DESKTOP_TOKEN_ENV, launch_token)
+    else:
+        monkeypatch.delenv(DESKTOP_TOKEN_ENV, raising=False)
+    monkeypatch.setenv(DESKTOP_BOOTSTRAP_TOKEN_ENV, bootstrap_token)
+
+    with pytest.raises(RuntimeError, match=error_code):
+        create_app(app_paths, auto_migrate=False)
+
+    assert DESKTOP_TOKEN_ENV not in os.environ
+    assert DESKTOP_BOOTSTRAP_TOKEN_ENV not in os.environ
 
 
 def test_desktop_bootstrap_creates_one_use_httponly_session(app_paths, monkeypatch):
