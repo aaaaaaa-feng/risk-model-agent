@@ -460,12 +460,61 @@ function Get-ProductShortcuts {
     )
     if ($ShortcutFiles.Count -eq 0) { return @() }
 
-    $Shell = New-Object -ComObject WScript.Shell
+    $WScriptShell = $null
+    $ShellApplication = $null
     try {
+        try {
+            $WScriptShell = New-Object -ComObject WScript.Shell
+        } catch {
+            # WScript 只是首选读取器；Windows Shell 仍可以独立解析 .lnk。
+        }
+        try {
+            $ShellApplication = New-Object -ComObject Shell.Application
+        } catch {
+            # 下方会保留空目标并在白名单校验处 fail-closed。
+        }
         return @(
             foreach ($ShortcutFile in $ShortcutFiles) {
-                $Shortcut = $Shell.CreateShortcut($ShortcutFile.FullName)
-                $TargetPath = [string]$Shortcut.TargetPath
+                $Shortcut = $null
+                $ShortcutFolder = $null
+                $ShortcutItem = $null
+                $ShellLink = $null
+                $TargetPath = ""
+                try {
+                    if ($null -ne $WScriptShell) {
+                        try {
+                            $Shortcut = $WScriptShell.CreateShortcut($ShortcutFile.FullName)
+                            $TargetPath = [string]$Shortcut.TargetPath
+                        } catch {
+                            $TargetPath = ""
+                        }
+                    }
+                    if ([string]::IsNullOrWhiteSpace($TargetPath) -and $null -ne $ShellApplication) {
+                        # PowerShell 7 的 WScript.Shell 在 Windows Runner 上可能无法回读
+                        # Inno 创建的中文 .lnk。改由 Windows Shell 的 FolderItem.GetLink
+                        # 读取完全限定的目标路径；最终仍须通过下方真实路径相等校验。
+                        try {
+                            $ShortcutFolder = $ShellApplication.NameSpace($ShortcutFile.DirectoryName)
+                            if ($null -ne $ShortcutFolder) {
+                                $ShortcutItem = $ShortcutFolder.ParseName($ShortcutFile.Name)
+                            }
+                            if ($null -ne $ShortcutItem -and $ShortcutItem.IsLink) {
+                                $ShellLink = $ShortcutItem.GetLink
+                            }
+                            if ($null -ne $ShellLink) {
+                                $TargetPath = [string]$ShellLink.Path
+                            }
+                        } catch {
+                            $TargetPath = ""
+                        }
+                    }
+                } finally {
+                    foreach ($ComObject in @($ShellLink, $ShortcutItem, $ShortcutFolder, $Shortcut)) {
+                        if ($null -ne $ComObject -and [System.Runtime.InteropServices.Marshal]::IsComObject($ComObject)) {
+                            [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($ComObject)
+                        }
+                    }
+                }
                 $TargetDirectory = if ([string]::IsNullOrWhiteSpace($TargetPath)) {
                     ""
                 } else {
@@ -488,7 +537,11 @@ function Get-ProductShortcuts {
             }
         )
     } finally {
-        [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($Shell)
+        foreach ($ComObject in @($ShellApplication, $WScriptShell)) {
+            if ($null -ne $ComObject -and [System.Runtime.InteropServices.Marshal]::IsComObject($ComObject)) {
+                [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($ComObject)
+            }
+        }
     }
 }
 
