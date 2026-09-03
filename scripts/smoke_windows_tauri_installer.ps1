@@ -30,6 +30,8 @@ if ([string]::IsNullOrWhiteSpace($LegacyInstallerPath)) {
 }
 $LegacyInstallerPath = (Resolve-Path $LegacyInstallerPath).Path
 $ExpectedLegacyHash = "b0d3ce62632a95ffd72e76ac27c49727af11d856ee74d22586190b5efaf27636"
+$ExpectedLegacyExecutableHash = "eed99b0776114cd7ff76c8fd0b6b6ab4b7dc7a6da7ac9c6e5f54b004e382e4df"
+$ExpectedLegacyUninstallerHash = "353e1ca0f6afcc8998cb50a55d9775279605b6ffa78f026f42d4c75daf22ab58"
 $ActualLegacyHash = (Get-FileHash -Path $LegacyInstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($ActualLegacyHash -ne $ExpectedLegacyHash) {
     throw "真实 1.1.2 Inno 安装器 SHA-256 不匹配，已阻止迁移冒烟。"
@@ -444,11 +446,15 @@ function Get-ProductUninstallEntries {
 function Get-ProductShortcuts {
     $ShortcutRoots = @(
         (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"),
-        [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
-    ) | Where-Object { $_ -and (Test-Path $_ -PathType Container) }
+        (Join-Path $env:ProgramData "Microsoft\Windows\Start Menu\Programs"),
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs),
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory),
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonPrograms),
+        [Environment]::GetFolderPath([Environment+SpecialFolder]::CommonDesktopDirectory)
+    ) | Where-Object { $_ -and (Test-Path $_ -PathType Container) } | Select-Object -Unique
     $ShortcutFiles = @(
         foreach ($Root in $ShortcutRoots) {
-            Get-ChildItem -Path $Root -Filter "*$ProductName*.lnk" -File -Recurse -ErrorAction Stop
+            Get-ChildItem -Path $Root -Filter "*.lnk" -File -Recurse -ErrorAction Stop
         }
     )
     if ($ShortcutFiles.Count -eq 0) { return @() }
@@ -458,15 +464,39 @@ function Get-ProductShortcuts {
         return @(
             foreach ($ShortcutFile in $ShortcutFiles) {
                 $Shortcut = $Shell.CreateShortcut($ShortcutFile.FullName)
-                [PSCustomObject]@{
-                    Path = $ShortcutFile.FullName
-                    TargetPath = [string]$Shortcut.TargetPath
+                $TargetPath = [string]$Shortcut.TargetPath
+                $TargetDirectory = if ([string]::IsNullOrWhiteSpace($TargetPath)) {
+                    ""
+                } else {
+                    [System.IO.Path]::GetDirectoryName($TargetPath)
+                }
+                $TargetsKnownInstall = @($InstallDirectory, $LegacyInstallDirectory) |
+                    Where-Object {
+                        [string]::Equals(
+                            $TargetDirectory,
+                            $_,
+                            [System.StringComparison]::OrdinalIgnoreCase
+                        )
+                    }
+                if ($ShortcutFile.Name -like "*$ProductName*" -or $TargetsKnownInstall.Count -gt 0) {
+                    [PSCustomObject]@{
+                        Path = $ShortcutFile.FullName
+                        TargetPath = $TargetPath
+                    }
                 }
             }
         )
     } finally {
         [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($Shell)
     }
+}
+
+function Get-ProductShortcutFingerprint {
+    return @(
+        Get-ProductShortcuts |
+            ForEach-Object { "$($_.Path)`t$($_.TargetPath)" } |
+            Sort-Object
+    ) -join "`n"
 }
 
 function Test-ShortcutTargetsPath {
@@ -612,7 +642,10 @@ function Invoke-LegacySilentUninstall {
 }
 
 function Assert-RejectedTauriMigration {
-    param([Parameter(Mandatory = $true)][string]$Scenario)
+    param(
+        [Parameter(Mandatory = $true)][string]$Scenario,
+        [string]$ExpectedShortcutFingerprint = ""
+    )
 
     $Result = Start-Process -FilePath $InstallerPath -ArgumentList @("/S") -Wait -PassThru
     if ($Result.ExitCode -eq 0) {
@@ -630,11 +663,12 @@ function Assert-RejectedTauriMigration {
             Get-ChildItem -LiteralPath $InstallDirectory -Force -ErrorAction Stop
         )
     }
-    if ($UnexpectedInstallItems.Count -gt 0 -or (Test-Path $TauriRegistryPath) -or (@(Get-ProductShortcuts).Count -gt 0)) {
+    $CurrentShortcutFingerprint = Get-ProductShortcutFingerprint
+    if ($UnexpectedInstallItems.Count -gt 0 -or (Test-Path $TauriRegistryPath) -or $CurrentShortcutFingerprint -ne $ExpectedShortcutFingerprint) {
         throw "$Scenario 虽被拒绝，但已写入新客户端目录、卸载项或快捷方式。"
     }
     if (Test-Path -LiteralPath $InstallDirectory -PathType Container) {
-        Remove-Item -LiteralPath $InstallDirectory -Force
+        Remove-Item -LiteralPath $InstallDirectory -Force -ErrorAction Stop
         if (Test-Path -LiteralPath $InstallDirectory) {
             throw "$Scenario 留下的空安装目录无法安全清理。"
         }
@@ -687,6 +721,19 @@ try {
     New-ItemProperty -Path $LegacyRegistryPath -Name "DisplayVersion" -Value "1.1.2" -PropertyType String | Out-Null
     New-ItemProperty -Path $LegacyRegistryPath -Name "InstallLocation" -Value (Join-Path $TemporaryRoot "forged-product-$RunToken") -PropertyType String | Out-Null
     Assert-RejectedTauriMigration -Scenario "固定旧 Inno 键的产品或发布者被伪造"
+    Remove-Item -Path $LegacyRegistryPath -Recurse -Force
+    $CorruptFixtureCreated = $false
+
+    Write-Host "[迁移冒烟] 验证没有完整性白名单的 1.1.1 必须手动卸载…"
+    New-Item -Path $LegacyRegistryPath -Force | Out-Null
+    $CorruptFixtureCreated = $true
+    New-ItemProperty -Path $LegacyRegistryPath -Name "DisplayName" -Value $ProductName -PropertyType String | Out-Null
+    New-ItemProperty -Path $LegacyRegistryPath -Name "Publisher" -Value "Risk Model Agent" -PropertyType String | Out-Null
+    New-ItemProperty -Path $LegacyRegistryPath -Name "DisplayVersion" -Value "1.1.1" -PropertyType String | Out-Null
+    New-ItemProperty -Path $LegacyRegistryPath -Name "InstallLocation" -Value $LegacyInstallDirectory -PropertyType String | Out-Null
+    New-ItemProperty -Path $LegacyRegistryPath -Name "UninstallString" -Value "`"$LegacyUninstaller`"" -PropertyType String | Out-Null
+    New-ItemProperty -Path $LegacyRegistryPath -Name "QuietUninstallString" -Value "`"$LegacyUninstaller`" /SILENT" -PropertyType String | Out-Null
+    Assert-RejectedTauriMigration -Scenario "没有完整性白名单的 1.1.1 旧版本"
     Remove-Item -Path $LegacyRegistryPath -Recurse -Force
     $CorruptFixtureCreated = $false
 
@@ -747,6 +794,9 @@ try {
     $LegacyUninstallerHash = (Get-FileHash -LiteralPath $LegacyUninstaller -Algorithm SHA256).Hash.ToLowerInvariant()
     Write-Host "[1.1.2 迁移哈希] risk-model-agent.exe=$LegacyExecutableHash"
     Write-Host "[1.1.2 迁移哈希] unins000.exe=$LegacyUninstallerHash"
+    if ($LegacyExecutableHash -ne $ExpectedLegacyExecutableHash -or $LegacyUninstallerHash -ne $ExpectedLegacyUninstallerHash) {
+        throw "真实 1.1.2 安装后的主程序或卸载器 SHA-256 与安全白名单不一致。"
+    }
     $LegacyEntry = Get-ItemProperty -Path $LegacyRegistryPath -ErrorAction Stop
     $LegacyEntries = @(Get-ProductUninstallEntries)
     $LegacyShortcuts = @(Get-ProductShortcuts)
@@ -754,7 +804,40 @@ try {
         throw "真实 1.1.2 安装后未形成唯一、版本正确的旧卸载项。"
     }
     if (-not (Test-ShortcutTargetsPath -Shortcuts $LegacyShortcuts -TargetPath $LegacyExecutable)) {
-        throw "真实 1.1.2 安装后未找到指向旧程序的开始菜单或桌面入口。"
+        throw "真实 1.1.2 安装后未找到指向固定白名单主程序的开始菜单或桌面入口。"
+    }
+    $LegacyShortcutFingerprint = Get-ProductShortcutFingerprint
+
+    Write-Host "[迁移冒烟] 验证真实 1.1.2 主程序被替换时必须拒绝升级…"
+    $LegacyExecutableBackup = Join-Path $TemporaryRoot "legacy-application-$RunToken.exe"
+    Copy-Item -LiteralPath $LegacyExecutable -Destination $LegacyExecutableBackup -Force
+    try {
+        Copy-Item -LiteralPath $env:ComSpec -Destination $LegacyExecutable -Force
+        Assert-RejectedTauriMigration `
+            -Scenario "真实 1.1.2 主程序被替换" `
+            -ExpectedShortcutFingerprint $LegacyShortcutFingerprint
+    } finally {
+        Copy-Item -LiteralPath $LegacyExecutableBackup -Destination $LegacyExecutable -Force
+        Remove-Item -LiteralPath $LegacyExecutableBackup -Force -ErrorAction SilentlyContinue
+    }
+    if ((Get-FileHash -LiteralPath $LegacyExecutable -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedLegacyExecutableHash) {
+        throw "1.1.2 主程序替换负例后未恢复固定白名单文件。"
+    }
+
+    Write-Host "[迁移冒烟] 验证真实 1.1.2 卸载器被替换时必须拒绝升级…"
+    $LegacyUninstallerBackup = Join-Path $TemporaryRoot "legacy-uninstaller-$RunToken.exe"
+    Copy-Item -LiteralPath $LegacyUninstaller -Destination $LegacyUninstallerBackup -Force
+    try {
+        Copy-Item -LiteralPath $env:ComSpec -Destination $LegacyUninstaller -Force
+        Assert-RejectedTauriMigration `
+            -Scenario "真实 1.1.2 卸载器被替换" `
+            -ExpectedShortcutFingerprint $LegacyShortcutFingerprint
+    } finally {
+        Copy-Item -LiteralPath $LegacyUninstallerBackup -Destination $LegacyUninstaller -Force
+        Remove-Item -LiteralPath $LegacyUninstallerBackup -Force -ErrorAction SilentlyContinue
+    }
+    if ((Get-FileHash -LiteralPath $LegacyUninstaller -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedLegacyUninstallerHash) {
+        throw "1.1.2 卸载器替换负例后未恢复固定白名单文件。"
     }
 
     Write-Host "[迁移冒烟] 运行真实 1.1.2 冻结服务、Notebook、建模与评分基线…"
@@ -1305,6 +1388,10 @@ try {
     }
     if ($LegacyUninstaller -and (Test-Path $LegacyUninstaller -PathType Leaf)) {
         try {
+            $CleanupLegacyUninstallerHash = (Get-FileHash -LiteralPath $LegacyUninstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($CleanupLegacyUninstallerHash -ne $ExpectedLegacyUninstallerHash) {
+                throw "清理阶段的旧版卸载器与固定白名单不一致，已拒绝执行。"
+            }
             Invoke-LegacySilentUninstall -UninstallerPath $LegacyUninstaller
         } catch {
             if ($null -eq $Failure) { $Failure = $_ } else { Write-Warning $_.Exception.Message }

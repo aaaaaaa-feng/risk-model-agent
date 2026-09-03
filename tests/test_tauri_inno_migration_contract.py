@@ -8,11 +8,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HOOK_PATH = ROOT / "desktop" / "src-tauri" / "windows" / "installer-hooks.nsh"
+VERIFY_SCRIPT_PATH = ROOT / "desktop" / "src-tauri" / "windows" / "verify-legacy-inno.ps1"
 CONFIG_PATH = ROOT / "desktop" / "src-tauri" / "tauri.conf.json"
 LEGACY_KEY = (
     "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
     "{4CE3329A-CF6F-49E0-86C7-BE5C38DB1474}_is1"
 )
+LEGACY_APPLICATION_SHA256 = "eed99b0776114cd7ff76c8fd0b6b6ab4b7dc7a6da7ac9c6e5f54b004e382e4df"
+LEGACY_UNINSTALLER_SHA256 = "353e1ca0f6afcc8998cb50a55d9775279605b6ffa78f026f42d4c75daf22ab58"
 
 
 def test_tauri_nsis_registers_the_legacy_inno_migration_hook() -> None:
@@ -38,17 +41,35 @@ def test_legacy_migration_is_fixed_hkcu_fail_closed_and_silent() -> None:
     assert '"InstallLocation"' in hook
     assert '"UninstallString"' in hook
     assert '"QuietUninstallString"' in hook
-    assert 'IfFileExists "$R5\\risk-model-agent.exe"' in hook
-    assert 'IfFileExists "$R5\\unins000.exe"' in hook
+    assert 'IfFileExists "$R5\\risk-model-agent.exe" rma_legacy_application_exists 0' in hook
+    assert 'IfFileExists "$R5\\unins000.exe" rma_legacy_uninstaller_exists 0' in hook
     assert "ReadRegStr $R0 HKCU" not in hook
     assert "StrCpy $R0 '$\\\"$R5\\unins000.exe$\\\"'" in hook
     assert 'GetFullPathName $R9 "$LOCALAPPDATA\\Programs\\RiskModelAgent\\."' in hook
     assert "${If} $R5 != $R9" in hook
     assert "${If} $R7 != $R0" in hook
     assert '${If} $R8 != "$R0 /SILENT"' in hook
+    assert '${If} $R4 != "1.1.2"' in hook
+    assert not any(version in hook for version in ("1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1"))
+    assert LEGACY_APPLICATION_SHA256 in hook
+    assert LEGACY_UNINSTALLER_SHA256 in hook
+    assert 'RMA_VERIFY_SCRIPT_SOURCE "${__FILEDIR__}\\verify-legacy-inno.ps1"' in hook
+    assert 'File "/oname=$PLUGINSDIR\\verify-legacy-inno.ps1"' in hook
+    assert (
+        'IfFileExists "$PLUGINSDIR\\verify-legacy-inno.ps1" rma_legacy_hash_script_exists 0'
+    ) in hook
+    assert 'IfFileExists "$R5\\risk-model-agent.exe" +2 0' not in hook
+    assert 'IfFileExists "$R5\\unins000.exe" +2 0' not in hook
+    assert 'IfFileExists "$PLUGINSDIR\\verify-legacy-inno.ps1" +2 0' not in hook
+    assert '"$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe"' in hook
+    assert "nsExec::Exec /TIMEOUT=60000" in hook
+    assert '-ExpectedApplicationHash "${RMA_LEGACY_APPLICATION_SHA256}"' in hook
+    assert '-ExpectedUninstallerHash "${RMA_LEGACY_UNINSTALLER_SHA256}"' in hook
+    assert "nsExec::ExecToStack" not in hook
     assert "ExecWait '$R0 /VERYSILENT /SUPPRESSMSGBOXES /NORESTART' $R1" in hook
     assert "${If} ${Errors}" in hook
     assert "${If} $R1 != 0" in hook
+    assert 'IfFileExists "$R5\\risk-model-agent.exe" 0 rma_legacy_application_removed' in hook
     assert hook.count("!insertmacro RMA_DETECT_LEGACY_INNO_KEY $R6") == 2
     assert hook.count("!insertmacro RMA_ABORT_LEGACY_MIGRATION") >= 5
     assert all(f"Push $R{register}" in hook for register in range(10))
@@ -70,3 +91,20 @@ def test_legacy_migration_never_scans_or_deletes_user_data() -> None:
     )
 
     assert not any(marker in hook for marker in forbidden)
+
+
+def test_legacy_hash_verifier_is_streaming_silent_and_path_bound() -> None:
+    script = VERIFY_SCRIPT_PATH.read_text(encoding="ascii")
+
+    assert "SHA256]::Create()" in script
+    assert "[System.IO.File]::Open(" in script
+    assert "ComputeHash($Stream)" in script
+    assert "GetFolderPath(" in script
+    assert '"Programs", "RiskModelAgent"' in script
+    assert "[System.IO.FileAttributes]::ReparsePoint" in script
+    assert script.count('ValidatePattern("^[0-9a-fA-F]{64}$")') == 2
+    assert "Get-FileHash" not in script
+    assert "ReadAllBytes" not in script
+    assert "Write-Host" not in script
+    assert "Write-Output" not in script
+    assert "$env:LOCALAPPDATA" not in script

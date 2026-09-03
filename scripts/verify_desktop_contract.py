@@ -35,6 +35,7 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
         "desktop/src-tauri/src/main.rs",
         "desktop/src-tauri/build.rs",
         "desktop/src-tauri/windows/installer-hooks.nsh",
+        "desktop/src-tauri/windows/verify-legacy-inno.ps1",
         "app/core/desktop_auth.py",
         "frontend/src/shared/lib/uiPreferences.ts",
         "scripts/build_windows_tauri.ps1",
@@ -98,6 +99,7 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
     packaged_smoke_script = _read(root, "scripts/smoke_packaged_service.py")
     root_windows_build = _read(root, "scripts/build_windows.ps1")
     installer_hooks = _read(root, "desktop/src-tauri/windows/installer-hooks.nsh")
+    legacy_hash_verifier = _read(root, "desktop/src-tauri/windows/verify-legacy-inno.ps1")
     package_workflow = _read(root, ".github/workflows/package.yml")
     ci_workflow = _read(root, ".github/workflows/ci.yml")
     windows_artifact_path = re.search(
@@ -165,12 +167,39 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
             and '"InstallLocation"' in installer_hooks
             and '"UninstallString"' in installer_hooks
             and '"QuietUninstallString"' in installer_hooks
-            and 'IfFileExists "$R5\\risk-model-agent.exe"' in installer_hooks
-            and 'IfFileExists "$R5\\unins000.exe"' in installer_hooks
+            and 'IfFileExists "$R5\\risk-model-agent.exe" rma_legacy_application_exists 0'
+            in installer_hooks
+            and 'IfFileExists "$R5\\unins000.exe" rma_legacy_uninstaller_exists 0'
+            in installer_hooks
             and 'GetFullPathName $R9 "$LOCALAPPDATA\\Programs\\RiskModelAgent\\."'
             in installer_hooks
             and "${If} $R7 != $R0" in installer_hooks
             and '${If} $R8 != "$R0 /SILENT"' in installer_hooks
+            and '${If} $R4 != "1.1.2"' in installer_hooks
+            and not any(
+                version in installer_hooks
+                for version in ("1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1")
+            )
+            and "eed99b0776114cd7ff76c8fd0b6b6ab4b7dc7a6da7ac9c6e5f54b004e382e4df"
+            in installer_hooks
+            and "353e1ca0f6afcc8998cb50a55d9775279605b6ffa78f026f42d4c75daf22ab58"
+            in installer_hooks
+            and 'File "/oname=$PLUGINSDIR\\verify-legacy-inno.ps1"' in installer_hooks
+            and 'IfFileExists "$PLUGINSDIR\\verify-legacy-inno.ps1" rma_legacy_hash_script_exists 0'
+            in installer_hooks
+            and "+2 0\n      !insertmacro RMA_ABORT_LEGACY_MIGRATION" not in installer_hooks
+            and '"$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe"' in installer_hooks
+            and "nsExec::Exec /TIMEOUT=60000" in installer_hooks
+            and "nsExec::ExecToStack" not in installer_hooks
+            and 'IfFileExists "$R5\\risk-model-agent.exe" 0 rma_legacy_application_removed'
+            in installer_hooks
+            and "SHA256]::Create()" in legacy_hash_verifier
+            and "ComputeHash($Stream)" in legacy_hash_verifier
+            and legacy_hash_verifier.count('ValidatePattern("^[0-9a-fA-F]{64}$")') == 2
+            and "Get-FileHash" not in legacy_hash_verifier
+            and "ReadAllBytes" not in legacy_hash_verifier
+            and "Write-Host" not in legacy_hash_verifier
+            and "Write-Output" not in legacy_hash_verifier
             and "ReadRegStr $R0 HKCU" not in installer_hooks
             and "ExecWait" in installer_hooks
             and "Abort" in installer_hooks
@@ -469,6 +498,14 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
                 "Assert-RejectedTauriMigration",
                 "$UnexpectedInstallItems.Count -gt 0",
                 "Remove-Item -LiteralPath $InstallDirectory -Force",
+                "$ExpectedLegacyExecutableHash",
+                "$ExpectedLegacyUninstallerHash",
+                "没有完整性白名单的 1.1.1 旧版本",
+                "真实 1.1.2 主程序被替换",
+                "真实 1.1.2 卸载器被替换",
+                "Get-ProductShortcutFingerprint",
+                "CommonPrograms",
+                "$CleanupLegacyUninstallerHash",
                 'New-ItemProperty -Path $LegacyRegistryPath -Name "DisplayName"',
                 'New-ItemProperty -Path $LegacyRegistryPath -Name "Publisher"',
                 'New-ItemProperty -Path $LegacyRegistryPath -Name "InstallLocation"',
