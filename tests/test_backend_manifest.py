@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,21 @@ def _load_manifest_module():
 
 
 manifest_module = _load_manifest_module()
+
+
+class _Cp1252Stream:
+    encoding = "cp1252"
+
+    def __init__(self) -> None:
+        self.values: list[str] = []
+
+    def write(self, value: str) -> int:
+        value.encode(self.encoding)
+        self.values.append(value)
+        return len(value)
+
+    def flush(self) -> None:
+        return None
 
 
 def test_manifest_is_deterministic_and_excludes_itself(tmp_path: Path) -> None:
@@ -88,3 +104,32 @@ def test_manifest_rejects_external_symlinks(tmp_path: Path) -> None:
 
     with pytest.raises(manifest_module.ManifestError, match="越出资源目录"):
         manifest_module.create_manifest(bundle, "1.2.0")
+
+
+def test_manifest_cli_output_survives_windows_cp1252(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "risk-model-agent.exe").write_bytes(b"fixture")
+    output = _Cp1252Stream()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    assert manifest_module.main(["--root", str(bundle), "--version", "1.2.0"]) == 0
+    rendered = "".join(output.values)
+    assert "files=1" in rendered
+    assert "sha256=" in rendered
+    assert "\\u" in rendered
+
+
+def test_manifest_cli_help_survives_windows_cp1252(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = _Cp1252Stream()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    with pytest.raises(SystemExit) as exit_info:
+        manifest_module.main(["--help"])
+
+    assert exit_info.value.code == 0
+    assert "--root" in "".join(output.values)

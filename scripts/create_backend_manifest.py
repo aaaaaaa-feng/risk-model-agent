@@ -12,7 +12,7 @@ import stat
 import sys
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 MANIFEST_FILENAME = "backend-manifest.json"
 SCHEMA_VERSION = "risk-model-agent/backend-manifest/v1"
@@ -22,6 +22,34 @@ HASH_CHUNK_SIZE = 1024 * 1024
 
 class ManifestError(RuntimeError):
     """后端清单无法安全生成。"""
+
+
+def _console_safe_text(value: str, stream: TextIO) -> str:
+    """按实际控制台编码降级，避免 Windows 旧代码页使任务假失败。"""
+
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        value.encode(encoding)
+    except LookupError:
+        encoding = "ascii"
+    except UnicodeEncodeError:
+        pass
+    else:
+        return value
+    return value.encode(encoding, errors="backslashreplace").decode(encoding)
+
+
+def _print_console(value: str, *, stream: TextIO) -> None:
+    print(_console_safe_text(value, stream), file=stream)
+
+
+class _ConsoleSafeArgumentParser(argparse.ArgumentParser):
+    """让帮助与参数错误也经过相同的控制台编码边界。"""
+
+    def _print_message(self, message: str, file: TextIO | None = None) -> None:
+        if message:
+            stream = file or sys.stderr
+            stream.write(_console_safe_text(message, stream))
 
 
 def _sha256_file(path: Path) -> str:
@@ -151,7 +179,7 @@ def _default_version(repository_root: Path) -> str:
 
 def _arguments(argv: list[str] | None = None) -> argparse.Namespace:
     repository_root = Path(__file__).resolve().parent.parent
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = _ConsoleSafeArgumentParser(description=__doc__)
     parser.add_argument(
         "--root",
         type=Path,
@@ -175,10 +203,13 @@ def main(argv: list[str] | None = None) -> int:
         digest = hashlib.sha256(destination.read_bytes()).hexdigest()
         payload = json.loads(destination.read_text(encoding="utf-8"))
     except (ManifestError, OSError, tomllib.TOMLDecodeError) as error:
-        print(f"生成后端完整性清单失败：{error}", file=sys.stderr)
+        _print_console(f"生成后端完整性清单失败：{error}", stream=sys.stderr)
         return 2
 
-    print(f"已生成 {destination} | files={len(payload['files'])} | sha256={digest}")
+    _print_console(
+        f"已生成 {destination} | files={len(payload['files'])} | sha256={digest}",
+        stream=sys.stdout,
+    )
     return 0
 
 
