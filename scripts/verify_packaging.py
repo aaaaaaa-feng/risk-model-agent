@@ -32,6 +32,7 @@ def main() -> int:
         "frontend/package.json",
         "frontend/package-lock.json",
         "frontend/src/App.tsx",
+        "app/__init__.py",
         "app/api/capabilities.py",
         "app/bootstrap/context.py",
         "app/domain/pipeline.py",
@@ -61,6 +62,7 @@ def main() -> int:
     )
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     frontend_package = json.loads((ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
+    package_source = (ROOT / "app" / "__init__.py").read_text(encoding="utf-8")
     main_source = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
     installer = (
         (ROOT / "packaging/windows_installer.iss").read_text(encoding="utf-8")
@@ -70,17 +72,26 @@ def main() -> int:
     package_workflow = (
         (ROOT / ".github/workflows/package.yml").read_text(encoding="utf-8") if not missing else ""
     )
+    windows_installer_smoke = (
+        (ROOT / "scripts/smoke_windows_installer.ps1").read_text(encoding="utf-8")
+        if not missing
+        else ""
+    )
     project_version_match = re.search(
         r'^version = "([0-9]+\.[0-9]+\.[0-9]+)"$', pyproject, re.MULTILINE
     )
     backend_version_match = re.search(
         r'^APP_VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"$', main_source, re.MULTILINE
     )
+    package_version_match = re.search(
+        r'^__version__ = "([0-9]+\.[0-9]+\.[0-9]+)"$', package_source, re.MULTILINE
+    )
     installer_fallback_match = re.search(
         r'#define MyAppVersion "([0-9]+\.[0-9]+\.[0-9]+)"', installer
     )
     project_version = project_version_match.group(1) if project_version_match else ""
     backend_version = backend_version_match.group(1) if backend_version_match else ""
+    package_version = package_version_match.group(1) if package_version_match else ""
     installer_fallback_version = (
         installer_fallback_match.group(1) if installer_fallback_match else ""
     )
@@ -98,6 +109,8 @@ def main() -> int:
             for name in (
                 '"duckdb"',
                 '"ipykernel_launcher"',
+                '"uvicorn.protocols.http.h11_impl"',
+                '"uvicorn.loops.asyncio"',
                 '"xgboost.sklearn"',
                 '"lightgbm.sklearn"',
                 '"catboost.core"',
@@ -130,9 +143,21 @@ def main() -> int:
                 "tkinter",
             )
         ),
+        "spec_excludes_optional_uvicorn_backends": all(
+            f'"{name}"' in spec
+            for name in (
+                "uvicorn.loops.auto",
+                "uvicorn.loops.uvloop",
+                "uvicorn.protocols.http.auto",
+                "uvicorn.protocols.http.httptools_impl",
+            )
+        ),
         "runtime_dependencies_are_slim": '"polars' not in pyproject.lower()
         and '"uvicorn[standard]' not in pyproject.lower()
+        and '"httptools' not in pyproject.lower()
         and '"duckdb' in pyproject.lower(),
+        "server_uses_deterministic_uvicorn_backend": 'http="h11"' in main_source
+        and 'loop="asyncio"' in main_source,
         "xgboost_package_size_guard": '"xgboost>=2.0,<3.2"' in pyproject.lower(),
         "launcher_dispatches_kernel": "IPKernelApp.launch_instance()"
         in (ROOT / "run_local.py").read_text(encoding="utf-8"),
@@ -149,6 +174,7 @@ def main() -> int:
         "versions_are_consistent": bool(project_version)
         and project_version == str(frontend_package.get("version") or "")
         and project_version == backend_version
+        and project_version == package_version
         and project_version == installer_fallback_version,
         "windows_installer_is_per_user": (
             "PrivilegesRequired=lowest" in installer
@@ -161,6 +187,19 @@ def main() -> int:
         "windows_installer_has_uninstall_entry": "{uninstallexe}" in installer,
         "windows_installer_has_localized_messages": (
             "languages\\ChineseSimplified.isl" in installer
+        ),
+        "windows_installer_removes_stale_httptools": (
+            "[InstallDelete]" in installer
+            and 'Type: filesandordirs; Name: "{app}\\_internal\\httptools"' in installer
+        ),
+        "windows_installer_smoke_covers_stale_httptools": all(
+            value in windows_installer_smoke
+            for value in (
+                "stale-upgrade-marker.txt",
+                "Test-Path $StaleHttpToolsMarker",
+                "-RedirectStandardError $RuntimeStderr",
+                "HttpRequestParser",
+            )
         ),
         "windows_installer_uses_lzma2": "Compression=lzma2/ultra64" in installer
         and "SolidCompression=yes" in installer,
@@ -182,6 +221,15 @@ def main() -> int:
                 ".\\dist\\risk-model-agent\\risk-model-agent.exe --internal-package-self-test",
             )
         ),
+        "package_ci_fails_closed_on_windows_runtime_errors": all(
+            value in package_workflow
+            for value in (
+                "-RedirectStandardError $runtimeStderr",
+                "if ($LASTEXITCODE -ne 0)",
+                "HttpRequestParser",
+                "module 'httptools' has no attribute",
+            )
+        ),
     }
     contract["valid"] = not missing and all(
         bool(contract[key])
@@ -192,7 +240,9 @@ def main() -> int:
             "spec_has_offline_capabilities",
             "spec_uses_precise_collection",
             "spec_excludes_unused_modules",
+            "spec_excludes_optional_uvicorn_backends",
             "runtime_dependencies_are_slim",
+            "server_uses_deterministic_uvicorn_backend",
             "xgboost_package_size_guard",
             "launcher_dispatches_kernel",
             "launcher_supports_frozen_workers",
@@ -209,9 +259,12 @@ def main() -> int:
             "windows_installer_keeps_user_data",
             "windows_installer_has_uninstall_entry",
             "windows_installer_has_localized_messages",
+            "windows_installer_removes_stale_httptools",
+            "windows_installer_smoke_covers_stale_httptools",
             "windows_installer_uses_lzma2",
             "package_ci_has_size_gate",
             "package_ci_runs_frozen_self_test",
+            "package_ci_fails_closed_on_windows_runtime_errors",
         )
     )
     print(json.dumps(contract, ensure_ascii=False, indent=2, sort_keys=True))

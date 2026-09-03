@@ -24,6 +24,9 @@ hiddenimports = [
     "xlrd",
     "duckdb",
     "ipykernel_launcher",
+    # 桌面服务固定使用纯 Python H11 与 asyncio，不依赖环境自动探测。
+    "uvicorn.protocols.http.h11_impl",
+    "uvicorn.loops.asyncio",
     "skops.io",
     # skops.io._persist 以字符串动态加载无 __init__.py 的旧协议兼容模块。
     "skops.io.old._general_v0",
@@ -77,8 +80,12 @@ excluded_modules = [
     "jedi",
     "parso",
     "uvloop",
+    "uvicorn.loops.auto",
+    "uvicorn.loops.uvloop",
     "watchfiles",
     "httptools",
+    "uvicorn.protocols.http.auto",
+    "uvicorn.protocols.http.httptools_impl",
     "tkinter",
     "_tkinter",
     "sklearn.datasets.tests",
