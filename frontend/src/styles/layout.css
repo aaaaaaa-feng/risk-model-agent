@@ -870,6 +870,10 @@ body.col-resizing .chat-rail {
   min-height: 0;
 }
 
+.agent-chat.has-context {
+  grid-template-rows: 32px auto minmax(0, 1fr) auto;
+}
+
 .chat-head {
   display: flex;
   align-items: center;
@@ -879,6 +883,19 @@ body.col-resizing .chat-rail {
 .chat-head strong {
   font-size: 12px;
   font-weight: 800;
+}
+
+.chat-context {
+  margin: 0 -4px 2px;
+  padding: 5px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-solid);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-api-state {

@@ -18,8 +18,15 @@ router = APIRouter(tags=["agent-conversation"])
 EVENT_BATCH_SIZE = 5000
 
 
+class ConversationContextPayload(BaseModel):
+    run_id: str | None = Field(default=None, min_length=1, max_length=160)
+    stage: str | None = Field(default=None, min_length=1, max_length=120)
+    decision_id: str | None = Field(default=None, min_length=1, max_length=160)
+
+
 class SendMessage(BaseModel):
     content: str = Field(min_length=1, max_length=20000)
+    context: ConversationContextPayload | None = None
 
 
 class FeedbackCreate(BaseModel):
@@ -45,7 +52,11 @@ def send_message(
     payload: SendMessage,
     ctx: AppContext = Depends(context),
 ) -> dict[str, Any]:
-    return ctx.conversations.send(project_id, payload.content)
+    return ctx.conversations.send(
+        project_id,
+        payload.content,
+        payload.context.model_dump() if payload.context else None,
+    )
 
 
 @router.post("/conversation-messages/{message_id}/feedback", status_code=201)

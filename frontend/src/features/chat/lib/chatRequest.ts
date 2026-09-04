@@ -1,4 +1,29 @@
+import type { ChatContext } from "../types";
+
+export function chatContextKey(context: ChatContext): string {
+  return JSON.stringify([context.run_id || "", context.stage || "", context.decision_id || ""]);
+}
+
 export function isCurrentChatRequest(
+  activeGeneration: number,
+  requestGeneration: number,
+  activeProjectId: string | null,
+  requestProjectId: string,
+  activeContextKey: string,
+  requestContextKey: string,
+): boolean {
+  return (
+    activeGeneration === requestGeneration &&
+    activeProjectId === requestProjectId &&
+    activeContextKey === requestContextKey
+  );
+}
+
+/**
+ * 已被后端接受的请求要跟踪到完成，即使 Run 在回答期间跨了阶段。
+ * transport 只绑定项目和请求代次；contextKey 只决定旧草稿能否显示。
+ */
+export function isCurrentChatTransport(
   activeGeneration: number,
   requestGeneration: number,
   activeProjectId: string | null,

@@ -1,5 +1,5 @@
 import { eventUrl, httpClient } from "@/shared/api/client";
-import type { ConversationResponse, MessagePostResponse } from "../types";
+import type { ChatContext, ConversationResponse, MessagePostResponse } from "../types";
 
 export const chatApi = {
   conversation: (projectId: string, signal?: AbortSignal) =>
@@ -7,10 +7,10 @@ export const chatApi = {
       `/projects/${encodeURIComponent(projectId)}/conversation`,
       { signal },
     ),
-  send: (projectId: string, content: string, signal?: AbortSignal) =>
+  send: (projectId: string, content: string, context: ChatContext, signal?: AbortSignal) =>
     httpClient.post<MessagePostResponse>(
       `/projects/${encodeURIComponent(projectId)}/conversation/messages`,
-      { content },
+      { content, context },
       { signal },
     ),
   feedback: (messageId: string, rating: string) =>

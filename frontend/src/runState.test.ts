@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isCurrentSelection, mergeEventsForRun } from "@/features/runs/model/runState";
+import {
+  isCurrentRunResponse,
+  isCurrentSelection,
+  isTerminalRunStatus,
+  mergeEventsForRun,
+  shouldUseRunFallbackPolling,
+} from "@/features/runs/model/runState";
 import type { RunEvent } from "@/features/runs";
 
 function event(id: string, runId: string, sequence: number): RunEvent {
@@ -31,5 +37,19 @@ describe("run-scoped UI state", () => {
     expect(isCurrentSelection("p1", "r1", "p1", "r1")).toBe(true);
     expect(isCurrentSelection("p1", "r1", "p2", "r1")).toBe(false);
     expect(isCurrentSelection("p1", "r1", "p1", "r2")).toBe(false);
+  });
+
+  it("rejects a persisted project/run combination with the wrong ownership", () => {
+    expect(isCurrentRunResponse("p1", "r1", "p1", "r1", "p1")).toBe(true);
+    expect(isCurrentRunResponse("p1", "r1", "p1", "r1", "p2")).toBe(false);
+  });
+
+  it("SSE 失败时只为非终态 Run 启用轮询", () => {
+    expect(shouldUseRunFallbackPolling("connected", "running")).toBe(false);
+    expect(shouldUseRunFallbackPolling("fallback", "running")).toBe(true);
+    for (const status of ["succeeded", "failed", "blocked"]) {
+      expect(isTerminalRunStatus(status)).toBe(true);
+      expect(shouldUseRunFallbackPolling("fallback", status)).toBe(false);
+    }
   });
 });

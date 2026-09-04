@@ -203,7 +203,7 @@ function ruleFor(
   if (code === "RUN_EVENT_STREAM_STOPPED")
     return {
       summary: "运行进度的实时连接暂时无法恢复。",
-      action: "已停止实时重连，页面会继续通过普通刷新获取状态。",
+      action: "已切换到普通刷新，并会低频尝试恢复实时连接。",
     };
   if (code === "CONVERSATION_EVENT_STREAM_INVALID")
     return {

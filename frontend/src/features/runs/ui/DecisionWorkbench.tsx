@@ -1,6 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { runsApi } from "../api/runsApi";
-import { editableBinSpec } from "../lib/binning";
+import {
+  createManualBinDrafts,
+  parseManualBinDrafts,
+  parseManualBinSpec,
+  updateManualBinDraft,
+  type ManualBinSpecError,
+} from "../lib/binning";
 import { confirmLabel, decisionStageName, reviewLabel } from "../lib/labels";
 import { Button } from "@/shared/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/shared/ui/dialog";
@@ -29,9 +35,17 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
   const [busy, setBusy] = useState(false);
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   const [manualColumn, setManualColumn] = useState("");
-  const [manualSpec, setManualSpec] = useState("");
+  const [manualDrafts, setManualDrafts] = useState<Record<string, string>>({});
+  const [manualDirtyColumns, setManualDirtyColumns] = useState<string[]>([]);
+  const [manualSpecError, setManualSpecError] = useState<ManualBinSpecError | null>(null);
+  const [manualVisualError, setManualVisualError] = useState<string | null>(null);
+  const initializedDecision = useRef("");
 
   useEffect(() => {
+    const decisionKey = `${decision.id}:${decision.kind}`;
+    if (initializedDecision.current === decisionKey) return;
+    initializedDecision.current = decisionKey;
+    setEdits({});
     if (decision.kind === "confirm_data") {
       const dataSummary = summary as import("../types").DataSummary;
       setEdits({
@@ -51,29 +65,42 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
       });
     } else if (decision.kind === "confirm_binning") {
       const binningSummary = summary as import("../types").BinningSummary;
-      const first = Object.keys(binningSummary.specs || {})[0] || "";
+      const specs = binningSummary.specs || {};
+      const first = Object.keys(specs)[0] || "";
       setManualColumn(first);
-      setManualSpec(
-        first ? JSON.stringify(editableBinSpec(binningSummary.specs?.[first]), null, 2) : "",
-      );
-    } else {
-      setEdits({});
+      setManualDrafts(createManualBinDrafts(specs));
     }
     if (decision.kind !== "confirm_binning") {
       setManualColumn("");
-      setManualSpec("");
+      setManualDrafts({});
     }
+    setManualDirtyColumns([]);
+    setManualSpecError(null);
+    setManualVisualError(null);
   }, [decision.id, decision.kind, summary]);
 
   const review: import("../types").Review = summary.review || decision.review || {};
 
   const confirm = async (approved: boolean) => {
+    const payloadEdits = { ...edits };
+    if (approved && decision.kind === "confirm_binning" && manualVisualError) {
+      notify(manualVisualError, true);
+      return;
+    }
+    if (approved && decision.kind === "confirm_binning" && manualDirtyColumns.length) {
+      const parsed = parseManualBinDrafts(manualDrafts, manualDirtyColumns);
+      if (!parsed.ok) {
+        setManualColumn(parsed.column);
+        setManualSpecError(parsed.error);
+        notify(parsed.error.message, true);
+        return;
+      }
+      payloadEdits.manual_specs = parsed.value;
+    }
+
+    setManualSpecError(null);
     setBusy(true);
     try {
-      const payloadEdits = { ...edits };
-      if (decision.kind === "confirm_binning" && manualColumn && manualSpec.trim()) {
-        payloadEdits.manual_specs = { [manualColumn]: JSON.parse(manualSpec) };
-      }
       await runsApi.decide(run.id, decision.id, approved, payloadEdits);
       onResolved();
     } catch (error) {
@@ -158,9 +185,25 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
             <BinningDecision
               summary={summary as import("../types").BinningSummary}
               manualColumn={manualColumn}
-              setManualColumn={setManualColumn}
-              manualSpec={manualSpec}
-              setManualSpec={setManualSpec}
+              dirtyColumns={manualDirtyColumns}
+              setManualColumn={(column) => {
+                setManualSpecError(null);
+                setManualColumn(column);
+              }}
+              manualSpec={manualDrafts[manualColumn] || ""}
+              onManualSpecChange={(value) => {
+                setManualSpecError((current) => {
+                  if (!current) return null;
+                  const parsed = parseManualBinSpec(value);
+                  return parsed.ok ? null : parsed.error;
+                });
+                setManualDirtyColumns((current) =>
+                  current.includes(manualColumn) ? current : [...current, manualColumn],
+                );
+                setManualDrafts((current) => updateManualBinDraft(current, manualColumn, value));
+              }}
+              manualSpecError={manualSpecError}
+              onManualVisualErrorChange={setManualVisualError}
             />
           )}
           {decision.kind === "confirm_models" && (

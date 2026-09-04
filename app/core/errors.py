@@ -94,6 +94,8 @@ _MESSAGES = {
     "PROVIDER_BASE_URL_MUST_BE_HTTPS_OR_LOCALHOST": "Provider 地址必须使用 HTTPS；本机服务可使用 localhost 或 127.0.0.1。",
     "PROVIDER_INVALID": "不支持所选 Provider，请重新选择模型 API 配置。",
     "API_FORMAT_INVALID": "API 格式无效，请选择 OpenAI 或 Anthropic 兼容格式。",
+    "CONVERSATION_RUN_PROJECT_MISMATCH": "当前对话选择的 Run 不属于这个项目，请刷新页面后重新选择。",
+    "CONVERSATION_DECISION_RUN_MISMATCH": "当前对话选择的确认节点与 Run 不一致，请刷新页面后重试。",
     "RUN_EXECUTION_FAILED": "当前建模节点执行失败，请查看节点提示并重试；其他 Y 任务不受影响。",
     "WORKER_EXECUTION_FAILED": "本地计算节点执行失败，请检查数据、资源设置和当前节点后重试。",
 }
