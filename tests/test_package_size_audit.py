@@ -1,3 +1,4 @@
+import importlib
 import json
 from pathlib import Path
 
@@ -48,6 +49,7 @@ def test_package_audit_reports_components_and_passes_both_size_gates(tmp_path: P
     report = create_report(
         bundle,
         installer=installer,
+        embedded_modules=(),
         policy=InstallerPolicy(
             baseline_kib=2,
             maximum_mib=1,
@@ -69,13 +71,18 @@ def test_package_audit_reports_components_and_passes_both_size_gates(tmp_path: P
         "_internal/xgboost/testing/data.pyc",
         "_internal/debugpy/server.pyc",
         "_internal/uvloop/loop.pyd",
+        "_internal/IPython/core/interactiveshell.pyc",
+        "_internal/ipykernel/kernelapp.pyc",
+        "_internal/jupyter_client/manager.pyc",
+        "_internal/nbformat/__init__.pyc",
+        "_internal/zmq/backend/cython/_zmq.pyd",
     ],
 )
 def test_package_audit_rejects_forbidden_or_test_components(tmp_path: Path, relative: str):
     bundle = tmp_path / "risk-model-agent"
     _write(bundle / relative, 10)
 
-    report = create_report(bundle)
+    report = create_report(bundle, embedded_modules=())
 
     assert report["valid"] is False
     assert report["forbidden_components"]["paths"] == [relative]
@@ -89,6 +96,7 @@ def test_package_audit_requires_both_absolute_and_relative_size_limits(tmp_path:
     report = create_report(
         bundle,
         installer=installer,
+        embedded_modules=(),
         policy=InstallerPolicy(
             baseline_kib=1,
             maximum_mib=1,
@@ -110,6 +118,83 @@ def test_installer_directory_must_contain_exactly_one_candidate(tmp_path: Path):
         resolve_installer(installer_dir)
 
 
+def test_package_audit_rejects_forbidden_modules_inside_executable(tmp_path: Path):
+    bundle = tmp_path / "risk-model-agent"
+    _write(bundle / "risk-model-agent.exe", 10)
+
+    report = create_report(
+        bundle,
+        embedded_modules=("app.main", "IPython.core.interactiveshell", "nbformat.validator"),
+    )
+
+    assert report["valid"] is False
+    assert report["forbidden_components"]["paths"] == []
+    assert report["forbidden_components"]["embedded_modules"] == [
+        "IPython.core.interactiveshell",
+        "nbformat.validator",
+    ]
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    (
+        "app.notebooks",
+        "app.notebooks.runtime",
+        "app.api.notebooks",
+        "app.agents.codegen",
+    ),
+)
+def test_package_audit_rejects_retired_notebook_application_modules(
+    tmp_path: Path, module_name: str
+):
+    bundle = tmp_path / "risk-model-agent"
+    _write(bundle / "risk-model-agent.exe", 10)
+
+    report = create_report(bundle, embedded_modules=("app.main", module_name))
+
+    assert report["valid"] is False
+    assert report["forbidden_components"]["embedded_modules"] == [module_name]
+
+
+def test_packaging_source_guard_is_recursive_and_covers_codegen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    scripts_directory = Path(__file__).resolve().parents[1] / "scripts"
+    monkeypatch.syspath_prepend(str(scripts_directory))
+    verify_packaging = importlib.import_module("verify_packaging")
+
+    assert verify_packaging.notebook_sources_are_removed(tmp_path) is True
+
+    nested_runtime = tmp_path / "app" / "notebooks" / "nested" / "runtime.py"
+    nested_runtime.parent.mkdir(parents=True)
+    nested_runtime.write_text("", encoding="utf-8")
+    assert verify_packaging.notebook_sources_are_removed(tmp_path) is False
+
+    nested_runtime.unlink()
+    codegen = tmp_path / "app" / "agents" / "codegen.py"
+    codegen.parent.mkdir(parents=True)
+    codegen.write_text("", encoding="utf-8")
+    assert verify_packaging.notebook_sources_are_removed(tmp_path) is False
+
+
+def test_embedded_module_audit_does_not_misclassify_vendored_optional_names(tmp_path: Path):
+    bundle = tmp_path / "risk-model-agent"
+    _write(bundle / "risk-model-agent.exe", 10)
+
+    report = create_report(
+        bundle,
+        embedded_modules=(
+            "dotenv.ipython",
+            "numpy.testing",
+            "pygments.lexers.graphviz",
+            "scipy._external.array_api_compat.dask",
+        ),
+    )
+
+    assert report["valid"] is True
+    assert report["forbidden_components"]["embedded_modules"] == []
+
+
 def test_package_audit_keeps_utf8_report_and_supports_cp1252_stdout(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -118,6 +203,7 @@ def test_package_audit_keeps_utf8_report_and_supports_cp1252_stdout(
     _write(bundle / "risk-model-agent.exe", 10)
     output = tmp_path / "中文报告.json"
     console = _Cp1252Console()
+    monkeypatch.setattr(package_size_audit, "embedded_python_modules", lambda _bundle: ())
     monkeypatch.setattr(package_size_audit.sys, "stdout", console)
 
     exit_code = package_size_audit.main(

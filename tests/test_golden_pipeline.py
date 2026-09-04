@@ -58,7 +58,8 @@ def test_full_agent_reviewer_worker_pipeline(golden):
     assert excluded["FPD7"] == "OTHER_TARGET"
     assert excluded["MOB30"] == "OTHER_TARGET"
     reviews = context.database.list("review_records", {"run_id": run["id"]}, limit=200)
-    assert {"code", "execution", "report"}.issubset({item["scope"] for item in reviews})
+    assert {"execution", "report"}.issubset({item["scope"] for item in reviews})
+    assert "code" not in {item["scope"] for item in reviews}
     assert all(item["status"] == "fallback_pass" for item in reviews)
     assert context.engine.persistence_mode == "sqlite"
 
@@ -73,8 +74,12 @@ def test_report_excel_html_json_share_one_structured_source(golden):
         "report_excel",
         "report_html",
         "model_package",
-        "reproducible_notebook",
     }.issubset(by_kind)
+    assert "reproducible_notebook" not in by_kind
+    completed_kinds = {"model_package", "report_json", "report_excel", "report_html"}
+    assert set(run["state"]["artifact_ids"]) == {
+        item["id"] for item in artifacts if item["kind"] in completed_kinds
+    }
     for artifact in artifacts:
         assert Path(artifact["path"]).exists()
         assert sha256_file(Path(artifact["path"])) == artifact["checksum"]

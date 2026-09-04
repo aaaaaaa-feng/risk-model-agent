@@ -2785,7 +2785,7 @@ dependencies = [
 
 [[package]]
 name = "risk-model-agent-desktop"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "getrandom 0.3.4",
  "serde",

@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { formatMetric, formatNumber, formatPercent } from "@/shared/lib/format";
-import { editableBinSpec } from "../lib/binning";
 import { monotonicLabel } from "../lib/labels";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
@@ -8,9 +7,10 @@ import { Checkbox } from "@/shared/ui/checkbox";
 import { Hint } from "@/shared/ui/hint";
 import { Input } from "@/shared/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
-import { Textarea } from "@/shared/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table";
 import { translateError } from "@/shared/lib/errors";
+import { ManualBinningEditor } from "./ManualBinningEditor";
+import type { ManualBinSpecError } from "../lib/binning";
 
 const modelCatalog = [
   ["dummy", "Dummy", "效果下限与流程基线"],
@@ -289,24 +289,27 @@ export function ScreeningDecision({
 export function BinningDecision({
   summary,
   manualColumn,
+  dirtyColumns,
   setManualColumn,
   manualSpec,
-  setManualSpec,
+  onManualSpecChange,
+  manualSpecError,
+  onManualVisualErrorChange,
 }: {
   summary: import("../types").BinningSummary;
   manualColumn: string;
+  dirtyColumns: string[];
   setManualColumn: (value: string) => void;
   manualSpec: string;
-  setManualSpec: (value: string) => void;
+  onManualSpecChange: (value: string) => void;
+  manualSpecError?: ManualBinSpecError | null;
+  onManualVisualErrorChange: (error: string | null) => void;
 }) {
   const specs = summary.specs || {};
   const columns = Object.keys(specs);
   const sample = manualColumn ? specs[manualColumn] : undefined;
   const stats = useMemo(() => (sample ? binStats(sample) : null), [sample]);
-  const load = (column: string) => {
-    setManualColumn(column);
-    setManualSpec(JSON.stringify(editableBinSpec(specs[column]), null, 2));
-  };
+  const load = (column: string) => setManualColumn(column);
   return (
     <section className="decision-section">
       <div className="summary-grid three">
@@ -341,6 +344,7 @@ export function BinningDecision({
                 <span className={spec.monotonic ? "bin-ok" : "bin-warn"}>
                   {spec.monotonic ? "单调" : "非单调，待调整"} ·{" "}
                   {spec.source === "manual" ? "人工" : "自动"}
+                  {dirtyColumns.includes(column) ? " · 草稿已调整" : ""}
                 </span>
               </button>
             );
@@ -437,11 +441,12 @@ export function BinningDecision({
                     人工分箱规则
                     <Hint text="保存后会生成新分箱版本，并使训练、质检和报告失效重跑。" />
                   </h3>
-                  <Textarea
+                  <ManualBinningEditor
+                    key={manualColumn}
                     value={manualSpec}
-                    onChange={(e) => setManualSpec(e.target.value)}
-                    spellCheck={false}
-                    rows={10}
+                    onChange={onManualSpecChange}
+                    submitError={manualSpecError}
+                    onVisualErrorChange={onManualVisualErrorChange}
                   />
                 </div>
                 <div>

@@ -304,7 +304,6 @@ class LegacyMigrator:
             "monthly_token_budget",
             "proxy",
             "ca_cert",
-            "notebook_network",
             "telemetry",
             "auto_update",
             "memory_budget_mb",

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from app.core.database import Database
 from app.core.paths import AppPaths, get_paths
 from app.evaluation.harness import EvaluationHarness
-from app.notebooks.manager import NotebookManager
 from app.orchestration.graph import RunEngine
 from app.services.archives import ArchiveService, BackupService
 from app.services.artifacts import ArtifactService
@@ -21,7 +20,6 @@ class AppContext:
     database: Database
     catalog: CatalogService
     artifacts: ArtifactService
-    notebooks: NotebookManager
     pipeline: RunPipeline
     engine: RunEngine
     archives: ArchiveService
@@ -36,7 +34,6 @@ class AppContext:
         database = Database(paths=resolved)
         catalog = CatalogService(database, resolved)
         artifacts = ArtifactService(database, resolved, catalog)
-        notebooks = NotebookManager(resolved)
         pipeline = RunPipeline(database, resolved, catalog, artifacts)
         engine = RunEngine(database, resolved, catalog, pipeline)
         archives = ArchiveService(database, resolved, catalog)
@@ -49,7 +46,6 @@ class AppContext:
             database,
             catalog,
             artifacts,
-            notebooks,
             pipeline,
             engine,
             archives,
@@ -60,7 +56,6 @@ class AppContext:
         )
 
     def shutdown(self) -> None:
-        self.notebooks.shutdown_all()
         self.conversations.shutdown()
         self.engine.shutdown()
         self.evaluations.shutdown()

@@ -1,5 +1,6 @@
 export type * from "./types";
 export { useRunData } from "./model/useRunData";
+export { isTerminalRunStatus, shouldUseRunFallbackPolling } from "./model/runState";
 export {
   confirmLabel,
   decisionStageName,

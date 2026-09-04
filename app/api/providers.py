@@ -34,7 +34,6 @@ class SettingsPayload(BaseModel):
     monthly_token_budget: int | None = Field(default=None, ge=0)
     proxy: str | None = None
     ca_cert: str | None = None
-    notebook_network: bool | None = None
     telemetry: bool | None = None
     auto_update: bool | None = None
     memory_budget_mb: int | None = Field(default=None, ge=256, le=131072)

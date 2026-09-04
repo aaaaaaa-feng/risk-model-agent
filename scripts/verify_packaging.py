@@ -17,6 +17,19 @@ from verify_desktop_contract import build_contract as build_desktop_contract
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def notebook_sources_are_removed(root: Path) -> bool:
+    """递归检查 Notebook 及其代码生成入口已从源码树移除。"""
+
+    notebook_package = root / "app" / "notebooks"
+    retired_entrypoints = (
+        root / "app" / "api" / "notebooks.py",
+        root / "app" / "agents" / "codegen.py",
+    )
+    return not any(path.is_file() for path in notebook_package.rglob("*.py")) and not any(
+        path.is_file() for path in retired_entrypoints
+    )
+
+
 def main() -> int:
     required_files = [
         "run_local.py",
@@ -44,7 +57,6 @@ def main() -> int:
         "app/domain/pipeline.py",
         "app/governance/manifest.py",
         "app/governance/tracing.py",
-        "app/notebooks/runtime.py",
         "app/orchestration/contracts.py",
         "app/orchestration/graph.py",
         "app/orchestration/process_runner.py",
@@ -79,7 +91,6 @@ def main() -> int:
     package_source = (ROOT / "app" / "__init__.py").read_text(encoding="utf-8")
     main_source = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
     launcher_source = (ROOT / "run_local.py").read_text(encoding="utf-8")
-    notebook_runtime_source = (ROOT / "app/notebooks/runtime.py").read_text(encoding="utf-8")
     windows_process_source = (ROOT / "app/core/windows_process.py").read_text(encoding="utf-8")
     package_workflow = (
         (ROOT / ".github/workflows/package.yml").read_text(encoding="utf-8") if not missing else ""
@@ -93,6 +104,9 @@ def main() -> int:
         (ROOT / "scripts/smoke_packaged_service.py").read_text(encoding="utf-8")
         if not missing
         else ""
+    )
+    package_audit_source = (
+        (ROOT / "scripts/audit_package_size.py").read_text(encoding="utf-8") if not missing else ""
     )
     desktop_contract = build_desktop_contract(ROOT)
     project_version_match = re.search(
@@ -119,18 +133,16 @@ def main() -> int:
         "spec_has_standalone_package_runtime": (
             '(str(ROOT / "app" / "workers" / "package_runtime.py"), "app/workers")' in spec
         ),
-        "spec_has_offline_capabilities": all(
+        "spec_has_model_and_data_capabilities": all(
             name in spec
             for name in (
                 '"duckdb"',
-                '"ipykernel_launcher"',
                 '"uvicorn.protocols.http.h11_impl"',
                 '"uvicorn.loops.asyncio"',
                 '"xgboost.sklearn"',
                 '"lightgbm.sklearn"',
                 '"catboost.core"',
                 '"app.workers.model_builders"',
-                '"app.notebooks.runtime"',
                 '"app.packaging.self_test"',
                 '"skops.io.old._general_v0"',
                 '"skops.io.old._numpy_v0"',
@@ -156,6 +168,13 @@ def main() -> int:
                 "watchfiles",
                 "httptools",
                 "tkinter",
+                "IPython",
+                "ipykernel",
+                "jupyter_client",
+                "jupyter_core",
+                "nbformat",
+                "notebook",
+                "zmq",
             )
         ),
         "spec_excludes_optional_uvicorn_backends": all(
@@ -170,22 +189,38 @@ def main() -> int:
         "runtime_dependencies_are_slim": '"polars' not in pyproject.lower()
         and '"uvicorn[standard]' not in pyproject.lower()
         and '"httptools' not in pyproject.lower()
+        and '"nbformat' not in pyproject.lower()
+        and '"jupyter-client' not in pyproject.lower()
+        and '"ipykernel' not in pyproject.lower()
         and '"duckdb' in pyproject.lower(),
         "server_uses_deterministic_uvicorn_backend": 'http="h11"' in main_source
         and 'loop="asyncio"' in main_source,
-        "windows_backend_and_notebook_are_windowless": (
+        "windows_backend_and_workers_are_windowless": (
             'console=sys.platform != "win32"' in spec
             and "_ensure_frozen_stdio" in launcher_source
             and "RISK_AGENT_BACKEND_LOG_PATH" in launcher_source
             and "install_frozen_windows_no_console_policy()" in launcher_source
-            and 'return {"creationflags": CREATE_NO_WINDOW}' in notebook_runtime_source
             and "_winapi as module" in windows_process_source
             and "no_console_creation_flags(creation_flags)" in windows_process_source
             and "os_module.system = system_without_console" in windows_process_source
             and "shell=True, creationflags=CREATE_NO_WINDOW" in windows_process_source
         ),
         "xgboost_package_size_guard": '"xgboost>=2.0,<3.2"' in pyproject.lower(),
-        "launcher_dispatches_kernel": "IPKernelApp.launch_instance()" in launcher_source,
+        "notebook_feature_is_removed": notebook_sources_are_removed(ROOT)
+        and "ipykernel_launcher" not in launcher_source
+        and "app.notebooks" not in spec
+        and "app.api.notebooks" not in spec
+        and "app.agents.codegen" not in spec
+        and "/api/v1/notebooks" not in packaged_service_smoke,
+        "package_audit_checks_embedded_python_modules": all(
+            marker in package_audit_source
+            for marker in (
+                "CArchiveReader",
+                'open_embedded_archive("PYZ.pyz")',
+                "forbidden_module_names",
+                '"embedded_modules": module_violations',
+            )
+        ),
         "launcher_supports_frozen_workers": "multiprocessing.freeze_support()" in launcher_source,
         "launcher_dispatches_package_self_test": "--internal-package-self-test" in launcher_source,
         "spec_has_launcher": "run_local.py" in spec,
@@ -255,15 +290,16 @@ def main() -> int:
             "spec_has_onedir_collect",
             "spec_has_local_assets",
             "spec_has_standalone_package_runtime",
-            "spec_has_offline_capabilities",
+            "spec_has_model_and_data_capabilities",
             "spec_uses_precise_collection",
             "spec_excludes_unused_modules",
             "spec_excludes_optional_uvicorn_backends",
             "runtime_dependencies_are_slim",
             "server_uses_deterministic_uvicorn_backend",
-            "windows_backend_and_notebook_are_windowless",
+            "windows_backend_and_workers_are_windowless",
             "xgboost_package_size_guard",
-            "launcher_dispatches_kernel",
+            "notebook_feature_is_removed",
+            "package_audit_checks_embedded_python_modules",
             "launcher_supports_frozen_workers",
             "launcher_dispatches_package_self_test",
             "spec_has_launcher",

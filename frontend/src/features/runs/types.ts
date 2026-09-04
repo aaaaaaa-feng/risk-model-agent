@@ -164,6 +164,7 @@ export interface BinSpec {
   iv?: number;
   monotonic?: boolean;
   source?: string;
+  business_exception?: string;
   table?: BinRow[];
   merge_suggestions?: MergeSuggestion[];
 }

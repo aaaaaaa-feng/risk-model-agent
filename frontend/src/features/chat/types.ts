@@ -17,4 +17,11 @@ export interface MessagePostResponse {
   conversation_id: string;
   response_id: string;
   user_message: Message;
+  context?: ChatContext;
+}
+
+export interface ChatContext {
+  run_id: string | null;
+  stage: string | null;
+  decision_id: string | null;
 }

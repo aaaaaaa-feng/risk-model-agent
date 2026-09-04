@@ -14,10 +14,16 @@ import {
   settingsApi,
   type Settings,
 } from "@/features/settings";
-import { isAbortError, isCurrentChatRequest, parseConversationEvent } from "../lib/chatRequest";
+import {
+  chatContextKey,
+  isAbortError,
+  isCurrentChatRequest,
+  isCurrentChatTransport,
+  parseConversationEvent,
+} from "../lib/chatRequest";
 import { Hint } from "@/shared/ui/hint";
 import { RefreshCw } from "lucide-react";
-import type { Message } from "../types";
+import type { ChatContext, Message } from "../types";
 
 /* 风控语境的快捷提问,点击填入输入框 */
 const promptSuggestions = [
@@ -39,11 +45,22 @@ const modelVariants: Record<string, string[]> = {
 
 interface Props {
   projectId: string | null;
+  context: ChatContext;
+  contextLabel: string;
+  contextPending?: boolean;
   settings: Settings | null;
   onProviderChange: () => void;
 }
 
-export function AgentChat({ projectId, settings, onProviderChange }: Props) {
+export function AgentChat({
+  projectId,
+  context,
+  contextLabel,
+  contextPending = false,
+  settings,
+  onProviderChange,
+}: Props) {
+  const contextKey = chatContextKey(context);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [draft, setDraft] = useState("");
@@ -52,13 +69,17 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
   const [pressed, setPressed] = useState<Record<string, string>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const projectRef = useRef(projectId);
+  const contextRef = useRef(contextKey);
   const loadGenerationRef = useRef(0);
   const streamGenerationRef = useRef(0);
   const loadAbortRef = useRef<AbortController | null>(null);
   const submitAbortRef = useRef<AbortController | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const recoveryTimerRef = useRef<number | null>(null);
+  const activeRequestContextRef = useRef<string | null>(null);
+  const activeRequestDetachedRef = useRef(false);
   projectRef.current = projectId;
+  contextRef.current = contextKey;
 
   const clearRecoveryTimer = useCallback(() => {
     if (recoveryTimerRef.current !== null) {
@@ -115,6 +136,8 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
     loadAbortRef.current?.abort();
     submitAbortRef.current?.abort();
     closeEventSource();
+    activeRequestContextRef.current = null;
+    activeRequestDetachedRef.current = false;
     setMessages([]);
     setInput("");
     setDraft("");
@@ -130,25 +153,44 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
   }, [closeEventSource, invalidateAsyncRequests, load]);
 
   useEffect(() => {
+    // 对话历史属于项目，但一次发送必须固定在提交时的 Run/阶段/确认节点。
+    // 跨阶段时隐藏旧草稿，但继续跟踪已被后端接受的请求；完成后重新读取持久化消息。
+    if (activeRequestContextRef.current && activeRequestContextRef.current !== contextKey) {
+      activeRequestDetachedRef.current = true;
+      setDraft("");
+    }
+  }, [contextKey]);
+
+  useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, draft]);
 
   const submit = async () => {
-    if (!projectId || !input.trim() || busy) return;
+    if (!projectId || contextPending || !input.trim() || busy) return;
     const requestedProjectId = projectId;
+    const requestedContext = { ...context };
+    const requestedContextKey = contextKey;
+    let responseContextKey = requestedContextKey;
     const generation = ++streamGenerationRef.current;
     submitAbortRef.current?.abort();
     closeEventSource();
     const controller = new AbortController();
     submitAbortRef.current = controller;
     const content = input.trim();
+    activeRequestContextRef.current = requestedContextKey;
+    activeRequestDetachedRef.current = false;
     setInput("");
     setBusy(true);
     setDraft("");
     try {
-      const result = await chatApi.send(requestedProjectId, content, controller.signal);
+      const result = await chatApi.send(
+        requestedProjectId,
+        content,
+        requestedContext,
+        controller.signal,
+      );
       if (
-        !isCurrentChatRequest(
+        !isCurrentChatTransport(
           streamGenerationRef.current,
           generation,
           projectRef.current,
@@ -156,6 +198,14 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
         )
       )
         return;
+      if (requestedContext.run_id && result.context) {
+        responseContextKey = chatContextKey(result.context);
+        activeRequestContextRef.current = responseContextKey;
+        if (contextRef.current !== responseContextKey) {
+          activeRequestDetachedRef.current = true;
+          setDraft("");
+        }
+      }
       setMessages((current) => [...current, result.user_message]);
       const source = new EventSource(
         chatApi.eventStreamUrl(result.conversation_id, result.response_id),
@@ -164,7 +214,7 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
       source.onopen = clearRecoveryTimer;
       source.addEventListener("conversation_event", (message) => {
         if (
-          !isCurrentChatRequest(
+          !isCurrentChatTransport(
             streamGenerationRef.current,
             generation,
             projectRef.current,
@@ -177,6 +227,8 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
         const item = parseConversationEvent((message as MessageEvent).data);
         if (!item) {
           closeEventSource();
+          activeRequestContextRef.current = null;
+          activeRequestDetachedRef.current = false;
           setDraft("");
           setBusy(false);
           void load();
@@ -184,11 +236,23 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
           return;
         }
         if (item.evidence?.response_id !== result.response_id) return;
-        if (item.status === "delta") setDraft((current) => current + item.content);
+        if (
+          item.status === "delta" &&
+          !activeRequestDetachedRef.current &&
+          isCurrentChatRequest(
+            streamGenerationRef.current,
+            generation,
+            projectRef.current,
+            requestedProjectId,
+            contextRef.current,
+            responseContextKey,
+          )
+        )
+          setDraft((current) => current + item.content);
       });
       source.addEventListener("stream_end", async () => {
         if (
-          !isCurrentChatRequest(
+          !isCurrentChatTransport(
             streamGenerationRef.current,
             generation,
             projectRef.current,
@@ -199,13 +263,15 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
           return;
         }
         closeEventSource();
+        activeRequestContextRef.current = null;
+        activeRequestDetachedRef.current = false;
         setDraft("");
         setBusy(false);
         await load();
       });
       source.onerror = () => {
         if (
-          !isCurrentChatRequest(
+          !isCurrentChatTransport(
             streamGenerationRef.current,
             generation,
             projectRef.current,
@@ -220,7 +286,7 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
         if (recoveryTimerRef.current === null) {
           recoveryTimerRef.current = window.setTimeout(() => {
             if (
-              !isCurrentChatRequest(
+              !isCurrentChatTransport(
                 streamGenerationRef.current,
                 generation,
                 projectRef.current,
@@ -229,6 +295,8 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
             )
               return;
             closeEventSource();
+            activeRequestContextRef.current = null;
+            activeRequestDetachedRef.current = false;
             setBusy(false);
             setDraft("");
             void load();
@@ -239,7 +307,7 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
     } catch (error) {
       if (
         isAbortError(error) ||
-        !isCurrentChatRequest(
+        !isCurrentChatTransport(
           streamGenerationRef.current,
           generation,
           projectRef.current,
@@ -247,6 +315,8 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
         )
       )
         return;
+      activeRequestContextRef.current = null;
+      activeRequestDetachedRef.current = false;
       setBusy(false);
       notify(errorMessage(error), true);
     } finally {
@@ -310,10 +380,20 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
     else if (value.startsWith("m:")) switchModel(value.slice(2));
   };
 
-  const welcome = projectId && !messages.length && !busy && !draft;
+  const responseContextChanged = Boolean(
+    busy && activeRequestContextRef.current && activeRequestContextRef.current !== contextKey,
+  );
+  const responseFromPreviousContext = Boolean(
+    busy && (activeRequestDetachedRef.current || responseContextChanged),
+  );
+  const visibleDraft = responseFromPreviousContext ? "" : draft;
+  const welcome = projectId && !messages.length && !busy && !visibleDraft;
 
   return (
-    <section className="agent-chat" aria-label="项目 Agent 对话">
+    <section
+      className={`agent-chat${projectId ? " has-context" : ""}`}
+      aria-label="项目 Agent 对话"
+    >
       <div className="chat-head">
         <strong>
           项目 Agent 对话
@@ -327,6 +407,11 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
           {connection.label}
         </Badge>
       </div>
+      {projectId && (
+        <p className="chat-context" title="下一次提问会按这里显示的 Run 和确认节点解释“当前”">
+          发送上下文 · {contextLabel}
+        </p>
+      )}
       <div className="chat-messages" ref={scrollRef}>
         {!projectId && <p className="chat-placeholder">创建或选择项目后开始对话。</p>}
         {projectId && settings && !connection.ready && (
@@ -397,19 +482,19 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
             </div>
           ),
         )}
-        {draft && (
+        {visibleDraft && (
           <div className="chat-row assistant streaming">
             <span className="chat-avatar" aria-hidden>
               A
             </span>
             <div className="chat-bubble">
               <span className="chat-meta">MAIN AGENT</span>
-              <Markdown>{draft}</Markdown>
+              <Markdown>{visibleDraft}</Markdown>
               <i className="cursor" aria-hidden />
             </div>
           </div>
         )}
-        {busy && !draft && (
+        {busy && !visibleDraft && (
           <div className="chat-row assistant">
             <span className="chat-avatar" aria-hidden>
               A
@@ -417,9 +502,11 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
             <div className="chat-bubble typing">
               <span className="chat-meta">MAIN AGENT</span>
               <p>
-                {connection.ready
-                  ? `正在请求 ${modelLabel}，并结合当前项目节点与 Reviewer 证据生成答复…`
-                  : `${connection.label}，正在基于本地项目状态生成降级答复…`}
+                {responseFromPreviousContext
+                  ? "Run 上下文已变化；上一阶段的答复仍在后台完成，结束后会自动同步到对话历史…"
+                  : connection.ready
+                    ? `正在请求 ${modelLabel}，并结合当前项目节点与 Reviewer 证据生成答复…`
+                    : `${connection.label}，正在基于本地项目状态生成降级答复…`}
               </p>
             </div>
           </div>
@@ -434,8 +521,14 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
       >
         <ChatInputTextArea
           aria-label="给 Agent 发送消息"
-          disabled={!projectId || busy}
-          placeholder={projectId ? "补充要求或询问阶段…" : "请先选择项目"}
+          disabled={!projectId || contextPending || busy}
+          placeholder={
+            !projectId
+              ? "请先选择项目"
+              : contextPending
+                ? "正在验证 Run 上下文…"
+                : "补充要求或询问阶段…"
+          }
         />
         <div className="flex w-full items-center justify-between gap-2">
           {connection.ready && modelLabel ? (
@@ -482,6 +575,7 @@ export function AgentChat({ projectId, settings, onProviderChange }: Props) {
             </Button>
             <ChatInputSubmit
               aria-label="发送"
+              disabled={!projectId || contextPending || busy}
               className="h-[30px] w-[30px] p-0 [&_svg]:h-3.5 [&_svg]:w-3.5"
             />
           </div>

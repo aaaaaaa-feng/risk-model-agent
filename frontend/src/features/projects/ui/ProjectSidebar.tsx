@@ -1,12 +1,9 @@
 import type { CSSProperties } from "react";
 import type { Project } from "../types";
-import type { Settings } from "@/features/settings";
-import { Hint } from "@/shared/ui/hint";
 
 interface Props {
   projects: Project[];
   selectedId: string | null;
-  settings: Settings | null;
   open: boolean;
   onToggle: () => void;
   /** 展开时的宽度（拖拽分隔条实时调整）；折叠时忽略 */
@@ -19,7 +16,6 @@ interface Props {
 export function ProjectSidebar({
   projects,
   selectedId,
-  settings,
   open,
   onToggle,
   width,
@@ -112,12 +108,6 @@ export function ProjectSidebar({
       )}
       {open && (
         <div className="side-footer">
-          <div className="network-note">
-            <b>
-              Notebook 网络：{settings?.notebook_network === false ? "关闭偏好" : "开启"}
-              <Hint text="产品与 LLM 不主动上传原始数据；用户代码和第三方包并非安全沙箱。" />
-            </b>
-          </div>
           <button
             className="settings-open"
             type="button"

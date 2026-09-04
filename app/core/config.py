@@ -60,7 +60,6 @@ class Settings:
     monthly_token_budget: int = 0
     proxy: str = ""
     ca_cert: str = ""
-    notebook_network: bool = True
     telemetry: bool = False
     auto_update: bool = True
     memory_budget_mb: int = 1536

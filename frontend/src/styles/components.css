@@ -413,10 +413,6 @@ label > textarea {
 }
 
 @media (max-width: 1100px) {
-  .fallback-grid {
-    grid-template-columns: 1fr;
-  }
-
   .candidate-bars > div {
     grid-template-columns: 120px 1fr;
   }

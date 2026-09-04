@@ -14,7 +14,7 @@ import { cn } from "@/shared/lib/utils";
 import type { ProjectDetail } from "@/features/projects";
 import type { DataAsset } from "../types";
 
-import { AssetTable, NotebookEditor, type NotebookCell } from "./DataSections";
+import { AssetTable } from "./DataSections";
 
 interface Props {
   detail: ProjectDetail;
@@ -28,12 +28,11 @@ interface JoinStepDraft {
   leftKeys: string;
   rightKeys: string;
 }
-type DataSection = "upload" | "join" | "target" | "notebook";
+type DataSection = "upload" | "join" | "target";
 const dataSections: ReadonlyArray<readonly [DataSection, string]> = [
   ["upload", "1 导入"],
   ["join", "2 关联"],
   ["target", "3 Y 任务"],
-  ["notebook", "Notebook"],
 ];
 
 export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
@@ -46,8 +45,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
   const [datasetId, setDatasetId] = useState("");
   const [targets, setTargets] = useState<string[]>([]);
   const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
-  const [notebook, setNotebook] = useState<unknown>(null);
-  const [document, setDocument] = useState<unknown>(null);
   const assets = detail.assets.filter((item) => item.status !== "sheet_selection_required");
   const binaryCandidates = useMemo(
     () =>
@@ -167,28 +164,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
       setBusy("");
     }
   };
-  const createNotebook = async (agentGenerated: boolean) => {
-    const step = steps[0];
-    setBusy("notebook");
-    try {
-      const result = await dataApi.createNotebook({
-        project_id: detail.project.id,
-        name: agentGenerated ? "Agent 关联草稿" : "手工关联 Notebook",
-        template: agentGenerated ? "agent_join" : "blank",
-        base_asset_id: agentGenerated ? baseId : undefined,
-        right_asset_id: agentGenerated ? step?.right_asset_id : undefined,
-        left_keys: agentGenerated ? splitKeys(step?.leftKeys || "") : [],
-        right_keys: agentGenerated ? splitKeys(step?.rightKeys || "") : [],
-      });
-      setNotebook(result.notebook);
-      setDocument(result.document);
-      setSection("notebook");
-    } catch (error) {
-      notify(errorMessage(error), true);
-    } finally {
-      setBusy("");
-    }
-  };
   const createTargets = async () => {
     if (!datasetId || !targets.length) return;
     setBusy("targets");
@@ -233,7 +208,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
         <div>
           <h2>
             准备本地建模数据
-            <Hint text="支持直接建模、多表关联和 Notebook 兜底；每个结果都会重新校验。" />
+            <Hint text="支持直接建模和多表关联；每个关联结果都会重新校验。" />
           </h2>
         </div>
         <div className="run-meta">
@@ -318,8 +293,8 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
           <div className="section-heading">
             <div>
               <h3>
-                四级关联工作流
-                <Hint text="Agent 推荐 → 可视化编辑 → Agent Notebook → 用户手写 Notebook。" />
+                可视化关联工作流
+                <Hint text="先由 Agent 推荐关联键，再由用户核对或修改，最后执行完整校验。" />
               </h3>
             </div>
             <Button variant="outline" onClick={addStep} disabled={assets.length < 2}>
@@ -432,40 +407,18 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
               <span>
                 {(recommendation as { recommendations?: unknown[] }).recommendations?.length
                   ? `已按重合率和唯一性填入推荐键；仍需执行完整校验。`
-                  : "没有可靠推荐，请使用可视化键或 Notebook。"}
+                  : "没有可靠推荐，请手动填写并核对关联键。"}
               </span>
             </div>
           )}
-          <div className="fallback-grid">
-            <button
-              className="fallback-card"
+          <div className="inline-actions">
+            <Button
               onClick={executeJoin}
               disabled={!steps.length || busy === "join"}
               title="按当前关联键执行多表关联并运行粒度与样本膨胀校验"
             >
-              <b>1-2</b>
-              <strong>执行可视化关联</strong>
-              <span>使用 Agent 推荐或手动编辑后的键</span>
-            </button>
-            <button
-              className="fallback-card"
-              onClick={() => createNotebook(true)}
-              disabled={!steps.length}
-              title="让 Agent 生成可逐单元格核对的关联 Notebook 草稿"
-            >
-              <b>3</b>
-              <strong>Agent 生成 Notebook</strong>
-              <span>逐单元格核对并运行关联草稿</span>
-            </button>
-            <button
-              className="fallback-card"
-              onClick={() => createNotebook(false)}
-              title="创建空白 Notebook，由用户手工编写关联代码"
-            >
-              <b>4</b>
-              <strong>用户手写 Notebook</strong>
-              <span>最末级兜底，不需要离开产品</span>
-            </button>
+              {busy === "join" ? "关联校验中…" : "执行关联并校验"}
+            </Button>
           </div>
         </section>
       )}
@@ -565,35 +518,6 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
               ))}
               <Button disabled={!selectedTasks.length || busy === "runs"} onClick={startRuns}>
                 {busy === "runs" ? "入队中…" : `启动 ${selectedTasks.length} 个 Run`}
-              </Button>
-            </div>
-          )}
-        </section>
-      )}
-      {section === "notebook" && (
-        <section
-          id="data-panel-notebook"
-          className="work-section"
-          role="tabpanel"
-          aria-labelledby="tab-notebook"
-        >
-          {notebook && document ? (
-            <NotebookEditor
-              notebook={notebook as { id: string; name: string; dataset_version_id?: string }}
-              document={document as { cells: NotebookCell[] }}
-              setDocument={setDocument as (value: { cells: NotebookCell[] }) => void}
-              onRefresh={onRefresh}
-              notify={notify}
-            />
-          ) : (
-            <div className="notebook-empty">
-              <h3>项目级本地 Notebook</h3>
-              <p>
-                用上一步的“Agent 生成 Notebook”或“用户手写
-                Notebook”创建。代码可访问本机与网络，因此不是安全沙箱。
-              </p>
-              <Button variant="outline" onClick={() => createNotebook(false)}>
-                创建空白 Notebook
               </Button>
             </div>
           )}

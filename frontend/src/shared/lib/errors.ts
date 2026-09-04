@@ -1,5 +1,4 @@
-export type ErrorContext =
-  "default" | "workspace" | "provider" | "decision" | "notebook" | "model" | "review";
+export type ErrorContext = "default" | "workspace" | "provider" | "decision" | "model" | "review";
 
 export interface ErrorTranslationOptions {
   context?: ErrorContext;
@@ -34,10 +33,6 @@ const CONTEXT_FALLBACKS: Record<ErrorContext, Pick<FriendlyError, "summary" | "a
   decision: {
     summary: "当前确认没有提交成功。",
     action: "请刷新当前 Run，确认节点仍在等待后重试。",
-  },
-  notebook: {
-    summary: "Notebook 操作没有完成。",
-    action: "请检查当前单元格、输入文件和输出路径后重试。",
   },
   model: {
     summary: "候选模型训练没有成功。",
@@ -203,7 +198,7 @@ function ruleFor(
   if (code === "RUN_EVENT_STREAM_STOPPED")
     return {
       summary: "运行进度的实时连接暂时无法恢复。",
-      action: "已停止实时重连，页面会继续通过普通刷新获取状态。",
+      action: "已切换到普通刷新，并会低频尝试恢复实时连接。",
     };
   if (code === "CONVERSATION_EVENT_STREAM_INVALID")
     return {
@@ -215,19 +210,6 @@ function ruleFor(
       summary: "浏览器阻止了报告预览窗口。",
       action: "请允许本地页面打开新窗口，再重试。",
     };
-  if (code.startsWith("NOTEBOOK_")) {
-    if (code.includes("TIMEOUT"))
-      return {
-        summary: "Notebook 单元格执行超时。",
-        action: "请拆分处理步骤或减少单次数据量后重试。",
-      };
-    if (/OUTPUT|PARENT|LINEAGE/.test(code))
-      return {
-        summary: "Notebook 输出未通过数据血缘和样本校验。",
-        action: "请检查业务主键、Y 标签映射和父数据版本后重试。",
-      };
-    return CONTEXT_FALLBACKS.notebook;
-  }
   if (/MODEL_|NO_AVAILABLE_MODELS|NO_SUCCESSFUL_MODELS|CHAMPION_MISSING/.test(code))
     return CONTEXT_FALLBACKS.model;
   if (facts.status === 404 || /(?:RESOURCE|PROJECT|TARGET)_NOT_FOUND/.test(code))

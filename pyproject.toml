@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "risk-model-agent"
-version = "1.2.0"
+version = "1.2.1"
 description = "Local-first binary consumer-credit risk modeling Agent workbench"
 requires-python = ">=3.11,<3.14"
 dependencies = [
@@ -30,9 +30,6 @@ dependencies = [
   "cryptography>=43",
   "keyring>=25",
   "psutil>=6",
-  "nbformat>=5.10",
-  "jupyter-client>=8.6",
-  "ipykernel>=6.29",
 ]
 
 [project.optional-dependencies]

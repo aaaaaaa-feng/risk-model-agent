@@ -36,6 +36,8 @@ MIME_TYPES = {
     ".html": "text/html; charset=utf-8",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".zip": "application/zip",
+    # Historical Notebook artifacts remain checksum-verifiable/downloadable.
+    # The application no longer creates or executes them.
     ".ipynb": "application/x-ipynb+json",
     ".csv": "text/csv; charset=utf-8",
     ".skops": "application/octet-stream",
@@ -120,7 +122,7 @@ class ArtifactService:
         task: dict[str, Any],
         bundle: ModelBundle,
         frame: pd.DataFrame,
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         directory = self.run_dir(run["project_id"], run["id"])
         model_name = f"{task['target_column']}-{bundle.algorithm}-{run['id'][-6:]}"
         bundle.name = model_name
@@ -168,8 +170,8 @@ class ArtifactService:
                 "created_at": now_iso(),
             },
         )
-        self.register(run["id"], "model_package", package, {"manifest": manifest})
-        return model_version, manifest
+        artifact = self.register(run["id"], "model_package", package, {"manifest": manifest})
+        return model_version, manifest, artifact
 
     def score_file(
         self,

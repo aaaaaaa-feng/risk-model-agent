@@ -17,7 +17,6 @@ Worker 是本地确定性 Python 执行层，不是 Agent。它接受结构化�
 - Modeling：候选训练、CV、类别权重、校准、Test 选择、OOT 最终评估。
 - Reporting：统一 JSON 事实源、Excel、单文件 HTML、哈希清单。
 - Packaging/Scoring：模型原生格式、字段契约、版本锁定、独立加载和批量评分。
-- Notebook：项目级本地 Kernel、逐单元执行、保存和输出数据版本校验。
 
 ## 3. 通用结果
 
@@ -43,12 +42,6 @@ Worker 是本地确定性 Python 执行层，不是 Agent。它接受结构化�
 - Dummy 作为下限，不作为默认 Champion 候选优先级。
 - 单个可选算法缺依赖或训练失败时隔离记录；其他模型继续。
 
-## 6. Notebook 合约
-
-Notebook 是本地 `.ipynb`，使用项目级 Kernel。预置 Pandas、NumPy、DuckDB、Scikit-learn、XGBoost、LightGBM、CatBoost。用户可逐单元格执行或导入已有 Notebook。为避免重复列式计算引擎显著放大离线安装包，V1.1 起不再内置 Polars。
-
-导入 Notebook 输出前必须校验：文件位于项目目录、粒度与行数合理、重复/膨胀、所有候选 Y 的分布、字段契约和父版本血缘。Notebook 默认联网且不是安全沙箱。
-
-## 7. 模型包
+## 6. 模型包
 
 每个包必须包含模型文件、字段契约、预处理、评分参数、依赖版本锁定、真实 CLI 和逐文件 checksum。加载评分前先校验 ZIP/路径边界、文件集合、hash 和版本化类型白名单；不得把 `skops.get_untrusted_types()` 的全部结果直接设为可信。评分卡使用可独立执行的 JSON WOE+Logistic 规则。同一输入在训练后内存评分、重载评分和干净目录 CLI 评分必须一致。

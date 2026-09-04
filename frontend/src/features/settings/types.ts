@@ -10,7 +10,6 @@ export interface Settings {
   monthly_token_budget: number;
   proxy: string;
   ca_cert: string;
-  notebook_network: boolean;
   telemetry: boolean;
   auto_update: boolean;
   memory_budget_mb: number;

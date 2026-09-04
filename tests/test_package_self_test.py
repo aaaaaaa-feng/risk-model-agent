@@ -34,20 +34,19 @@ class _Cp1252Console:
         return "".join(self.fragments)
 
 
-def test_package_self_test_fits_every_required_model_and_notebook_contract():
+def test_package_self_test_fits_every_required_model_and_data_runtime_contract():
     report = run_package_self_test()
 
+    assert report["schema_version"] == "risk-package-self-test/v2"
     assert report["status"] == "passed", report
     assert {item["id"] for item in report["models"]} >= REQUIRED_MODELS
     assert all(item["status"] == "passed" for item in report["models"])
-    assert report["notebook"]["status"] == "passed"
-    assert report["notebook"]["dependencies"] == {
+    assert report["data_runtime"]["status"] == "passed"
+    assert report["data_runtime"]["engine"] == "duckdb"
+    assert report["data_runtime"]["dependencies"] == {
         "pandas": True,
         "numpy": True,
         "duckdb": True,
-        "nbformat": True,
-        "jupyter_client": True,
-        "ipykernel": True,
     }
     assert report["serialization"]["status"] == "passed"
     assert report["serialization"]["format"] == "skops"
@@ -93,7 +92,7 @@ def test_launcher_dispatches_internal_package_self_test_without_starting_web_ser
 def test_package_self_test_cli_supports_cp1252_stdout(monkeypatch: pytest.MonkeyPatch):
     console = _Cp1252Console()
     report = {
-        "schema_version": "risk-package-self-test/v1",
+        "schema_version": "risk-package-self-test/v2",
         "status": "passed",
         "message": "冻结包能力自检通过",
     }

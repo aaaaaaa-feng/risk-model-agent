@@ -21,10 +21,9 @@ describe("用户友好错误翻译", () => {
   it("隐藏技术堆栈，只保留友好处理建议", () => {
     const text = errorMessage(
       new Error('Traceback (most recent call last): File "worker.py", line 4 TypeError: bad'),
-      { context: "notebook" },
     );
     expect(text).not.toMatch(/Traceback|worker\.py|TypeError/);
-    expect(text).toContain("请检查当前单元格");
+    expect(text).toContain("请重试");
   });
 
   it("诊断码保留在结构化结果，不进入主文案", () => {
@@ -82,7 +81,7 @@ describe("用户友好错误翻译", () => {
     expect(text).toContain("请重试");
   });
 
-  it("运行事件流异常明确告知已降级和自动重连", () => {
+  it("运行事件流异常明确告知已降级和恢复策略", () => {
     const interrupted = errorMessage({ code: "RUN_EVENT_STREAM_INTERRUPTED" });
     const invalid = errorMessage({ code: "RUN_EVENT_STREAM_INVALID" });
     expect(interrupted).toContain("实时连接暂时中断");
@@ -91,8 +90,8 @@ describe("用户友好错误翻译", () => {
     expect(invalid).toContain("运行进度无法识别");
     expect(invalid).toContain("重新读取最新运行状态");
     const stopped = errorMessage({ code: "RUN_EVENT_STREAM_STOPPED" });
-    expect(stopped).toContain("停止实时重连");
     expect(stopped).toContain("普通刷新");
+    expect(stopped).toContain("低频尝试恢复实时连接");
   });
 
   it("对话事件损坏时明确告知已恢复已保存回复", () => {

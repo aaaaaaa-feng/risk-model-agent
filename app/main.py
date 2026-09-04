@@ -33,7 +33,7 @@ from app.core.paths import AppPaths, get_paths, is_synced_path
 from app.workers.model_adapters import available_models
 
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 logger = logging.getLogger(__name__)
 

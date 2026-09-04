@@ -21,6 +21,14 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _duration_ms(started_at: str, finished_at: str) -> int:
+    try:
+        elapsed = datetime.fromisoformat(finished_at) - datetime.fromisoformat(started_at)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, int(elapsed.total_seconds() * 1000))
+
+
 def new_id(prefix: str) -> str:
     return f"{prefix}_{secrets.token_hex(8)}"
 
@@ -176,6 +184,7 @@ CREATE TABLE IF NOT EXISTS events (
   created_at TEXT NOT NULL, UNIQUE(run_id, seq)
 );
 CREATE TABLE IF NOT EXISTS notebooks (
+  -- Legacy compatibility only: retained so upgrades and archives never drop user records.
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), dataset_version_id TEXT,
   name TEXT NOT NULL, path TEXT NOT NULL, kernel_id TEXT, status TEXT NOT NULL DEFAULT 'idle',
   metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -474,24 +483,193 @@ class Database:
         return [self._decode(row) or {} for row in rows]
 
     def update(self, table: str, identifier: str, data: dict[str, Any]) -> dict[str, Any]:
-        table = self._table(table)
-        encoded = self._encode(data)
-        if not encoded:
+        if not data:
             current = self.get(table, identifier)
             if current is None:
                 raise KeyError(identifier)
             return current
-        assignments = ", ".join(f"{key}=?" for key in encoded)
         with self.transaction() as connection:
-            cursor = connection.execute(
-                f"UPDATE {table} SET {assignments} WHERE id=?", (*encoded.values(), identifier)
-            )
-            if cursor.rowcount != 1:
-                raise KeyError(identifier)
+            self._update_on_connection(connection, table, identifier, data)
         result = self.get(table, identifier)
         if result is None:  # pragma: no cover
             raise KeyError(identifier)
         return result
+
+    def _update_on_connection(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        identifier: str,
+        data: dict[str, Any],
+    ) -> None:
+        table = self._table(table)
+        encoded = self._encode(data)
+        if not encoded:
+            return
+        assignments = ", ".join(f"{key}=?" for key in encoded)
+        cursor = connection.execute(
+            f"UPDATE {table} SET {assignments} WHERE id=?", (*encoded.values(), identifier)
+        )
+        if cursor.rowcount != 1:
+            raise KeyError(identifier)
+
+    def transition_run_with_event(
+        self,
+        run_id: str,
+        run_data: dict[str, Any],
+        event_payload: dict[str, Any],
+        *,
+        target_task_id: str | None = None,
+        target_task_data: dict[str, Any] | None = None,
+        close_open_decisions_reason: str | None = None,
+        finish_open_trace_status: str | None = None,
+        trace_error_code: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically terminate all mutable evidence attached to a Run transition."""
+
+        created_at = event_payload.get("created_at", now_iso())
+        with self.transaction() as connection:
+            row = connection.execute(
+                "SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq FROM events WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+            seq = int(row["next_seq"])
+            event = {
+                "id": new_id("evt"),
+                "run_id": run_id,
+                "seq": seq,
+                "stage": event_payload["stage"],
+                "node": event_payload["node"],
+                "agent": event_payload.get("agent", "local_worker"),
+                "tool": event_payload.get("tool"),
+                "status": event_payload["status"],
+                "summary": event_payload["summary"],
+                "evidence_json": event_payload.get("evidence", {}),
+                "created_at": created_at,
+            }
+            self._update_on_connection(
+                connection,
+                "runs",
+                run_id,
+                {
+                    **run_data,
+                    "seq": seq,
+                    "stage": event["stage"],
+                    "node": event["node"],
+                    "updated_at": created_at,
+                },
+            )
+            if target_task_id and target_task_data is not None:
+                self._update_on_connection(
+                    connection,
+                    "target_tasks",
+                    target_task_id,
+                    target_task_data,
+                )
+            if close_open_decisions_reason:
+                self._close_open_decisions_on_connection(
+                    connection,
+                    run_id,
+                    close_open_decisions_reason,
+                    created_at,
+                )
+            if finish_open_trace_status:
+                self._finish_open_trace_on_connection(
+                    connection,
+                    run_id,
+                    finish_open_trace_status,
+                    trace_error_code,
+                    created_at,
+                )
+            self._insert_on_connection(connection, "events", event)
+        result = self.get("events", event["id"])
+        return result or event
+
+    def _close_open_decisions_on_connection(
+        self,
+        connection: sqlite3.Connection,
+        run_id: str,
+        reason_code: str,
+        resolved_at: str,
+    ) -> None:
+        rows = connection.execute(
+            "SELECT id, payload_json FROM decisions "
+            "WHERE run_id=? AND status IN ('pending', 'submitted')",
+            (run_id,),
+        ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                payload = None
+            update: dict[str, Any] = {
+                "status": "cancelled",
+                "resolved_at": resolved_at,
+            }
+            if isinstance(payload, dict):
+                payload["upgrade_resolution"] = {
+                    "status": "cancelled",
+                    "reason_code": reason_code,
+                    "resolved_at": resolved_at,
+                }
+                update["payload_json"] = payload
+            self._update_on_connection(
+                connection,
+                "decisions",
+                str(row["id"]),
+                update,
+            )
+
+    def _finish_open_trace_on_connection(
+        self,
+        connection: sqlite3.Connection,
+        run_id: str,
+        status: str,
+        error_code: str | None,
+        finished_at: str,
+    ) -> None:
+        trace = connection.execute(
+            "SELECT * FROM traces WHERE run_id=? ORDER BY started_at DESC LIMIT 1",
+            (run_id,),
+        ).fetchone()
+        if trace is None:
+            return
+        spans = connection.execute(
+            "SELECT * FROM trace_spans WHERE trace_id=? AND status IN ('requested', 'running')",
+            (trace["id"],),
+        ).fetchall()
+        for span in spans:
+            try:
+                evidence = json.loads(span["evidence_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                evidence = None
+            update: dict[str, Any] = {
+                "status": status,
+                "error_code": error_code,
+                "error_type": "UpgradeCompatibilityError",
+                "degradation_path": "new_run_required",
+                "finished_at": finished_at,
+                "duration_ms": _duration_ms(str(span["started_at"]), finished_at),
+            }
+            if isinstance(evidence, dict):
+                evidence["terminal_transition"] = {
+                    "status": status,
+                    "reason_code": error_code,
+                }
+                update["evidence_json"] = evidence
+            self._update_on_connection(
+                connection,
+                "trace_spans",
+                str(span["id"]),
+                update,
+            )
+        if trace["status"] in {"requested", "running"}:
+            self._update_on_connection(
+                connection,
+                "traces",
+                str(trace["id"]),
+                {"status": status, "finished_at": finished_at},
+            )
 
     def delete(self, table: str, identifier: str) -> None:
         table = self._table(table)

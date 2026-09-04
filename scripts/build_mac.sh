@@ -4,12 +4,10 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 PYTHON="$ROOT/.venv/bin/python"
 [ -x "$PYTHON" ] || PYTHON=python3
 
-# Keep build caches inside the project.  This avoids relying on a user's
-# global PyInstaller/Matplotlib directories (which may be unavailable on a
-# managed Mac) and makes a rebuild reproducible from the repository.
+# Keep the build cache inside the project. This avoids relying on a user's
+# global PyInstaller directory and makes a rebuild reproducible.
 export PYINSTALLER_CONFIG_DIR="${PYINSTALLER_CONFIG_DIR:-$ROOT/runtime/pyinstaller-cache}"
-export MPLCONFIGDIR="${MPLCONFIGDIR:-$ROOT/runtime/matplotlib-cache}"
-mkdir -p "$PYINSTALLER_CONFIG_DIR" "$MPLCONFIGDIR"
+mkdir -p "$PYINSTALLER_CONFIG_DIR"
 
 (cd "$ROOT/frontend" && npm ci && npm run build)
 "$PYTHON" "$ROOT/scripts/verify_packaging.py"

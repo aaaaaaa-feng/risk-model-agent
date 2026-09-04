@@ -21,6 +21,18 @@ MIN_REDUCTION_PERCENT = 25.0
 FORBIDDEN_COMPONENTS = (
     "polars",
     "_polars_runtime",
+    "ipython",
+    "ipykernel",
+    "ipykernel_launcher",
+    "jupyter",
+    "jupyter_client",
+    "jupyter_core",
+    "nbformat",
+    "notebook",
+    "prompt_toolkit",
+    "traitlets",
+    "tornado",
+    "zmq",
     "matplotlib",
     "plotly",
     "pil",
@@ -42,6 +54,22 @@ FORBIDDEN_COMPONENTS = (
     "tcl",
 )
 TEST_COMPONENTS = {"test", "tests", "testing", "_pytest", "pytest"}
+FORBIDDEN_MODULE_PREFIXES = (
+    "app.notebooks",
+    "app.api.notebooks",
+    "app.agents.codegen",
+    "xgboost.dask",
+    "xgboost.spark",
+    "xgboost.testing",
+    "lightgbm.dask",
+    "lightgbm.plotting",
+    "catboost.widget",
+    "catboost.eval",
+    "uvicorn.loops.auto",
+    "uvicorn.loops.uvloop",
+    "uvicorn.protocols.http.auto",
+    "uvicorn.protocols.http.httptools_impl",
+)
 
 
 class PackageAuditError(ValueError):
@@ -105,6 +133,46 @@ def forbidden_paths(bundle: Path) -> list[str]:
     return sorted(violations)
 
 
+def embedded_python_modules(bundle: Path) -> tuple[str, ...]:
+    """读取 PyInstaller 主程序及其内嵌 PYZ 的模块名。"""
+
+    candidates = [bundle / "risk-model-agent.exe", bundle / "risk-model-agent"]
+    executables = [path for path in candidates if path.is_file()]
+    if len(executables) != 1:
+        raise PackageAuditError(
+            f"PyInstaller 主程序必须唯一，当前找到 {len(executables)} 个：{bundle}"
+        )
+    try:
+        from PyInstaller.archive.readers import CArchiveReader
+    except ImportError as exc:
+        raise PackageAuditError("检查内嵌 Python 模块需要安装 PyInstaller 打包依赖。") from exc
+    try:
+        archive = CArchiveReader(str(executables[0]))
+        names = set(archive.toc)
+        names.update(archive.open_embedded_archive("PYZ.pyz").toc)
+    except Exception as exc:
+        raise PackageAuditError("无法读取 PyInstaller 主程序的内嵌模块清单。") from exc
+    return tuple(sorted(str(name) for name in names))
+
+
+def forbidden_module_names(module_names: Iterable[str]) -> list[str]:
+    violations: set[str] = set()
+    for module_name in module_names:
+        normalized = module_name.replace("/", ".").casefold()
+        top_level = normalized.split(".", 1)[0]
+        forbidden_top_level = (
+            any(_matches_component(top_level, marker) for marker in FORBIDDEN_COMPONENTS)
+            or top_level in TEST_COMPONENTS
+        )
+        forbidden_nested = any(
+            normalized == prefix.casefold() or normalized.startswith(f"{prefix.casefold()}.")
+            for prefix in FORBIDDEN_MODULE_PREFIXES
+        )
+        if forbidden_top_level or forbidden_nested:
+            violations.add(module_name)
+    return sorted(violations)
+
+
 def directory_summary(bundle: Path, *, top: int = 30) -> dict[str, object]:
     if not bundle.is_dir():
         raise PackageAuditError(f"找不到 PyInstaller 目录：{bundle}")
@@ -161,15 +229,23 @@ def create_report(
     *,
     installer: Path | None = None,
     policy: InstallerPolicy | None = None,
+    embedded_modules: Iterable[str] | None = None,
 ) -> dict[str, object]:
     selected_policy = policy or InstallerPolicy()
-    violations = forbidden_paths(bundle) if bundle.is_dir() else []
+    bundle_summary = directory_summary(bundle)
+    path_violations = forbidden_paths(bundle)
+    module_names = (
+        tuple(embedded_modules) if embedded_modules is not None else embedded_python_modules(bundle)
+    )
+    module_violations = forbidden_module_names(module_names)
     report: dict[str, object] = {
         "schema_version": "risk-package-size-report/v1",
-        "bundle": directory_summary(bundle),
+        "bundle": bundle_summary,
         "forbidden_components": {
-            "passed": not violations,
-            "paths": violations,
+            "passed": not path_violations and not module_violations,
+            "paths": path_violations,
+            "embedded_modules": module_violations,
+            "embedded_module_count": len(module_names),
         },
         "policy": {
             "baseline_installer_kib": selected_policy.baseline_kib,
@@ -182,7 +258,7 @@ def create_report(
         summary = installer_summary(resolve_installer(installer), selected_policy)
         report["installer"] = summary
         installer_passed = bool(summary["within_maximum"] and summary["meets_reduction"])
-    report["valid"] = not violations and installer_passed
+    report["valid"] = not path_violations and not module_violations and installer_passed
     return report
 
 

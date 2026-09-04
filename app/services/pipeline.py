@@ -8,13 +8,8 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from app.agents.codegen import (
-    extract_generated_spec,
-    generate_reproducible_notebook_code,
-    write_reproducible_notebook,
-)
 from app.agents.evidence import build_safe_evidence
-from app.agents.prompts import CODE_REPAIR_PROMPT, MODEL_PLAN_PROMPT
+from app.agents.prompts import MODEL_PLAN_PROMPT
 from app.agents.reviewer import IndependentReviewer
 from app.core.config import SettingsStore
 from app.core.database import Database, new_id, now_iso
@@ -463,113 +458,6 @@ class RunPipeline:
         )
         return {"model_plan": plan}
 
-    def generate_and_review_code(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
-        dataset = self.catalog.require("dataset_versions", state["working_dataset_version_id"])
-        source = generate_reproducible_notebook_code(
-            dataset_file=dataset["stored_path"],
-            target=state["target"],
-            features=state["screening"]["included"],
-            split=state["split"],
-            models=state["model_plan"]["models"],
-            score_config=state["model_plan"]["score"],
-        )
-        aliases = dict(state.get("field_aliases", {}))
-        expected_spec = extract_generated_spec(source)
-        reviewer = self._reviewer(run_id)
-        main_gateway = self._gateway(run_id)
-        safe, _ = build_safe_evidence(
-            state["profile"], state["target_evidence"], state["screening"]
-        )
-        combined: dict[str, Any] = {}
-        for repair_round in range(1, 4):
-            safe_source = _sanitize_generated_code(source, dataset["stored_path"], aliases)
-            deterministic = reviewer.review_code(source)
-            llm = reviewer.llm_review(
-                "generated_code",
-                {
-                    **safe,
-                    "sanitized_code": safe_source,
-                    "code_sha256": sha256_bytes(source.encode("utf-8")),
-                    "repair_round": repair_round,
-                    "prior_review_issues": combined.get("issues", []),
-                },
-            )
-            combined = reviewer.combine("code", deterministic, llm)
-            combined["repair_round"] = repair_round
-            if review_is_approved(combined):
-                self._record_review(run_id, combined)
-                break
-            repair_evidence: dict[str, Any] = {
-                "attempted": False,
-                "accepted": False,
-                "feedback_issue_codes": [
-                    str(item.get("code") or "UNSPECIFIED") for item in combined.get("issues", [])
-                ],
-            }
-            if main_gateway.enabled:
-                repair_evidence["attempted"] = True
-                payload, result = main_gateway.complete_json(
-                    CODE_REPAIR_PROMPT.content,
-                    {
-                        **safe,
-                        "sanitized_code": safe_source,
-                        "review_issues": combined.get("issues", []),
-                        "immutable_spec": extract_generated_spec(safe_source),
-                        "repair_round": repair_round,
-                        "response_schema": {"code": "string"},
-                    },
-                    purpose="main_agent_code_repair",
-                )
-                repair_evidence.update(
-                    provider_error=result.error_code,
-                    model=result.model,
-                    payload_hash=result.payload_hash,
-                )
-                candidate = (payload or {}).get("code")
-                if isinstance(candidate, str) and 0 < len(candidate) <= 100_000:
-                    candidate = _strip_code_fence(candidate)
-                    if (
-                        "<LOCAL_DATASET>" in candidate
-                        and dataset["stored_path"] not in candidate
-                        and _generated_spec_matches(candidate, extract_generated_spec(safe_source))
-                    ):
-                        restored = _restore_generated_code(
-                            candidate, dataset["stored_path"], aliases
-                        )
-                        local_review = reviewer.review_code(restored)
-                        if review_is_approved(local_review) and _generated_spec_matches(
-                            restored, expected_spec
-                        ):
-                            source = restored
-                            repair_evidence["accepted"] = True
-                            repair_evidence["repaired_code_sha256"] = sha256_bytes(
-                                source.encode("utf-8")
-                            )
-            combined.setdefault("evidence", {})["main_agent_repair"] = repair_evidence
-            self._record_review(run_id, combined)
-        if not review_is_approved(combined):
-            if review_blocks_progress(combined) or not review_is_approved(deterministic):
-                raise ValueError("GENERATED_CODE_REVIEW_BLOCKED")
-            combined = {
-                "scope": "code",
-                "status": "fallback_pass",
-                "issues": combined.get("issues", []),
-                "evidence": {
-                    "safe_downgrade": "deterministic_template_after_three_reviewer_rounds"
-                },
-            }
-            self._record_review(run_id, combined)
-        path = (
-            self.artifacts.run_dir(self.catalog.require("runs", run_id)["project_id"], run_id)
-            / "reproducible-modeling.ipynb"
-        )
-        write_reproducible_notebook(
-            path,
-            source,
-            {"run_id": run_id, "review_status": combined["status"], "raw_data_embedded": False},
-        )
-        return {"generated_code_path": str(path), "code_review": combined}
-
     def train_and_review(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
         frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
         resource_dict = state["model_plan"]["resource_plan"]
@@ -692,16 +580,12 @@ class RunPipeline:
             bundles = self._bundles[run_id]
             state = {**state, **replay}
         champion = state["model_result"]["champion"]
-        model_version, package_manifest = self.artifacts.write_model_artifacts(
+        model_version, package_manifest, model_artifact = self.artifacts.write_model_artifacts(
             run, task, bundles[champion], frame
-        )
-        notebook = self.artifacts.register(
-            run_id, "reproducible_notebook", Path(state["generated_code_path"]), {"reviewed": True}
         )
         report_run = {**run, "status": "succeeded", "stage": "completed"}
         report = self.artifacts.build_structured_report(report_run, state, frame)
         report["artifacts"] = [
-            {"name": notebook["name"], "kind": notebook["kind"]},
             {"name": f"{model_version['name']}-model-package.zip", "kind": "model_package"},
         ]
         report, report_artifacts = self.artifacts.write_report_artifacts(report_run, report)
@@ -709,7 +593,7 @@ class RunPipeline:
             "report": report,
             "model_version_id": model_version["id"],
             "package_manifest": package_manifest,
-            "artifact_ids": [notebook["id"], *[item["id"] for item in report_artifacts]],
+            "artifact_ids": [model_artifact["id"], *[item["id"] for item in report_artifacts]],
         }
 
     def _context(self, run_id: str) -> tuple[dict[str, Any], dict[str, Any], pd.DataFrame]:
@@ -1043,39 +927,6 @@ def _preferred_customer_key(profile: dict[str, Any]) -> str | None:
         return score, int(repeated)
 
     return str(max(candidates, key=rank).get("name"))
-
-
-def _sanitize_generated_code(source: str, dataset_path: str, aliases: dict[str, str]) -> str:
-    value = source.replace(dataset_path, "<LOCAL_DATASET>")
-    for original, alias in sorted(aliases.items(), key=lambda item: len(item[0]), reverse=True):
-        value = value.replace(original, alias)
-    return value
-
-
-def _restore_generated_code(source: str, dataset_path: str, aliases: dict[str, str]) -> str:
-    value = source.replace("<LOCAL_DATASET>", dataset_path)
-    for original, alias in sorted(aliases.items(), key=lambda item: len(item[1]), reverse=True):
-        value = value.replace(alias, original)
-    return value
-
-
-def _strip_code_fence(source: str) -> str:
-    value = source.strip()
-    if not value.startswith("```"):
-        return value
-    lines = value.splitlines()
-    if lines and lines[0].startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
-
-
-def _generated_spec_matches(source: str, expected: dict[str, Any]) -> bool:
-    try:
-        return extract_generated_spec(source) == expected
-    except (SyntaxError, ValueError, json.JSONDecodeError):
-        return False
 
 
 def _validate_score_config(config: dict[str, Any]) -> None:

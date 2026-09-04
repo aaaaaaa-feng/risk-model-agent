@@ -13,7 +13,6 @@ export const TECH_STAGES = [
   "screening",
   "binning",
   "model_plan",
-  "code_review",
   "training",
   "reporting",
   "completed",
@@ -40,7 +39,7 @@ export const BUSINESS_STAGES: readonly BusinessStage[] = [
   {
     id: "modeling_qc",
     label: "建模与质检",
-    substages: ["model_plan", "code_review", "training"],
+    substages: ["model_plan", "training"],
   },
   {
     id: "reporting",

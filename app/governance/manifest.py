@@ -18,7 +18,7 @@ from app.tooling.registry import ToolRegistry
 
 
 MANIFEST_SCHEMA = "risk-agent-eval-manifest/v1"
-AGENT_GRAPH_VERSION = "risk-model-agent-graph/v1"
+AGENT_GRAPH_VERSION = "risk-model-agent-graph/v2"
 REVIEWER_RUBRIC_VERSION = "risk-model-reviewer/v1"
 SAFE_EVIDENCE_POLICY_VERSION = "risk-safe-evidence/v2"
 ERROR_TAXONOMY_VERSION = "risk-agent-error-taxonomy/v1"

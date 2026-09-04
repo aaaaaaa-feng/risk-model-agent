@@ -54,11 +54,15 @@ def list_runs(project_id: str, ctx: AppContext = Depends(context)) -> dict[str, 
 @router.get("/runs/{run_id}")
 def get_run(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
     run = ctx.catalog.require("runs", run_id)
-    pending = [
-        item
-        for item in ctx.database.list("decisions", {"run_id": run_id}, limit=500)
-        if item["status"] == "pending"
-    ]
+    pending = (
+        [
+            item
+            for item in ctx.database.list("decisions", {"run_id": run_id}, limit=500)
+            if item["status"] == "pending"
+        ]
+        if run["status"] == "awaiting_decision"
+        else []
+    )
     return {"run": _public_run(run), "pending_decisions": pending}
 
 

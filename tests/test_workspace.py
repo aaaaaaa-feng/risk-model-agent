@@ -153,7 +153,7 @@ def test_workspace_api_switches_context_and_project_folder_is_self_describing(tm
         assert (project_dir / ".risk-model-agent-project.json").is_file()
         assert (project_dir / "assets").is_dir()
         assert (project_dir / "runs").is_dir()
-        assert (project_dir / "notebooks").is_dir()
+        assert not (project_dir / "notebooks").exists()
 
         blocked = client.post("/api/v1/workspace/select", json={"path": str(tmp_path / "another")})
         assert blocked.status_code == 409

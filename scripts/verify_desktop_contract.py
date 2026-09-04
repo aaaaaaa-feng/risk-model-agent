@@ -82,7 +82,6 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
     splash_source = _read(root, "desktop/src/splash.ts")
     app_main = _read(root, "app/main.py")
     desktop_auth_source = _read(root, "app/core/desktop_auth.py")
-    notebook_runtime = _read(root, "app/notebooks/runtime.py")
     windows_process = _read(root, "app/core/windows_process.py")
     workspace_manager = _read(root, "app/core/workspace.py")
     workspace_paths = _read(root, "app/core/paths.py")
@@ -395,7 +394,6 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
         and 'console=sys.platform != "win32"' in packaging_spec
         and "_ensure_frozen_stdio" in launcher
         and "install_frozen_windows_no_console_policy()" in launcher
-        and 'return {"creationflags": CREATE_NO_WINDOW}' in notebook_runtime
         and "_winapi as module" in windows_process
         and "no_console_creation_flags(creation_flags)" in windows_process
         and "os_module.system = system_without_console" in windows_process

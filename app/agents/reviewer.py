@@ -5,7 +5,6 @@ from typing import Any
 
 from app.providers.gateway import ProviderGateway
 
-from .codegen import review_generated_code
 from .prompts import REVIEWER_PROMPT
 
 
@@ -49,10 +48,6 @@ class IndependentReviewer:
                 "oot_locked": split_method == "time_holdout",
             },
         )
-
-    def review_code(self, source: str) -> dict[str, Any]:
-        result = review_generated_code(source)
-        return self._record("code", result["findings"], result.get("checks", {}))
 
     def review_execution(self, model_result: dict[str, Any]) -> dict[str, Any]:
         issues: list[dict[str, Any]] = []

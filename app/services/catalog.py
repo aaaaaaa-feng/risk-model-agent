@@ -52,7 +52,7 @@ class CatalogService:
             },
         )
         directory = self.paths.project_dir(project["id"])
-        for child in ("assets", "datasets", "runs", "notebooks", "scores", "trash"):
+        for child in ("assets", "datasets", "runs", "scores", "trash"):
             (directory / child).mkdir(parents=True, exist_ok=True)
         self._write_project_manifest(project)
         self.ensure_conversation(project["id"])
@@ -145,7 +145,6 @@ class CatalogService:
                 "assets": "assets/",
                 "datasets": "datasets/",
                 "runs": "runs/",
-                "notebooks": "notebooks/",
                 "scores": "scores/",
                 "trash": "trash/",
             },
@@ -169,7 +168,7 @@ class CatalogService:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.get_project(project_id)
-        if kind not in {"base", "feature", "dictionary", "score_input", "notebook_output"}:
+        if kind not in {"base", "feature", "dictionary", "score_input"}:
             raise ValueError("DATA_ASSET_KIND_INVALID")
         asset_id = new_id("asset")
         asset_dir = self.paths.project_dir(project_id) / "assets" / asset_id

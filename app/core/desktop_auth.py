@@ -59,7 +59,7 @@ class DesktopAuth:
 
     @classmethod
     def capture_environment(cls) -> DesktopAuth:
-        """Capture then erase capabilities before any Notebook/Worker is launched."""
+        """Capture then erase capabilities before any local Worker is launched."""
 
         supplied_launch_token = os.environ.pop(DESKTOP_TOKEN_ENV, "")
         supplied_bootstrap_token = os.environ.pop(DESKTOP_BOOTSTRAP_TOKEN_ENV, "")

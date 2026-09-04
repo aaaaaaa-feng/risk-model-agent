@@ -120,21 +120,8 @@ def main() -> None:
         base_url,
         "POST",
         "/api/v1/projects",
-        {"name": "Packaged Notebook Smoke", "mode": "fully_trusted"},
+        {"name": "Packaged API Smoke", "mode": "fully_trusted"},
     )["project"]
-    notebook = request_json(
-        base_url,
-        "POST",
-        "/api/v1/notebooks",
-        {"project_id": project["id"], "name": "Bundled dependencies"},
-    )["notebook"]
-    execution = request_json(
-        base_url,
-        "POST",
-        f"/api/v1/notebooks/{notebook['id']}/execute-cell",
-        {"cell_index": 1, "timeout_seconds": 150},
-    )["execution"]
-    assert execution["status"] == "succeeded", execution
 
     demo = request_json(
         base_url,
@@ -177,7 +164,6 @@ def main() -> None:
         "report_json",
         "report_excel",
         "report_html",
-        "reproducible_notebook",
         "model_package",
     }
     assert required.issubset(artifacts), sorted(artifacts)
@@ -261,7 +247,6 @@ def main() -> None:
         json.dumps(
             {
                 "status": "passed",
-                "notebook": execution["status"],
                 "run_id": run["id"],
                 "champion": result["champion"],
                 "quality_verdict": state["report"]["executive_summary"]["quality_verdict"],

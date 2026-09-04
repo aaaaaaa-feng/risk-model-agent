@@ -19,13 +19,13 @@ export function useProjectData(
     detailAbort.current?.abort();
     if (!projectId) {
       setDetail(null);
-      return;
+      return true;
     }
     const controller = new AbortController();
     detailAbort.current = controller;
     try {
       const value = await projectsApi.detail(projectId, controller.signal);
-      if (requestId !== detailRequest.current || selectedRef.current !== projectId) return;
+      if (requestId !== detailRequest.current || selectedRef.current !== projectId) return false;
       setDetail(value);
       setRunId((current) => {
         if (current && value.runs.some((item) => item.id === current)) return current;
@@ -34,8 +34,10 @@ export function useProjectData(
         );
         return active?.id || value.runs[0]?.id || null;
       });
+      return true;
     } catch (error) {
       if (!isAbort(error)) notify(errorMessage(error), true);
+      return false;
     }
   }, [selectedId, selectedRef, setRunId]);
 

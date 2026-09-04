@@ -10,13 +10,13 @@
 
 - 导入本机 CSV、XLSX/XLSM/XLS（含多 Sheet）和数据字典。
 - 处理订单/客户粒度、多张特征表和多个 `0/1/-1/空值` Y；每个 Y 独立冻结有效样本并顺序运行。
-- 提供四级关联兜底：Agent 推荐、可视化编辑、Agent 生成 Notebook、用户手写 Notebook；所有结果重新执行粒度、重复、样本膨胀、Y 与血缘检查。
+- 多表关联由 Agent 推荐强类型 JoinPlan，用户可视化核对与调整；执行后统一检查粒度、重复、样本膨胀、Y 与血缘。
 - 依次执行诊断、清洗、Train/Test/OOT、IV/缺失率/相关性筛选、自动或人工分箱、候选训练、校准、Reviewer 质检、报告、模型包和批量评分。
 - 时间 OOT 使用明确 cutoff；在同时要求客户互斥时，跨边界客户和无效时间样本会被显式列入排除证据，只有满足 `max(dev_time) < min(oot_time)` 才标记为严格 OOT。
 - 支持 Dummy、WOE Logistic Scorecard、正则化 Logistic、Random Forest、Extra Trees、XGBoost、LightGBM、CatBoost；根据资源运行推荐组合，不默认全跑。
 - 默认评分范围 300—900，高分代表低风险；基准分 600、基准好坏比 20:1、PDO 50，均可在确认节点调整。
 - 由同一份结构化事实数据生成 Web、Excel、单文件 HTML 和模型包；评分结果列以模型版本名称命名。
-- 提供半信任与完全信任两种模式。Reviewer 在独立上下文审核计划、生成代码、执行证据和报告，最多三轮修复后进入受控降级；安全阻断不能被自动批准。
+- 提供半信任与完全信任两种模式。Reviewer 在独立上下文审核方案、执行证据和报告，最多三轮修复后进入受控降级；安全阻断不能被自动批准。
 - SSE 持续输出阶段、节点、Agent、工具、状态、摘要、时间和证据引用；不输出隐藏思维链。
 - 每个 Run 冻结 Git/源码、Prompt、Tool、策略、Provider、数据和环境版本，并生成父子 Span 与脱敏 Trace Bundle；提供隔离 `run_eval_case()` 和单机评测 Harness（Suite/Case/Trial、Outcome/Trajectory/Risk/Efficiency、门禁与 Baseline/Candidate 可比性）。
 - 模型方案支持 0—12 次受控 Train/CV 小网格调参；报告记录每次试验，不使用 OOT 选参。
@@ -26,7 +26,7 @@
 - 原始表、客户级记录、逐行预测和模型文件保存在应用专属本地目录，不由产品上传到外部 LLM。
 - DeepSeek、Kimi、Kimi Code、OpenAI、Anthropic 与自定义 Provider 只能接收通过 DLP 的聚合 `SafeEvidence`；小于 30 个样本的分组被抑制。
 - API Key 优先使用系统凭据存储，失败时使用权限受限的本地密钥文件；页面不回显密钥，并可在保存前测试当前表单连接。
-- Notebook 使用项目级本地 Kernel，默认允许联网。它不是安全沙箱；用户代码和第三方包可能主动外发数据，关闭产品侧 LLM 外发不能替代操作系统网络隔离。
+- 产品不再提供 Notebook 或任意本地代码执行入口；数据处理只通过强类型工具和可审核参数执行。
 - 项目迁移包使用 AES-256-GCM；密码经 scrypt 派生，并支持独立恢复密钥。
 - 本地 Web 服务只允许绑定 loopback，并校验 Host、Origin、跨站写入和临时本机会话。Tauri 模式再通过一次性 WebView bootstrap 换取 `HttpOnly` / `SameSite=Strict` Cookie，除最小启动接口外保护首页、业务 API、SSE 和下载；V1 不提供远程绑定或多人访问模式。
 - 新模型包在加载前验证 ZIP 边界、文件集合和 SHA-256，并只允许版本化的 `skops` 类型白名单。评分卡使用 JSON 规则；包内提供真实 CLI、字段类型校验和独立评分入口。
@@ -89,11 +89,11 @@ Windows 使用 `scripts/build_windows.ps1`，它会依次构建 React 前端、P
 .venv/bin/python scripts/build_offline_bundle.py --wheel-dir ./wheelhouse --lock requirements.lock --output ./dist/offline
 ```
 
-安装程序输出到 `dist\installer\RiskModelAgent-<version>-windows-x64-setup.exe`，同时生成 SHA-256 和 Tauri 产物清单。它采用当前用户安装，不要求管理员权限，包含开始菜单和标准卸载入口。启动后先显示本地启动页，再在客户端窗口内打开工作台；Python 后端、Worker 与 Notebook Kernel 均以无终端方式运行，不会另外打开系统浏览器。运行期后端异常会回到中文恢复页；正常关窗先执行有界优雅停止，超时后才强制回收。卸载只移除应用程序，默认保留 `%LOCALAPPDATA%\RiskModelAgent` 中的项目、配置、密钥和模型数据。
+安装程序输出到 `dist\installer\RiskModelAgent-<version>-windows-x64-setup.exe`，同时生成 SHA-256 和 Tauri 产物清单。它采用当前用户安装，不要求管理员权限，包含开始菜单和标准卸载入口。启动后先显示本地启动页，再在客户端窗口内打开工作台；Python 后端与 Worker 均以无终端方式运行，不会另外打开系统浏览器。运行期后端异常会回到中文恢复页；正常关窗先执行有界优雅停止，超时后才强制回收。卸载只移除应用程序，默认保留 `%LOCALAPPDATA%\RiskModelAgent` 中的项目、配置、密钥和模型数据。
 
 客户端依赖 Microsoft Edge WebView2。安装器使用小型下载引导模式：多数 Windows 10/11 设备已具备 WebView2；若目标机缺失，首次安装需要联网获取运行时。当前未配置 Authenticode 代码签名证书，Windows SmartScreen 仍可能提示“未知发布者”。
 
-完整离线包保留 Pandas、DuckDB、Notebook 和全部建模算法，不再重复打包 Polars。打包配置只收集模型训练必需的原生库，并排除产品未使用的分布式训练、调试、代码补全和 Python 绘图模块。桌面版暂将 XGBoost 限定在 `<3.2`：3.2 的 Windows 原生库显著增大，而当前 V1 未使用其新增能力；解除上限前必须重新通过八模型冻结自检、完整评分冒烟和安装包体积门禁。可使用以下命令在本地生成体积与依赖清单：
+完整离线包保留 Pandas、DuckDB 和全部建模算法，不再打包 Polars 或 Jupyter/Notebook 运行时。打包配置只收集模型训练必需的原生库，并排除产品未使用的分布式训练、调试、代码补全和 Python 绘图模块。桌面版暂将 XGBoost 限定在 `<3.2`：3.2 的 Windows 原生库显著增大，而当前 V1 未使用其新增能力；解除上限前必须重新通过八模型冻结自检、完整评分冒烟和安装包体积门禁。可使用以下命令在本地生成体积与依赖清单：
 
 ```bash
 python scripts/audit_package_size.py --bundle dist/risk-model-agent --output dist/package-size-report.json --enforce
@@ -101,13 +101,13 @@ python scripts/audit_package_size.py --bundle dist/risk-model-agent --output dis
 
 Windows CI 对最终 `.exe` 同时执行两道硬门禁：安装包不超过 180 MiB，并且相对 239176 KiB 基线至少缩小 25%。体积清单 `package-size-report.json` 与安装包一起发布；未通过门禁时不会上传候选产物。
 
-冻结包还会在启动 Web 服务前执行内部离线自检：使用固定种子小样本逐一构建、拟合和预测全部八种模型，并验证 DuckDB、Jupyter Client、IPyKernel 和 nbformat 契约。该自检不联网、不启动项目、不写入用户工作区；任一能力失败都会阻断打包产物。
+冻结包还会在启动 Web 服务前执行内部离线自检：使用固定种子小样本逐一构建、拟合和预测全部八种模型，并验证 Pandas、NumPy 和 DuckDB 数据引擎契约。该自检不联网、不启动项目、不写入用户工作区；任一能力失败都会阻断打包产物。
 
-GitHub Actions 会在 Windows Runner 上真实执行“冻结后端 → 八模型/Notebook 自检 → 构建 Tauri 安装器 → 从旧 Inno 版本升级 → 默认中文路径安装 → 启动无终端客户端 → Notebook/建模/报告/评分整链路 → 后端故障恢复 → 正常关窗优雅停止 → 静默卸载 → 验证用户数据仍保留”。客户端会校验内置后端清单与哈希，并用每次启动生成的临时凭据识别随机本地端口上的正确服务。签名、原生文件夹选择器人工操作和真实用户电脑验收完成前，不把 CI 候选包宣传为机构级生产发行版。
+GitHub Actions 会在 Windows Runner 上真实执行“冻结后端 → 八模型/数据引擎自检 → 构建 Tauri 安装器 → 从旧 Inno 版本升级 → 默认中文路径安装 → 启动无终端客户端 → 建模/报告/评分整链路 → 后端故障恢复 → 正常关窗优雅停止 → 静默卸载 → 验证用户数据仍保留”。客户端会校验内置后端清单与哈希，并用每次启动生成的临时凭据识别随机本地端口上的正确服务。签名、原生文件夹选择器人工操作和真实用户电脑验收完成前，不把 CI 候选包宣传为机构级生产发行版。
 
 ## 本地数据与升级
 
-- 首次启动会弹出工作文件夹设置。建议选择本机专属目录；完成选择后，后续所有活动数据都在该目录中，项目文件位于 `projects/<project_id>/`，每个项目独立保存资产、数据版本、Notebook、Run、报告、模型包和评分结果。应用控制目录保留工作区指针及必要的引导状态。
+- 首次启动会弹出工作文件夹设置。建议选择本机专属目录；完成选择后，后续所有活动数据都在该目录中，项目文件位于 `projects/<project_id>/`，每个项目独立保存资产、数据版本、Run、报告、模型包和评分结果。升级时会保留旧版 Notebook 文件与记录，但新版不再提供创建、导入或执行入口。应用控制目录保留工作区指针及必要的引导状态。
 - macOS 默认控制目录：`~/Library/Application Support/RiskModelAgent`
 - Windows 默认控制目录：`%LOCALAPPDATA%\RiskModelAgent`
 - Linux 开发环境：`$XDG_DATA_HOME/risk-model-agent` 或 `~/.local/share/risk-model-agent`

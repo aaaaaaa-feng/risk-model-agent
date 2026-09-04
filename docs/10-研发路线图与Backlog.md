@@ -4,7 +4,7 @@
 
 - React/TypeScript/Vite 四区专业建模台与集中设置中心。
 - FastAPI `/api/v1`、SQLite 领域模型、LangGraph checkpoint/HITL。
-- 多表合成演示、CSV/Excel/数据字典、四级关联和 Notebook。
+- 多表合成演示、CSV/Excel/数据字典、Agent 关联推荐和可视化 JoinPlan 核对。
 - 多 Y 独立任务、诊断、清洗、切分、筛选、分箱和候选模型。
 - 独立 Reviewer、三轮修复/安全降级、SSE 和项目对话。
 - 统一报告、模型包、批量评分、归档、备份、迁移和旧版只读保留。
@@ -48,12 +48,12 @@
 - 主工作台在应用 WebView 内运行；Windows release 使用 GUI subsystem，后端使用无控制台子进程，不再弹出终端或系统浏览器。
 - 随机 loopback 端口、一次性启动凭据、后端版本合同、内置资源 manifest/hash 和最小窗口 capability 共同构成桌面边界。
 - 从固定 AppId 的旧 Inno 安装检测并调用原卸载器；升级失败即停止，不扫描其他软件，不删除控制目录、工作区和项目数据。
-- 正式候选必须由 Windows Runner 证明安装、升级、启动、八模型与 Notebook、完整建模评分、退出清理、卸载和数据保留；本机 macOS 编译不能替代该证据。
+- 正式候选必须由 Windows Runner 证明安装、升级、启动、八模型与数据引擎、完整建模评分、退出清理、卸载和数据保留；本机 macOS 编译不能替代该证据。
 - 当前使用 WebView2 小型下载引导模式；目标机缺少 WebView2 时安装需要联网。Authenticode 签名仍后置，未签名包可能触发 SmartScreen。
 
 ## 6. 明确后置
 
-多分类/回归/时序、任意 Agent 工具发现、云端原始数据处理、远程任意代码执行、未隔离 Notebook、自动替代业务审批均不进入当前 V1。
+多分类/回归/时序、任意 Agent 工具发现、云端原始数据处理、任意本地或远程代码执行、自动替代业务审批均不进入当前 V1。
 
 ## 7. 研发纪律
 

@@ -44,7 +44,9 @@ _MESSAGES = {
     "DATA_DICTIONARY_FIELD_COLUMN_REQUIRED": "数据字典缺少字段名列，请选择或补充字段名列后重试。",
     "EVENT_CURSOR_INVALID": "事件游标格式不正确，请刷新页面重新连接。",
     "RUN_MANIFEST_NOT_FOUND": "当前 Run 尚未生成可验证的清单，请等待任务完成或重新运行。",
-    "NOTEBOOK_EXECUTION_TIMEOUT": "Notebook 单元格执行超时，请停止长时间任务、拆分单元格或适当调高超时时间后重试。",
+    "RUN_RESTART_REQUIRED_AFTER_GRAPH_UPGRADE": "建模流程已升级，旧版未完成 Run 已保留为只读记录；请新建 Run 继续。",
+    "RUN_RESTART_REQUIRED_AFTER_MANIFEST_VALIDATION_FAILURE": "旧版未完成 Run 的审计清单不完整或已损坏，原记录已只读保留；请新建 Run 继续。",
+    "NOTEBOOK_EXECUTION_TIMEOUT": "该记录来自旧版 Notebook 执行；当前版本已停用 Notebook，请保留历史文件并新建 Run。",
     "TARGET_SINGLE_CLASS": "Y 的有效样本必须同时包含 0 和 1。",
     "TIME_COLUMN_REQUIRED": "时间外推切分需要可用的时间字段。",
     "NO_FEATURES_AFTER_SCREENING": "筛选后没有可入模变量，请调整可恢复规则或检查数据。",
@@ -94,6 +96,8 @@ _MESSAGES = {
     "PROVIDER_BASE_URL_MUST_BE_HTTPS_OR_LOCALHOST": "Provider 地址必须使用 HTTPS；本机服务可使用 localhost 或 127.0.0.1。",
     "PROVIDER_INVALID": "不支持所选 Provider，请重新选择模型 API 配置。",
     "API_FORMAT_INVALID": "API 格式无效，请选择 OpenAI 或 Anthropic 兼容格式。",
+    "CONVERSATION_RUN_PROJECT_MISMATCH": "当前对话选择的 Run 不属于这个项目，请刷新页面后重新选择。",
+    "CONVERSATION_DECISION_RUN_MISMATCH": "当前对话选择的确认节点与 Run 不一致，请刷新页面后重试。",
     "RUN_EXECUTION_FAILED": "当前建模节点执行失败，请查看节点提示并重试；其他 Y 任务不受影响。",
     "WORKER_EXECUTION_FAILED": "本地计算节点执行失败，请检查数据、资源设置和当前节点后重试。",
 }
@@ -102,7 +106,7 @@ _PREFIX_MESSAGES = (
     ("PROVIDER_", "模型 API 配置或调用未完成，请检查密钥、地址、模型和网络后重试。"),
     ("API_", "模型 API 配置无效，请检查接口格式、地址和模型后重试。"),
     ("WORKSPACE_", "工作文件夹操作未完成，请检查目录权限与当前任务状态后重试。"),
-    ("NOTEBOOK_", "Notebook 操作未完成，请检查单元格、输出文件和数据血缘后重试。"),
+    ("NOTEBOOK_", "该错误来自旧版 Notebook 功能；当前版本仅保留历史记录，请新建 Run。"),
     ("RUN_", "建模任务当前无法执行该操作，请刷新状态并按页面提示处理。"),
     ("DECISION_", "当前确认节点无法提交，请刷新状态后重新确认。"),
     ("PROJECT_", "项目操作未完成，请检查项目状态和输入后重试。"),
@@ -120,7 +124,7 @@ _PREFIX_MESSAGES = (
     ("PII_", "检测到可能的个人信息，请移除敏感内容后重试。"),
     ("SECRET_", "检测到可能的密钥，请移除敏感内容后重试。"),
     ("SAFE_", "安全证据校验未通过，请仅提交允许的聚合信息。"),
-    ("GENERATED_CODE_", "生成代码未通过安全或契约校验，请让 Agent 修复后重试。"),
+    ("GENERATED_CODE_", "这是旧版生成代码记录；当前版本已停用该能力，请新建 Run。"),
     ("WORKER_", "本地计算未完成，请检查数据、资源设置和当前节点后重试。"),
 )
 

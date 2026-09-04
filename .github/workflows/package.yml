@@ -87,12 +87,12 @@ jobs:
           --bundle dist/risk-model-agent
           --output dist/package-size-report.json
           --enforce
-      - name: 验证 macOS 冻结包全部算法与 Notebook 契约
+      - name: 验证 macOS 冻结包全部算法与数据引擎契约
         if: runner.os == 'macOS'
         timeout-minutes: 3
         shell: bash
         run: ./dist/risk-model-agent/risk-model-agent --internal-package-self-test
-      - name: 验证 Windows 冻结包全部算法与 Notebook 契约
+      - name: 验证 Windows 冻结包全部算法与数据引擎契约
         if: runner.os == 'Windows'
         timeout-minutes: 3
         shell: pwsh

@@ -2,19 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import nbformat
 import pandas as pd
 import pytest
 
 from app.core.database import new_id, now_iso
-from app.api.notebooks import (
-    NotebookCreate,
-    NotebookImportOutput,
-    create_notebook,
-    import_notebook_output,
-)
 from app.services.archives import _remap_row
-from app.notebooks.manager import NotebookManager
 from app.workers.demo import install_demo_project
 
 from conftest import wait_for_run
@@ -32,6 +24,15 @@ def test_encrypted_project_archive_password_and_recovery(context):
     assert restored_by_recovery["name"].endswith("· 恢复")
     with pytest.raises(ValueError, match="INVALID_ARCHIVE_OR_CREDENTIAL"):
         context.archives.restore(Path(record["path"]), "incorrect password")
+
+
+def test_current_project_archive_restore_does_not_recreate_notebook_directory(context):
+    project = context.catalog.create_project("当前项目归档")
+    record, _ = context.archives.create(project["id"], "current-project-password")
+
+    restored = context.archives.restore(Path(record["path"]), "current-project-password")
+
+    assert not (context.paths.project_dir(restored["id"]) / "notebooks").exists()
 
 
 def test_archive_restore_is_transactional_and_paths_fail_closed(context, monkeypatch):
@@ -165,65 +166,37 @@ def test_backup_restore_is_atomic_and_keeps_emergency_recovery(context):
     assert context.backups.verify(result["emergency_backup_id"])["valid"] is True
 
 
-def test_project_kernel_executes_and_persists_cells(context):
-    project = context.catalog.create_project("Notebook 项目")
-    path = context.notebooks.create(project["id"], "nb_test", "逐单元格验证")
-    document = context.notebooks.read(path)
-    document["cells"].append(nbformat.v4.new_code_cell("answer = 6 * 7\nprint(answer)"))
-    context.notebooks.save(path, document)
-    result = context.notebooks.execute_cell(project["id"], path, 2, timeout_seconds=30)
-    assert result["status"] == "succeeded"
-    assert any("42" in str(output.get("text", "")) for output in result["outputs"])
-    persisted = context.notebooks.read(path)
-    assert persisted["cells"][2]["execution_count"] is not None
-
-
-def test_default_notebook_cell_exposes_bundled_analysis_libraries(context):
-    project = context.catalog.create_project("Notebook 依赖项目")
-    path = context.notebooks.create(project["id"], "nb_dependencies", "依赖验证")
-    result = context.notebooks.execute_cell(project["id"], path, 1, timeout_seconds=30)
-    assert result["status"] == "succeeded"
-
-
-def test_notebook_cell_timeout_is_wall_clock_not_per_message(monkeypatch):
-    class NoisyClient:
-        @staticmethod
-        def get_iopub_msg(timeout):
-            assert timeout > 0
-            return {"parent_header": {"msg_id": "other"}, "header": {}, "content": {}}
-
-    clock = iter([0.0, 0.2, 1.1])
-    monkeypatch.setattr("app.notebooks.manager.time.monotonic", lambda: next(clock))
-    with pytest.raises(TimeoutError, match="NOTEBOOK_CELL_TIMEOUT"):
-        NotebookManager._collect(NoisyClient(), "expected", 1)
-
-
-def test_notebook_output_checks_target_mapping_by_stable_business_key(context):
-    project = context.catalog.create_project("Notebook 血缘项目")
-    source = pd.DataFrame(
-        {"order_id": ["O1", "O2", "O3", "O4"], "Y": [0, 1, 0, 1], "x": [1, 2, 3, 4]}
+def test_archive_preserves_legacy_notebook_record_and_file_without_runtime(context):
+    project = context.catalog.create_project("旧 Notebook 归档兼容")
+    legacy_directory = context.paths.project_dir(project["id"]) / "notebooks"
+    legacy_directory.mkdir()
+    path = legacy_directory / "historical.ipynb"
+    path.write_text('{"cells": [], "nbformat": 4, "nbformat_minor": 5}', encoding="utf-8")
+    timestamp = now_iso()
+    context.database.insert(
+        "notebooks",
+        {
+            "id": new_id("nb"),
+            "project_id": project["id"],
+            "dataset_version_id": None,
+            "name": "历史 Notebook",
+            "path": str(path),
+            "kernel_id": "legacy-kernel",
+            "status": "running",
+            "metadata_json": {"legacy": True},
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        },
     )
-    parent = context.catalog.create_dataset_version(
-        project["id"], source, "父版本", [], {"kind": "test"}
-    )
-    notebook = create_notebook(
-        NotebookCreate(
-            project_id=project["id"],
-            name="标签保护",
-            dataset_version_id=parent["id"],
-        ),
-        context,
-    )["notebook"]
-    output = source.copy()
-    output.loc[0, "Y"], output.loc[1, "Y"] = output.loc[1, "Y"], output.loc[0, "Y"]
-    output.to_csv(Path(notebook["path"]).parent / "swapped.csv", index=False)
-    with pytest.raises(ValueError, match="NOTEBOOK_OUTPUT_TARGET_MAPPING_CHANGED"):
-        import_notebook_output(
-            notebook["id"],
-            NotebookImportOutput(
-                relative_path="swapped.csv",
-                label="伪造标签输出",
-                parent_dataset_version_id=parent["id"],
-            ),
-            context,
-        )
+
+    archive, _ = context.archives.create(project["id"], "legacy-notebook-password")
+    restored = context.archives.restore(Path(archive["path"]), "legacy-notebook-password")
+    rows = context.database.list("notebooks", {"project_id": restored["id"]}, limit=10)
+
+    assert len(rows) == 1
+    assert rows[0]["status"] == "legacy_readonly"
+    assert rows[0]["kernel_id"] is None
+    assert rows[0]["metadata"]["compatibility_status"] == "historical_readonly"
+    restored_path = Path(rows[0]["path"])
+    assert restored_path.is_file()
+    assert restored_path.read_text(encoding="utf-8") == path.read_text(encoding="utf-8")
