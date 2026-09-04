@@ -136,9 +136,18 @@ function Observe-NewSystemBrowsers {
 }
 
 function Get-DescendantProcesses {
-    param([Parameter(Mandatory = $true)][int]$RootProcessId)
+    param(
+        [Parameter(Mandatory = $true)][int]$RootProcessId,
+        [AllowNull()][object[]]$ProcessSnapshot = $null
+    )
 
-    $Rows = @(Get-CimInstance Win32_Process)
+    # 调用方可传入同一份 CIM 快照，避免诊断过程中多次枚举导致
+    # 父子关系来自不同时刻。其他调用点不传参时保持原有行为。
+    $Rows = if ($PSBoundParameters.ContainsKey("ProcessSnapshot")) {
+        @($ProcessSnapshot)
+    } else {
+        @(Get-CimInstance Win32_Process)
+    }
     $Pending = [System.Collections.Generic.Queue[uint32]]::new()
     $Known = [System.Collections.Generic.HashSet[uint32]]::new()
     $Results = [System.Collections.Generic.List[object]]::new()
@@ -824,18 +833,180 @@ function Test-ShortcutTargetsPath {
     ).Count -gt 0
 }
 
-function Assert-NoVisibleBackendTerminal {
-    param([Parameter(Mandatory = $true)][int]$ClientProcessId)
+function ConvertTo-ProcessCreationUtc {
+    param([AllowNull()][object]$Value)
 
-    $Descendants = @(Get-DescendantProcesses -RootProcessId $ClientProcessId)
+    if ($null -eq $Value) { return $null }
+    try {
+        $Parsed = if ($Value -is [DateTime]) {
+            [DateTime]$Value
+        } else {
+            [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$Value)
+        }
+        return $Parsed.ToUniversalTime()
+    } catch {
+        return $null
+    }
+}
+
+function ConvertTo-SafeProcessTimestamp {
+    param([AllowNull()][object]$Value)
+
+    $CreatedUtc = ConvertTo-ProcessCreationUtc -Value $Value
+    if ($null -eq $CreatedUtc) { return "<未知>" }
+    return $CreatedUtc.ToString(
+        "yyyy-MM-ddTHH:mm:ss.fffZ",
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
+}
+
+function Get-SafeExecutableBasename {
+    param([Parameter(Mandatory = $true)][object]$ProcessRow)
+
+    $ExecutablePath = [string]$ProcessRow.ExecutablePath
+    if ([string]::IsNullOrWhiteSpace($ExecutablePath)) { return "<不可用>" }
+    try {
+        return ConvertTo-DiagnosticFragment `
+            -Value ([System.IO.Path]::GetFileName($ExecutablePath)) `
+            -MaximumLength 120
+    } catch {
+        return "<不可用>"
+    }
+}
+
+function Get-SafeProcessAncestorChain {
+    param(
+        [Parameter(Mandatory = $true)][object]$ProcessRow,
+        [Parameter(Mandatory = $true)][hashtable]$RowsById,
+        [Parameter(Mandatory = $true)][int]$RootProcessId
+    )
+
+    $Parts = [System.Collections.Generic.List[string]]::new()
+    $Visited = [System.Collections.Generic.HashSet[uint32]]::new()
+    $Current = $ProcessRow
+    while ($null -ne $Current) {
+        $CurrentProcessId = [uint32]$Current.ProcessId
+        if (-not $Visited.Add($CurrentProcessId)) {
+            throw "进程快照的祖先链出现循环 PID $CurrentProcessId，已阻止发布。"
+        }
+        if ($Parts.Count -ge 64) {
+            throw "进程快照的祖先链超过安全上限，已阻止发布。"
+        }
+
+        $SafeName = ConvertTo-DiagnosticFragment -Value $Current.Name -MaximumLength 80
+        $SafeExecutable = Get-SafeExecutableBasename -ProcessRow $Current
+        $SafeCreatedAt = ConvertTo-SafeProcessTimestamp -Value $Current.CreationDate
+        $Parts.Insert(
+            0,
+            "$SafeName(pid=$CurrentProcessId,created=$SafeCreatedAt,exe=$SafeExecutable)"
+        )
+        if ($CurrentProcessId -eq [uint32]$RootProcessId) {
+            return $Parts -join " -> "
+        }
+
+        $ParentProcessId = [uint32]$Current.ParentProcessId
+        $ParentKey = [string]$ParentProcessId
+        if (-not $RowsById.ContainsKey($ParentKey)) {
+            throw "进程快照缺少 PID $CurrentProcessId 的祖先 PID $ParentProcessId，已阻止发布。"
+        }
+        $Parent = $RowsById[$ParentKey]
+        $CurrentCreatedUtc = ConvertTo-ProcessCreationUtc -Value $Current.CreationDate
+        $ParentCreatedUtc = ConvertTo-ProcessCreationUtc -Value $Parent.CreationDate
+        if (
+            $null -ne $CurrentCreatedUtc -and
+            $null -ne $ParentCreatedUtc -and
+            $CurrentCreatedUtc -lt $ParentCreatedUtc
+        ) {
+            throw "进程快照中子进程 PID $CurrentProcessId 早于父进程 PID $ParentProcessId 创建，可能发生 PID 重用，已阻止发布。"
+        }
+        $Current = $Parent
+    }
+    throw "进程快照无法建立到桌面客户端 PID $RootProcessId 的安全祖先链。"
+}
+
+function Assert-NoVisibleBackendTerminal {
+    param(
+        [Parameter(Mandatory = $true)][int]$ClientProcessId,
+        [string]$Stage = "未标记阶段"
+    )
+
+    # 树关系、conhost 证据和祖先链全部取自这一份快照；不读取
+    # CommandLine，也不输出完整可执行文件路径。
+    $ProcessSnapshot = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+    $RootRows = @($ProcessSnapshot | Where-Object { [uint32]$_.ProcessId -eq [uint32]$ClientProcessId })
+    if ($RootRows.Count -ne 1) {
+        throw "[终端门禁][$Stage] 无法在单次进程快照中唯一确认桌面客户端 PID $ClientProcessId。"
+    }
+
+    $RootRow = $RootRows[0]
+    $RootSnapshotCreatedUtc = ConvertTo-ProcessCreationUtc -Value $RootRow.CreationDate
+    $RootRuntime = Get-Process -Id $ClientProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $RootRuntime) {
+        throw "[终端门禁][$Stage] 桌面客户端在进程快照后已退出。"
+    }
+    $RootRuntimeCreatedUtc = $null
+    try {
+        $RootRuntimeCreatedUtc = $RootRuntime.StartTime.ToUniversalTime()
+    } catch {
+        # 无法取得 StartTime 时仍使用单次 CIM 快照的创建时间链校验。
+    }
+    if (
+        $null -ne $RootSnapshotCreatedUtc -and
+        $null -ne $RootRuntimeCreatedUtc -and
+        [Math]::Abs(($RootRuntimeCreatedUtc - $RootSnapshotCreatedUtc).TotalSeconds) -gt 2
+    ) {
+        throw "[终端门禁][$Stage] 桌面客户端 PID $ClientProcessId 的创建时间与快照不一致，可能发生 PID 重用。"
+    }
+
+    $Descendants = @(
+        Get-DescendantProcesses `
+            -RootProcessId $ClientProcessId `
+            -ProcessSnapshot $ProcessSnapshot
+    )
+    $RowsById = @{}
+    foreach ($Row in $ProcessSnapshot) {
+        $ProcessKey = [string][uint32]$Row.ProcessId
+        if (-not $RowsById.ContainsKey($ProcessKey)) {
+            $RowsById[$ProcessKey] = $Row
+        }
+    }
     $ConsoleHosts = @($Descendants | Where-Object { $_.Name -ieq "conhost.exe" })
     if ($ConsoleHosts.Count -gt 0) {
-        throw "桌面客户端进程树出现 conhost.exe，后台建模或 Notebook 可能弹出终端。"
+        $ConsoleHostDiagnostics = foreach ($ConsoleHost in $ConsoleHosts) {
+            $SafeName = ConvertTo-DiagnosticFragment -Value $ConsoleHost.Name -MaximumLength 80
+            $SafeExecutable = Get-SafeExecutableBasename -ProcessRow $ConsoleHost
+            $SafeCreatedAt = ConvertTo-SafeProcessTimestamp -Value $ConsoleHost.CreationDate
+            $SafeAncestorChain = Get-SafeProcessAncestorChain `
+                -ProcessRow $ConsoleHost `
+                -RowsById $RowsById `
+                -RootProcessId $ClientProcessId
+            "pid=$($ConsoleHost.ProcessId),ppid=$($ConsoleHost.ParentProcessId),created=$SafeCreatedAt,name=$SafeName,exe=$SafeExecutable,ancestors=$SafeAncestorChain"
+        }
+        $SafeDiagnostic = ConvertTo-DiagnosticFragment `
+            -Value ($ConsoleHostDiagnostics -join " | ") `
+            -MaximumLength 4000
+        Write-Host "[终端门禁][$Stage] conhost 快照证据：$SafeDiagnostic"
+        throw "[终端门禁][$Stage] 桌面客户端进程树出现 conhost.exe，后台建模或 Notebook 可能弹出终端。"
     }
     foreach ($Descendant in $Descendants) {
         if ($Descendant.Name -ieq "msedgewebview2.exe") { continue }
         $DescendantProcess = Get-Process -Id $Descendant.ProcessId -ErrorAction SilentlyContinue
-        if ($DescendantProcess -and $DescendantProcess.MainWindowHandle -ne 0) {
+        if ($null -eq $DescendantProcess) { continue }
+        $SnapshotCreatedUtc = ConvertTo-ProcessCreationUtc -Value $Descendant.CreationDate
+        $RuntimeCreatedUtc = $null
+        try {
+            $RuntimeCreatedUtc = $DescendantProcess.StartTime.ToUniversalTime()
+        } catch {
+            # 窗口检查继续使用 CIM 快照身份；访问受限不会放宽 conhost 门禁。
+        }
+        if (
+            $null -ne $SnapshotCreatedUtc -and
+            $null -ne $RuntimeCreatedUtc -and
+            [Math]::Abs(($RuntimeCreatedUtc - $SnapshotCreatedUtc).TotalSeconds) -gt 2
+        ) {
+            throw "[终端门禁][$Stage] 子进程 PID $($Descendant.ProcessId) 的运行时身份与快照不一致，可能发生 PID 重用。"
+        }
+        if ($DescendantProcess.MainWindowHandle -ne 0) {
             throw "后台子进程 $($Descendant.Name) 出现了可见窗口。"
         }
     }
@@ -871,7 +1042,8 @@ function Wait-ForOwnedTauriBackend {
         [Parameter(Mandatory = $true)][System.Diagnostics.Process]$Client,
         [int]$RejectedProcessId = 0,
         [int]$RejectedPort = 0,
-        [int]$TimeoutSeconds = 180
+        [int]$TimeoutSeconds = 180,
+        [string]$TerminalValidationStage = "后端就绪"
     )
 
     $Deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
@@ -912,7 +1084,9 @@ function Wait-ForOwnedTauriBackend {
                     $Health = Invoke-RestMethod "$CandidateUrl/api/v1/health" -TimeoutSec 3
                     if ($Health.status -eq "ok" -and $Health.runtime -eq "local" -and $Health.desktop -eq $true -and $Health.version -eq $Version) {
                         $Process = Get-Process -Id $CandidateProcessId -ErrorAction Stop
-                        Assert-NoVisibleBackendTerminal -ClientProcessId $Client.Id
+                        Assert-NoVisibleBackendTerminal `
+                            -ClientProcessId $Client.Id `
+                            -Stage $TerminalValidationStage
                         return [PSCustomObject]@{
                             Process = $Process
                             ProcessId = $CandidateProcessId
@@ -1382,7 +1556,9 @@ try {
     if ($BackendProcess.MainWindowHandle -ne 0) {
         throw "后台建模服务出现了可见窗口，CREATE_NO_WINDOW 契约失效。"
     }
-    Assert-NoVisibleBackendTerminal -ClientProcessId $ClientProcess.Id
+    Assert-NoVisibleBackendTerminal `
+        -ClientProcessId $ClientProcess.Id `
+        -Stage "升级后首次启动"
 
     Write-Host "[迁移冒烟] 先验证 1.1.2 创建的项目与非秘密 Provider 配置仍可读取…"
     if (-not (Test-Path $Sentinel) -or -not (Test-Path $MigrationEvidencePath)) {
@@ -1456,7 +1632,8 @@ try {
         -Client $ClientProcess `
         -RejectedProcessId $OriginalBackendProcessId `
         -RejectedPort $OriginalBackendPort `
-        -TimeoutSeconds 180
+        -TimeoutSeconds 180 `
+        -TerminalValidationStage "恢复后后端就绪"
     $BackendProcess = $RecoveredBackend.Process
     $BackendProcessId = [int]$RecoveredBackend.ProcessId
     $BaseUrl = [string]$RecoveredBackend.BaseUrl
@@ -1480,6 +1657,11 @@ try {
     if ($ObservedNewBrowsers.Count -gt 0) {
         throw "运行期恢复过程中检测到新的系统浏览器进程：$($ObservedNewBrowsers -join ', ')。"
     }
+
+    Write-Host "[终端门禁] 恢复完成，在完整 Notebook、建模与评分冒烟前检查客户端进程树…"
+    Assert-NoVisibleBackendTerminal `
+        -ClientProcessId $ClientProcess.Id `
+        -Stage "恢复后-完整smoke前"
 
     Write-Host "[桌面冒烟] 本地服务已就绪：$BaseUrl；执行完整 Notebook、建模与评分，并持续监控后台窗口…"
     $SmokeScript = Join-Path $RepositoryRoot "scripts\smoke_packaged_service.py"
@@ -1507,7 +1689,9 @@ try {
     $DesktopWebSession = $null
     while ($true) {
         Observe-NewSystemBrowsers
-        Assert-NoVisibleBackendTerminal -ClientProcessId $ClientProcess.Id
+        Assert-NoVisibleBackendTerminal `
+            -ClientProcessId $ClientProcess.Id `
+            -Stage "完整Notebook建模评分"
         if ($ObservedNewBrowsers.Count -gt 0) {
             throw "完整建模期间检测到新的系统浏览器进程：$($ObservedNewBrowsers -join ', ')。"
         }
@@ -1574,14 +1758,17 @@ try {
         -Client $ClientProcess `
         -RejectedProcessId $GracefulBackendProcessId `
         -RejectedPort $GracefulBackendPort `
-        -TimeoutSeconds 180
+        -TimeoutSeconds 180 `
+        -TerminalValidationStage "Job Object兜底启动"
     $BackendProcess = $ForcedBackend.Process
     $BackendProcessId = [int]$ForcedBackend.ProcessId
     $ForcedBackendPort = [int]$ForcedBackend.Port
     $ForcedBaseUrl = [string]$ForcedBackend.BaseUrl
     Wait-ForDesktopWindow -Client $ClientProcess
     Observe-NewSystemBrowsers
-    Assert-NoVisibleBackendTerminal -ClientProcessId $ClientProcess.Id
+    Assert-NoVisibleBackendTerminal `
+        -ClientProcessId $ClientProcess.Id `
+        -Stage "Job Object兜底回收"
     if ($ObservedNewBrowsers.Count -gt 0) {
         throw "Job Object 兜底冒烟期间检测到新的系统浏览器进程：$($ObservedNewBrowsers -join ', ')。"
     }

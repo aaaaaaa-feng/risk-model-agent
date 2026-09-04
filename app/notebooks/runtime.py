@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from app.core.windows_process import CREATE_NO_WINDOW
+
 
 def _module_available(name: str) -> bool:
     try:
@@ -235,7 +237,7 @@ def _kernel_launch_options(platform_name: str | None = None) -> dict[str, Any]:
         return {}
     # subprocess.CREATE_NO_WINDOW 只在 Windows Python 暴露；常量值属于稳定的
     # Win32 CreateProcess 标志，显式写出也便于在非 Windows CI 做契约测试。
-    return {"creationflags": 0x0800_0000}
+    return {"creationflags": CREATE_NO_WINDOW}
 
 
 def _notebook_kernel_environment(

@@ -21,6 +21,12 @@ def _ensure_frozen_stdio() -> None:
 
 def main() -> None:
     _ensure_frozen_stdio()
+    # Install the Windows policy before freeze_support or any application/
+    # Jupyter imports.  This is the one boundary shared by Notebook kernels,
+    # model workers and third-party subprocess helpers in the frozen package.
+    from app.core.windows_process import install_frozen_windows_no_console_policy
+
+    install_frozen_windows_no_console_policy()
     # PyInstaller multiprocessing children must be dispatched before importing
     # the FastAPI application, which creates databases, thread pools and the
     # LangGraph runtime at module import time.

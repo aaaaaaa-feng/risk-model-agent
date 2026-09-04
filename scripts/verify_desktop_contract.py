@@ -38,6 +38,7 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
         "desktop/src-tauri/windows/installer-hooks.nsh",
         "desktop/src-tauri/windows/verify-legacy-inno.ps1",
         "app/core/desktop_auth.py",
+        "app/core/windows_process.py",
         "frontend/src/shared/lib/uiPreferences.ts",
         "scripts/build_windows_tauri.ps1",
         "scripts/collect_tauri_installer.ps1",
@@ -82,6 +83,7 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
     app_main = _read(root, "app/main.py")
     desktop_auth_source = _read(root, "app/core/desktop_auth.py")
     notebook_runtime = _read(root, "app/notebooks/runtime.py")
+    windows_process = _read(root, "app/core/windows_process.py")
     workspace_manager = _read(root, "app/core/workspace.py")
     workspace_paths = _read(root, "app/core/paths.py")
     packaging_spec = _read(root, "packaging/risk_model_agent.spec")
@@ -124,6 +126,12 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
         smoke_script,
     )
     picker_smoke_source = picker_smoke_match.group(0) if picker_smoke_match else ""
+    terminal_gate_match = re.search(
+        r"function Assert-NoVisibleBackendTerminal\s*\{[\s\S]*?"
+        r"\n\}\n\nfunction Wait-ForDesktopWindow",
+        smoke_script,
+    )
+    terminal_gate_source = terminal_gate_match.group(0) if terminal_gate_match else ""
     obsolete_current_release_files = (
         "packaging/windows_installer.iss",
         "packaging/languages/ChineseSimplified.isl",
@@ -386,7 +394,10 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
         )
         and 'console=sys.platform != "win32"' in packaging_spec
         and "_ensure_frozen_stdio" in launcher
-        and 'return {"creationflags": 0x0800_0000}' in notebook_runtime,
+        and "install_frozen_windows_no_console_policy()" in launcher
+        and 'return {"creationflags": CREATE_NO_WINDOW}' in notebook_runtime
+        and "_winapi as module" in windows_process
+        and "no_console_creation_flags(creation_flags)" in windows_process,
         "ui_preferences_survive_random_loopback_ports": all(
             marker in ui_preferences
             for marker in (
@@ -547,6 +558,40 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
                 "Stop-Process -Id $ClientProcess.Id -Force",
                 "Job Object",
             )
+        ),
+        "terminal_gate_uses_safe_single_snapshot_diagnostics": (
+            bool(terminal_gate_source)
+            and terminal_gate_source.count("Get-CimInstance Win32_Process") == 1
+            and all(
+                marker in terminal_gate_source
+                for marker in (
+                    "-ProcessSnapshot $ProcessSnapshot",
+                    "$RootRuntime.StartTime.ToUniversalTime()",
+                    "$DescendantProcess.StartTime.ToUniversalTime()",
+                    "Get-SafeProcessAncestorChain",
+                    "pid=$($ConsoleHost.ProcessId)",
+                    "ppid=$($ConsoleHost.ParentProcessId)",
+                    "created=$SafeCreatedAt",
+                    "name=$SafeName",
+                    "exe=$SafeExecutable",
+                    "ancestors=$SafeAncestorChain",
+                    "conhost 快照证据",
+                    "-MaximumLength 4000",
+                )
+            )
+            and "$CurrentCreatedUtc -lt $ParentCreatedUtc" in smoke_script
+            and "GetFileName($ExecutablePath)" in smoke_script
+            and "$ProcessRow.CommandLine" not in smoke_script
+            and "$ConsoleHost.CommandLine" not in smoke_script
+            and "$ConsoleHost.ExecutablePath" not in terminal_gate_source
+            and re.search(
+                r"Assert-NoVisibleBackendTerminal\s+`\s*\n"
+                r"\s*-ClientProcessId \$ClientProcess\.Id\s+`\s*\n"
+                r'\s*-Stage "恢复后-完整smoke前"\s*\n\s*'
+                r'Write-Host "\[桌面冒烟\] 本地服务已就绪',
+                smoke_script,
+            )
+            is not None
         ),
         "native_picker_smoke_enumerates_dialogs_and_reports_failures": (
             bool(picker_smoke_source)

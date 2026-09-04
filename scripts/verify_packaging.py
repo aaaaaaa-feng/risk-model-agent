@@ -40,6 +40,7 @@ def main() -> int:
         "app/__init__.py",
         "app/api/capabilities.py",
         "app/bootstrap/context.py",
+        "app/core/windows_process.py",
         "app/domain/pipeline.py",
         "app/governance/manifest.py",
         "app/governance/tracing.py",
@@ -79,6 +80,7 @@ def main() -> int:
     main_source = (ROOT / "app" / "main.py").read_text(encoding="utf-8")
     launcher_source = (ROOT / "run_local.py").read_text(encoding="utf-8")
     notebook_runtime_source = (ROOT / "app/notebooks/runtime.py").read_text(encoding="utf-8")
+    windows_process_source = (ROOT / "app/core/windows_process.py").read_text(encoding="utf-8")
     package_workflow = (
         (ROOT / ".github/workflows/package.yml").read_text(encoding="utf-8") if not missing else ""
     )
@@ -175,7 +177,10 @@ def main() -> int:
             'console=sys.platform != "win32"' in spec
             and "_ensure_frozen_stdio" in launcher_source
             and "RISK_AGENT_BACKEND_LOG_PATH" in launcher_source
-            and 'return {"creationflags": 0x0800_0000}' in notebook_runtime_source
+            and "install_frozen_windows_no_console_policy()" in launcher_source
+            and 'return {"creationflags": CREATE_NO_WINDOW}' in notebook_runtime_source
+            and "_winapi as module" in windows_process_source
+            and "no_console_creation_flags(creation_flags)" in windows_process_source
         ),
         "xgboost_package_size_guard": '"xgboost>=2.0,<3.2"' in pyproject.lower(),
         "launcher_dispatches_kernel": "IPKernelApp.launch_instance()" in launcher_source,
