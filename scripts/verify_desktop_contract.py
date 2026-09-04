@@ -397,7 +397,9 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
         and "install_frozen_windows_no_console_policy()" in launcher
         and 'return {"creationflags": CREATE_NO_WINDOW}' in notebook_runtime
         and "_winapi as module" in windows_process
-        and "no_console_creation_flags(creation_flags)" in windows_process,
+        and "no_console_creation_flags(creation_flags)" in windows_process
+        and "os_module.system = system_without_console" in windows_process
+        and "shell=True, creationflags=CREATE_NO_WINDOW" in windows_process,
         "ui_preferences_survive_random_loopback_ports": all(
             marker in ui_preferences
             for marker in (

@@ -181,6 +181,8 @@ def main() -> int:
             and 'return {"creationflags": CREATE_NO_WINDOW}' in notebook_runtime_source
             and "_winapi as module" in windows_process_source
             and "no_console_creation_flags(creation_flags)" in windows_process_source
+            and "os_module.system = system_without_console" in windows_process_source
+            and "shell=True, creationflags=CREATE_NO_WINDOW" in windows_process_source
         ),
         "xgboost_package_size_guard": '"xgboost>=2.0,<3.2"' in pyproject.lower(),
         "launcher_dispatches_kernel": "IPKernelApp.launch_instance()" in launcher_source,
