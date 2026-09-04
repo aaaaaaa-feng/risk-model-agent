@@ -1,6 +1,6 @@
 # Windows 安装迁移边界
 
-Tauri 1.2.0 的 NSIS 安装器通过 `installer-hooks.nsh` 迁移旧 Inno Setup 版本。
+Tauri 1.2.1 的 NSIS 安装器通过 `installer-hooks.nsh` 迁移旧 Inno Setup 版本。
 
 迁移遵守以下固定边界：
 
