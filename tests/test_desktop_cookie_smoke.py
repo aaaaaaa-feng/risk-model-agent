@@ -118,6 +118,18 @@ def test_cookie_reader_failure_is_generic_and_does_not_echo_internal_detail(
     assert sensitive_detail not in captured.err
 
 
+def test_cookie_reader_reports_only_a_safe_probe_stage() -> None:
+    error = read_webview_cookie.CookieProbeTimeout("debug_endpoint_unavailable")
+    message = read_webview_cookie._probe_failure_message(error)
+    assert message == "WebView2 调试端口未就绪，已阻止安装包冒烟。"
+    assert "127.0.0.1" not in message
+
+    unknown = read_webview_cookie.CookieProbeTimeout("sensitive-internal-detail")
+    fallback = read_webview_cookie._probe_failure_message(unknown)
+    assert fallback == "无法取得桌面浏览器会话，已阻止安装包冒烟。"
+    assert unknown.stage not in fallback
+
+
 def test_packaged_smoke_adds_valid_desktop_cookie_without_logging_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

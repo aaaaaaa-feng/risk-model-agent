@@ -1,4 +1,5 @@
 mod backend;
+mod ci_webview;
 mod commands;
 mod integrity;
 
@@ -35,6 +36,14 @@ pub fn run() {
         }
     }));
 
+    let context = tauri::generate_context!();
+    #[cfg(windows)]
+    let context = {
+        let mut context = context;
+        ci_webview::configure_ci_webview_probe(&mut context);
+        context
+    };
+
     let app = builder
         .setup(|app| {
             let log_dir = app.path().app_log_dir().unwrap_or_else(|_| {
@@ -54,7 +63,7 @@ pub fn run() {
             retry_backend,
             open_log_directory
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("风控建模 Agent 客户端初始化失败");
 
     app.run(|app_handle, event| match event {

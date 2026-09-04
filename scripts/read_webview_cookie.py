@@ -1,10 +1,11 @@
 """Read one HttpOnly desktop session cookie from a CI-only WebView2 CDP port.
 
 The production desktop client doesn't enable remote debugging. The Windows
-installer smoke test opts in through ``WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS``
-and uses this helper to prove that protected APIs work with the session created
-by the real application WebView. Cookie values are the only successful stdout
-output and must be captured by the caller rather than written to CI logs.
+installer smoke test opts in through a strict CI-only port request that the
+Rust shell applies with WebView2's programmatic browser-arguments API. This
+helper proves that protected APIs work with the session created by the real
+application WebView. Cookie values are the only successful stdout output and
+must be captured by the caller rather than written to CI logs.
 """
 
 from __future__ import annotations
@@ -21,6 +22,14 @@ from urllib.request import urlopen
 
 COOKIE_VALUE_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 DEFAULT_COOKIE_NAME = "risk_agent_desktop_session"
+
+
+class CookieProbeTimeout(TimeoutError):
+    """Bounded, non-sensitive stage result for Windows CI diagnostics."""
+
+    def __init__(self, stage: str) -> None:
+        super().__init__(stage)
+        self.stage = stage
 
 
 def _normalise_backend_url(value: str) -> str:
@@ -138,16 +147,21 @@ async def _read_cookie(
     from websockets.exceptions import WebSocketException
 
     deadline = time.monotonic() + timeout
+    saw_debug_endpoint = False
+    saw_matching_page = False
+    saw_cookie_response = False
     while time.monotonic() < deadline:
         remaining = max(0.1, deadline - time.monotonic())
         try:
             targets = await asyncio.to_thread(_read_targets, debug_port, min(2.0, remaining))
+            saw_debug_endpoint = True
             websocket_url = _select_page_target(
                 targets,
                 backend_url=backend_url,
                 debug_port=debug_port,
             )
             if websocket_url is not None:
+                saw_matching_page = True
                 async with connect(
                     websocket_url,
                     open_timeout=min(3.0, remaining),
@@ -171,6 +185,7 @@ async def _read_cookie(
                             )
                         )
                         if isinstance(message, dict) and message.get("id") == 1:
+                            saw_cookie_response = True
                             cookie = _extract_cookie(message, cookie_name=cookie_name)
                             if cookie is not None:
                                 return cookie
@@ -180,7 +195,24 @@ async def _read_cookie(
             # only against the already validated loopback endpoint.
             pass
         await asyncio.sleep(0.25)
-    raise TimeoutError("限定时间内未从目标 WebView 取得有效桌面会话。")
+    if not saw_debug_endpoint:
+        raise CookieProbeTimeout("debug_endpoint_unavailable")
+    if not saw_matching_page:
+        raise CookieProbeTimeout("application_page_not_found")
+    if not saw_cookie_response:
+        raise CookieProbeTimeout("cookie_command_unavailable")
+    raise CookieProbeTimeout("valid_cookie_not_found")
+
+
+def _probe_failure_message(error: BaseException) -> str:
+    if isinstance(error, CookieProbeTimeout):
+        return {
+            "debug_endpoint_unavailable": "WebView2 调试端口未就绪，已阻止安装包冒烟。",
+            "application_page_not_found": "WebView2 已启动，但未找到目标应用页面，已阻止安装包冒烟。",
+            "cookie_command_unavailable": "目标应用页面已找到，但会话读取命令未完成，已阻止安装包冒烟。",
+            "valid_cookie_not_found": "目标应用页面未返回有效桌面会话，已阻止安装包冒烟。",
+        }.get(error.stage, "无法取得桌面浏览器会话，已阻止安装包冒烟。")
+    return "无法取得桌面浏览器会话，已阻止安装包冒烟。"
 
 
 def main() -> int:
@@ -205,9 +237,9 @@ def main() -> int:
                 timeout=args.timeout,
             )
         )
-    except (ImportError, OSError, RuntimeError, TimeoutError, ValueError):
+    except (ImportError, OSError, RuntimeError, TimeoutError, ValueError) as error:
         # Never include CDP payloads, target metadata, or cookie values in logs.
-        print("无法取得桌面浏览器会话，已阻止安装包冒烟。", file=sys.stderr)
+        print(_probe_failure_message(error), file=sys.stderr)
         return 1
     print(value)
     return 0

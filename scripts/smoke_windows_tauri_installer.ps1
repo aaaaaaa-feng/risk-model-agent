@@ -993,7 +993,7 @@ $OriginalOpenBrowser = [Environment]::GetEnvironmentVariable("RISK_AGENT_OPEN_BR
 $OriginalPort = [Environment]::GetEnvironmentVariable("RISK_AGENT_PORT", "Process")
 $OriginalBackendLogPath = [Environment]::GetEnvironmentVariable("RISK_AGENT_BACKEND_LOG_PATH", "Process")
 $OriginalAutoMigrate = [Environment]::GetEnvironmentVariable("RISK_AGENT_AUTO_MIGRATE", "Process")
-$OriginalWebViewArguments = [Environment]::GetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "Process")
+$OriginalWebViewDebugPort = [Environment]::GetEnvironmentVariable("RISK_AGENT_SMOKE_WEBVIEW_DEBUG_PORT", "Process")
 $OriginalSmokeDesktopCookie = [Environment]::GetEnvironmentVariable("RISK_AGENT_SMOKE_DESKTOP_COOKIE", "Process")
 
 if (Test-Path $InstallDirectory) {
@@ -1294,10 +1294,12 @@ try {
     $env:RISK_AGENT_DATA_DIR = $DataDirectory
     [Environment]::SetEnvironmentVariable("RISK_AGENT_WORKSPACE_DIR", $null, "Process")
     $env:RISK_AGENT_OPEN_BROWSER = "1"
-    # 仅在本次 CI 安装冒烟的进程树内开启 WebView2 CDP。
-    # 正式客户端没有默认调试端口，finally 会恢复父进程环境。
+    # GitHub Windows Runner 可能处于高权限上下文，WebView2 会忽略普通的
+    # 本机环境参数。因此这里只传递严格端口，
+    # 由 Rust 在 GitHub CI + Windows 三重条件成立时通过 WebView2 API 写入
+    # 固定参数。正式客户端没有默认调试端口，finally 会恢复父进程环境。
     $WebViewDebugPort = Get-AvailableLoopbackPort
-    $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-address=127.0.0.1 --remote-debugging-port=$WebViewDebugPort"
+    $env:RISK_AGENT_SMOKE_WEBVIEW_DEBUG_PORT = [string]$WebViewDebugPort
     [Environment]::SetEnvironmentVariable("RISK_AGENT_SMOKE_DESKTOP_COOKIE", $null, "Process")
     Write-Host "[桌面冒烟] 启动无终端桌面客户端…"
     $ClientStartedAt = Get-Date
@@ -1740,7 +1742,7 @@ try {
     [Environment]::SetEnvironmentVariable("RISK_AGENT_PORT", $OriginalPort, "Process")
     [Environment]::SetEnvironmentVariable("RISK_AGENT_BACKEND_LOG_PATH", $OriginalBackendLogPath, "Process")
     [Environment]::SetEnvironmentVariable("RISK_AGENT_AUTO_MIGRATE", $OriginalAutoMigrate, "Process")
-    [Environment]::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", $OriginalWebViewArguments, "Process")
+    [Environment]::SetEnvironmentVariable("RISK_AGENT_SMOKE_WEBVIEW_DEBUG_PORT", $OriginalWebViewDebugPort, "Process")
     [Environment]::SetEnvironmentVariable("RISK_AGENT_SMOKE_DESKTOP_COOKIE", $OriginalSmokeDesktopCookie, "Process")
     $DesktopSessionCookie = $null
     $DesktopWebSession = $null

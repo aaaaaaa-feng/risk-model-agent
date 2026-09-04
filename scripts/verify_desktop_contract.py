@@ -29,6 +29,7 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
         "desktop/src-tauri/src/backend/process.rs",
         "desktop/src-tauri/src/backend/protocol.rs",
         "desktop/src-tauri/src/backend/window.rs",
+        "desktop/src-tauri/src/ci_webview.rs",
         "desktop/src-tauri/src/commands.rs",
         "desktop/src-tauri/src/integrity.rs",
         "desktop/src-tauri/src/lib.rs",
@@ -76,6 +77,7 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
         )
     )
     desktop_lib = _read(root, "desktop/src-tauri/src/lib.rs")
+    ci_webview = _read(root, "desktop/src-tauri/src/ci_webview.rs")
     splash_source = _read(root, "desktop/src/splash.ts")
     app_main = _read(root, "app/main.py")
     desktop_auth_source = _read(root, "app/core/desktop_auth.py")
@@ -577,21 +579,43 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
             all(
                 marker in smoke_script
                 for marker in (
-                    "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-                    "--remote-debugging-address=127.0.0.1",
-                    "--remote-debugging-port=$WebViewDebugPort",
+                    "RISK_AGENT_SMOKE_WEBVIEW_DEBUG_PORT",
+                    "$env:RISK_AGENT_SMOKE_WEBVIEW_DEBUG_PORT = [string]$WebViewDebugPort",
                     "read_webview_cookie.py",
                     "New-AuthenticatedDesktopWebSession",
                     "Microsoft.PowerShell.Commands.WebRequestSession",
                     "RISK_AGENT_SMOKE_DESKTOP_COOKIE",
-                    "$OriginalWebViewArguments",
+                    "$OriginalWebViewDebugPort",
                     "$OriginalSmokeDesktopCookie",
                 )
             )
+            and all(
+                marker in ci_webview
+                for marker in (
+                    'CI_DEBUG_PORT_ENV: &str = "RISK_AGENT_SMOKE_WEBVIEW_DEBUG_PORT"',
+                    'std::env::var("GITHUB_ACTIONS")',
+                    'std::env::var("CI")',
+                    'std::env::var("RUNNER_OS")',
+                    'runner_os != Some("Windows")',
+                    "raw_port?.parse::<u16>().ok()?",
+                    "if port == 0",
+                    "--remote-debugging-address=127.0.0.1",
+                    "--remote-debugging-port={port}",
+                    "msWebOOUI,msPdfOOUI,msSmartScreenProtection",
+                    "for window in &mut context.config_mut().app.windows",
+                    "window.additional_browser_args = Some(arguments.clone())",
+                    "std::env::remove_var(CI_DEBUG_PORT_ENV)",
+                )
+            )
+            and "mod ci_webview;" in desktop_lib
+            and "configure_ci_webview_probe(&mut context)" in desktop_lib
             and "remote-allow-origins" not in smoke_script
+            and "remote-allow-origins" not in ci_webview
             and "Write-Host $DesktopSessionCookie" not in smoke_script
+            and "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS" not in smoke_script
             and "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS" not in backend
             and "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS" not in desktop_lib
+            and "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS" not in ci_webview
             and "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS" not in package_workflow
             and "remote-debugging-port" not in tauri_source
             and "remote-debugging-port" not in backend
