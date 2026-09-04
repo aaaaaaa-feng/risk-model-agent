@@ -972,21 +972,38 @@ function Assert-NoVisibleBackendTerminal {
     }
     $ConsoleHosts = @($Descendants | Where-Object { $_.Name -ieq "conhost.exe" })
     if ($ConsoleHosts.Count -gt 0) {
-        $ConsoleHostDiagnostics = foreach ($ConsoleHost in $ConsoleHosts) {
-            $SafeName = ConvertTo-DiagnosticFragment -Value $ConsoleHost.Name -MaximumLength 80
-            $SafeExecutable = Get-SafeExecutableBasename -ProcessRow $ConsoleHost
-            $SafeCreatedAt = ConvertTo-SafeProcessTimestamp -Value $ConsoleHost.CreationDate
-            $SafeAncestorChain = Get-SafeProcessAncestorChain `
-                -ProcessRow $ConsoleHost `
-                -RowsById $RowsById `
-                -RootProcessId $ClientProcessId
-            "pid=$($ConsoleHost.ProcessId),ppid=$($ConsoleHost.ParentProcessId),created=$SafeCreatedAt,name=$SafeName,exe=$SafeExecutable,ancestors=$SafeAncestorChain"
+        # CREATE_NO_WINDOW 的 Win32 契约是“不创建可见控制台窗口”，
+        # 但 Windows 仍可能为无窗口的控制台进程保留 headless conhost。
+        # 因此必须检查真实顶层窗口，不能仅凭 conhost 进程名误判。
+        Initialize-NativeWindowProbe
+        $ConsoleHostProcessIds = [int[]]@($ConsoleHosts | ForEach-Object { $_.ProcessId })
+        $VisibleConsoleWindows = @(
+            [RiskModelAgentSmoke.NativeWindowProbe]::Enumerate($ConsoleHostProcessIds) |
+                Where-Object { $_.Visible }
+        )
+        if ($VisibleConsoleWindows.Count -gt 0) {
+            $VisibleConsoleProcessIds = @(
+                $VisibleConsoleWindows | ForEach-Object { [int]$_.ProcessId } | Select-Object -Unique
+            )
+            $ConsoleHostDiagnostics = foreach ($ConsoleHost in @(
+                $ConsoleHosts |
+                    Where-Object { $VisibleConsoleProcessIds -contains [int]$_.ProcessId }
+            )) {
+                $SafeName = ConvertTo-DiagnosticFragment -Value $ConsoleHost.Name -MaximumLength 80
+                $SafeExecutable = Get-SafeExecutableBasename -ProcessRow $ConsoleHost
+                $SafeCreatedAt = ConvertTo-SafeProcessTimestamp -Value $ConsoleHost.CreationDate
+                $SafeAncestorChain = Get-SafeProcessAncestorChain `
+                    -ProcessRow $ConsoleHost `
+                    -RowsById $RowsById `
+                    -RootProcessId $ClientProcessId
+                "pid=$($ConsoleHost.ProcessId),ppid=$($ConsoleHost.ParentProcessId),created=$SafeCreatedAt,name=$SafeName,exe=$SafeExecutable,ancestors=$SafeAncestorChain"
+            }
+            $SafeDiagnostic = ConvertTo-DiagnosticFragment `
+                -Value ($ConsoleHostDiagnostics -join " | ") `
+                -MaximumLength 4000
+            Write-Host "[终端门禁][$Stage] 可见控制台窗口证据：$SafeDiagnostic"
+            throw "[终端门禁][$Stage] 桌面客户端进程树出现可见控制台窗口，后台建模或 Notebook 会弹出终端。"
         }
-        $SafeDiagnostic = ConvertTo-DiagnosticFragment `
-            -Value ($ConsoleHostDiagnostics -join " | ") `
-            -MaximumLength 4000
-        Write-Host "[终端门禁][$Stage] conhost 快照证据：$SafeDiagnostic"
-        throw "[终端门禁][$Stage] 桌面客户端进程树出现 conhost.exe，后台建模或 Notebook 可能弹出终端。"
     }
     foreach ($Descendant in $Descendants) {
         if ($Descendant.Name -ieq "msedgewebview2.exe") { continue }

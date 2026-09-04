@@ -571,13 +571,17 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
                     "$RootRuntime.StartTime.ToUniversalTime()",
                     "$DescendantProcess.StartTime.ToUniversalTime()",
                     "Get-SafeProcessAncestorChain",
+                    "Initialize-NativeWindowProbe",
+                    "NativeWindowProbe]::Enumerate",
+                    "Where-Object { $_.Visible }",
+                    "$VisibleConsoleWindows.Count -gt 0",
                     "pid=$($ConsoleHost.ProcessId)",
                     "ppid=$($ConsoleHost.ParentProcessId)",
                     "created=$SafeCreatedAt",
                     "name=$SafeName",
                     "exe=$SafeExecutable",
                     "ancestors=$SafeAncestorChain",
-                    "conhost 快照证据",
+                    "可见控制台窗口证据",
                     "-MaximumLength 4000",
                 )
             )
@@ -586,6 +590,7 @@ def build_contract(root: Path = ROOT) -> dict[str, object]:
             and "$ProcessRow.CommandLine" not in smoke_script
             and "$ConsoleHost.CommandLine" not in smoke_script
             and "$ConsoleHost.ExecutablePath" not in terminal_gate_source
+            and "桌面客户端进程树出现 conhost.exe" not in terminal_gate_source
             and re.search(
                 r"Assert-NoVisibleBackendTerminal\s+`\s*\n"
                 r"\s*-ClientProcessId \$ClientProcess\.Id\s+`\s*\n"

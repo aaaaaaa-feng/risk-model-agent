@@ -30,11 +30,15 @@ def test_terminal_gate_uses_one_process_snapshot_and_checks_process_identity() -
     assert "$CurrentCreatedUtc -lt $ParentCreatedUtc" in source
 
 
-def test_conhost_failure_reports_only_bounded_safe_process_evidence() -> None:
+def test_only_visible_conhost_windows_fail_with_bounded_safe_process_evidence() -> None:
     source = SMOKE_PATH.read_text(encoding="utf-8")
     gate = _terminal_gate(source)
 
     for marker in (
+        "Initialize-NativeWindowProbe",
+        "NativeWindowProbe]::Enumerate",
+        "Where-Object { $_.Visible }",
+        "$VisibleConsoleWindows.Count -gt 0",
         "pid=$($ConsoleHost.ProcessId)",
         "ppid=$($ConsoleHost.ParentProcessId)",
         "created=$SafeCreatedAt",
@@ -42,11 +46,12 @@ def test_conhost_failure_reports_only_bounded_safe_process_evidence() -> None:
         "exe=$SafeExecutable",
         "ancestors=$SafeAncestorChain",
         "Get-SafeProcessAncestorChain",
-        "conhost 快照证据",
+        "可见控制台窗口证据",
         "-MaximumLength 4000",
     ):
         assert marker in gate
 
+    assert "桌面客户端进程树出现 conhost.exe" not in gate
     assert "GetFileName($ExecutablePath)" in source
     assert "$ProcessRow.CommandLine" not in source
     assert "$ConsoleHost.CommandLine" not in source
