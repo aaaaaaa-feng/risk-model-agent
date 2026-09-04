@@ -16,11 +16,13 @@ import json
 import re
 import sys
 import time
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 from urllib.request import urlopen
 
 
 COOKIE_VALUE_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+ROUTE_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,159}$")
+ALLOWED_ROUTE_VIEWS = {"workbench", "report", "history"}
 DEFAULT_COOKIE_NAME = "risk_agent_desktop_session"
 
 
@@ -59,6 +61,61 @@ def _validate_debug_port(value: int) -> int:
     return value
 
 
+def _is_application_page_url(value: str, *, backend_url: str) -> bool:
+    page = urlsplit(value)
+    expected = urlsplit(backend_url)
+    # ``urlsplit`` normalises a bare ``?`` to an empty query. Reject the
+    # delimiter itself before parsing so only fragment-local route parameters
+    # are accepted.
+    if "?" in value.partition("#")[0]:
+        return False
+    try:
+        page_port = page.port
+        expected_port = expected.port
+    except ValueError:
+        return False
+    if (
+        page.scheme != expected.scheme
+        or page.hostname != expected.hostname
+        or page_port != expected_port
+        or page.username is not None
+        or page.password is not None
+        or page.path not in {"", "/"}
+        or page.query
+    ):
+        return False
+    if not page.fragment:
+        return True
+
+    route, separator, raw_parameters = page.fragment.partition("?")
+    view = route.removeprefix("/") if route.startswith("/") else ""
+    if view not in ALLOWED_ROUTE_VIEWS:
+        return False
+    if not separator:
+        return True
+    if not raw_parameters:
+        return False
+    try:
+        parameters = parse_qsl(
+            raw_parameters,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=3,
+        )
+    except ValueError:
+        return False
+    seen: set[str] = set()
+    for key, parameter_value in parameters:
+        if key in seen or key not in {"project", "run", "mode"}:
+            return False
+        seen.add(key)
+        if key in {"project", "run"} and not ROUTE_IDENTIFIER_PATTERN.fullmatch(parameter_value):
+            return False
+        if key == "mode" and (view != "workbench" or parameter_value != "data"):
+            return False
+    return True
+
+
 def _select_page_target(
     targets: object,
     *,
@@ -67,7 +124,6 @@ def _select_page_target(
 ) -> str | None:
     if not isinstance(targets, list):
         return None
-    expected_pages = {backend_url, f"{backend_url}/"}
     for target in targets:
         if not isinstance(target, dict) or target.get("type") != "page":
             continue
@@ -79,7 +135,7 @@ def _select_page_target(
         # successful exchange WebView2 first stores the new cookie and only
         # then follows the 303 redirect to the application root. This also
         # prevents a previous random-port session from winning a recovery race.
-        if page_url not in expected_pages:
+        if not _is_application_page_url(page_url, backend_url=backend_url):
             continue
         parsed = urlsplit(websocket_url)
         try:
