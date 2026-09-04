@@ -38,7 +38,7 @@ def test_cookie_reader_selects_only_matching_loopback_page_target() -> None:
     expected = "ws://127.0.0.1:9222/devtools/page/expected"
     target = {
         "type": "page",
-        "url": f"{backend_url}/",
+        "url": f"{backend_url}/#/workbench?project=project_1",
         "webSocketDebuggerUrl": expected,
     }
     assert (
@@ -56,6 +56,51 @@ def test_cookie_reader_selects_only_matching_loopback_page_target() -> None:
             debug_port=9222,
         )
         is None
+    )
+
+
+@pytest.mark.parametrize(
+    "page_url",
+    [
+        "http://127.0.0.1:49152",
+        "http://127.0.0.1:49152/",
+        "http://127.0.0.1:49152/#/workbench",
+        "http://127.0.0.1:49152/#/workbench?project=project_1",
+        "http://127.0.0.1:49152/#/workbench?project=project_1&run=run_1&mode=data",
+        "http://127.0.0.1:49152/#/report?project=project_1&run=run_1",
+        "http://127.0.0.1:49152/#/history?project=project_1",
+    ],
+)
+def test_cookie_reader_accepts_only_application_root_and_known_hash_routes(
+    page_url: str,
+) -> None:
+    assert read_webview_cookie._is_application_page_url(
+        page_url,
+        backend_url="http://127.0.0.1:49152",
+    )
+
+
+@pytest.mark.parametrize(
+    "page_url",
+    [
+        "http://127.0.0.1:49153/#/workbench",
+        "http://localhost:49152/#/workbench",
+        "https://127.0.0.1:49152/#/workbench",
+        "http://127.0.0.1:49152/api/v1/desktop/bootstrap?token=hidden#/workbench",
+        "http://127.0.0.1:49152/?token=hidden#/workbench",
+        "http://127.0.0.1:49152/?#/workbench",
+        "http://127.0.0.1:49152/#/unknown",
+        "http://127.0.0.1:49152/#/workbench?",
+        "http://127.0.0.1:49152/#/workbench?project=invalid.value",
+        "http://127.0.0.1:49152/#/workbench?project=project_1&project=project_2",
+        "http://127.0.0.1:49152/#/report?mode=data",
+        "http://127.0.0.1:49152/#/history?token=hidden",
+    ],
+)
+def test_cookie_reader_rejects_non_application_page_targets(page_url: str) -> None:
+    assert not read_webview_cookie._is_application_page_url(
+        page_url,
+        backend_url="http://127.0.0.1:49152",
     )
 
 
