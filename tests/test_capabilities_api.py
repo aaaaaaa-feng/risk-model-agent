@@ -24,14 +24,14 @@ EXPECTED_ALGORITHMS = {
 }
 
 
-def test_capabilities_api_reports_model_adapters_and_notebook_packages(app_paths):
+def test_capabilities_api_reports_only_supported_model_adapters(app_paths):
     app = create_app(app_paths, auto_migrate=False)
     with TestClient(app) as client:
         response = client.get("/api/v1/capabilities")
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["schema_version"] == "risk-model-agent-capabilities/v1"
+    assert payload["schema_version"] == "risk-model-agent-capabilities/v2"
     assert payload["api_version"] == "v1"
 
     algorithms = {item["id"]: item for item in payload["algorithms"]}
@@ -41,19 +41,14 @@ def test_capabilities_api_reports_model_adapters_and_notebook_packages(app_paths
     assert all(isinstance(item["available"], bool) for item in algorithms.values())
     assert all(isinstance(item["dependencies"], list) for item in algorithms.values())
 
-    notebook = payload["notebook"]
-    assert notebook["runtime"] == "jupyter"
-    assert isinstance(notebook["available"], bool)
-    assert set(notebook["dependencies"]) == {
-        "pandas",
-        "numpy",
-        "duckdb",
-        "nbformat",
-        "jupyter_client",
-        "ipykernel",
-    }
-    assert "polars" not in notebook["dependencies"]
-    assert all(isinstance(available, bool) for available in notebook["dependencies"].values())
+    assert "notebook" not in payload
+
+
+def test_notebook_routes_are_not_registered(app_paths):
+    app = create_app(app_paths, auto_migrate=False)
+    paths = {route.path for route in app.routes if isinstance(route, APIRoute)}
+
+    assert not any("notebook" in path.lower() for path in paths)
 
 
 def test_capabilities_route_is_get_only():

@@ -43,6 +43,9 @@ RESOURCE_ORDER = (
     "notebooks",
     "score_jobs",
 )
+# `notebooks` stays in the archive schema as a read-only compatibility record.
+# New application versions neither create nor execute these rows, but dropping
+# them here would silently lose user-owned history during export and restore.
 
 ARCHIVE_SCHEMA = "risk-project-export/v1"
 MAX_ARCHIVE_MEMBERS = 100_000
@@ -242,7 +245,9 @@ class ArchiveService:
         staged_project.mkdir()
         if files_dir.exists():
             shutil.copytree(files_dir, staged_project, dirs_exist_ok=True)
-        for child in ("assets", "datasets", "runs", "notebooks", "scores", "trash"):
+        # Legacy Notebook directories are restored by copytree only when the
+        # archive really contains historical files; current projects stay clean.
+        for child in ("assets", "datasets", "runs", "scores", "trash"):
             (staged_project / child).mkdir(parents=True, exist_ok=True)
         marker = staged_project / ".restore-incomplete"
         marker.write_text(restored_id, encoding="utf-8")
@@ -302,7 +307,10 @@ class ArchiveService:
                         row["project_id"] = restored_id
                     if table == "notebooks":
                         row["kernel_id"] = None
-                        row["status"] = "idle"
+                        row["status"] = "legacy_readonly"
+                        metadata = dict(row.get("metadata") or {})
+                        metadata["compatibility_status"] = "historical_readonly"
+                        row["metadata"] = metadata
                     row = _replace_exact_values(row, manifest_hash_map)
                     if table == "run_manifests":
                         manifest_payload = dict(row.get("payload") or {})

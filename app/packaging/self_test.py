@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
 import time
@@ -12,7 +11,6 @@ import warnings
 import numpy as np
 import pandas as pd
 
-from app.notebooks.runtime import notebook_runtime_capability
 from app.workers.model_adapters import MODEL_REGISTRY
 
 
@@ -123,40 +121,19 @@ def _model_checks() -> list[dict[str, Any]]:
     return results
 
 
-def _notebook_check() -> dict[str, Any]:
+def _data_runtime_check() -> dict[str, Any]:
     started = time.monotonic()
     try:
-        capability = notebook_runtime_capability()
-        if not capability["available"]:
-            raise RuntimeError("NOTEBOOK_RUNTIME_DEPENDENCY_UNAVAILABLE")
-        for module_name in (
-            "pandas",
-            "numpy",
-            "duckdb",
-            "nbformat",
-            "jupyter_client",
-            "ipykernel",
-        ):
-            importlib.import_module(module_name)
-
         import duckdb
-        import nbformat
-        from ipykernel.kernelapp import IPKernelApp
-        from jupyter_client import KernelManager
-        from jupyter_client.provisioning.local_provisioner import LocalProvisioner
 
-        notebook = nbformat.v4.new_notebook(cells=[nbformat.v4.new_code_cell("answer = 6 * 7")])
-        nbformat.validate(notebook)
         with duckdb.connect(":memory:") as connection:
             answer = connection.execute("SELECT 6 * 7").fetchone()[0]
         if answer != 42:
             raise RuntimeError("DUCKDB_RESULT_INVALID")
-        if not all((KernelManager, LocalProvisioner, IPKernelApp)):
-            raise RuntimeError("NOTEBOOK_RUNTIME_CLASS_MISSING")
         return {
             "status": "passed",
-            "runtime": capability["runtime"],
-            "dependencies": capability["dependencies"],
+            "engine": "duckdb",
+            "dependencies": {"pandas": True, "numpy": True, "duckdb": True},
             "duration_ms": round((time.monotonic() - started) * 1000, 3),
         }
     except Exception as exc:
@@ -200,20 +177,20 @@ def _serialization_check() -> dict[str, Any]:
 
 
 def run_package_self_test() -> dict[str, Any]:
-    """在内存中验证完整离线包的模型与 Notebook 契约。"""
+    """在内存中验证完整离线包的模型与数据引擎契约。"""
 
     started = time.monotonic()
     models = _model_checks()
-    notebook = _notebook_check()
+    data_runtime = _data_runtime_check()
     serialization = _serialization_check()
     passed = bool(models) and all(item["status"] == "passed" for item in models)
-    passed = passed and notebook["status"] == "passed" and serialization["status"] == "passed"
+    passed = passed and data_runtime["status"] == "passed" and serialization["status"] == "passed"
     return {
-        "schema_version": "risk-package-self-test/v1",
+        "schema_version": "risk-package-self-test/v2",
         "status": "passed" if passed else "failed",
         "message": "冻结包能力自检通过" if passed else "冻结包能力自检失败",
         "models": models,
-        "notebook": notebook,
+        "data_runtime": data_runtime,
         "serialization": serialization,
         "duration_ms": round((time.monotonic() - started) * 1000, 3),
         "random_seed": SELF_TEST_SEED,

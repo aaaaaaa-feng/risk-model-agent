@@ -140,30 +140,6 @@ def test_provider_connectivity_error_is_actionable_and_never_echoes_exception(ap
     assert _PRIVATE_PATH not in (result.error_message or "")
 
 
-def test_notebook_timeout_has_stable_actionable_error(app_paths, monkeypatch):
-    app = create_app(app_paths, auto_migrate=False)
-    with TestClient(app, raise_server_exceptions=False) as client:
-        project = client.post("/api/v1/projects", json={"name": "Notebook 超时"}).json()["project"]
-        notebook = client.post(
-            "/api/v1/notebooks",
-            json={"project_id": project["id"], "name": "超时测试"},
-        ).json()["notebook"]
-
-        def timeout(*_args, **_kwargs):
-            raise TimeoutError(f"kernel timeout at {_PRIVATE_PATH} {_SECRET}")
-
-        monkeypatch.setattr(app.state.context.notebooks, "execute_cell", timeout)
-        response = client.post(
-            f"/api/v1/notebooks/{notebook['id']}/execute-cell",
-            json={"cell_index": 0, "timeout_seconds": 1},
-        )
-
-    assert response.status_code == 400
-    assert response.json()["error"]["code"] == "NOTEBOOK_EXECUTION_TIMEOUT"
-    assert "拆分单元格" in response.json()["error"]["message"]
-    assert _SECRET not in response.text and _PRIVATE_PATH not in response.text
-
-
 def test_conversation_and_run_failure_messages_hide_technical_errors():
     raw_error = f"open failed: {_PRIVATE_PATH} {_SECRET}"
     run = {

@@ -158,7 +158,6 @@ export function SettingsDrawer({
         monthly_token_budget: form.monthly_token_budget,
         proxy: form.proxy,
         ca_cert: form.ca_cert,
-        notebook_network: Boolean(form.notebook_network),
         telemetry: Boolean(form.telemetry),
         auto_update: Boolean(form.auto_update),
         memory_budget_mb: form.memory_budget_mb,
@@ -506,16 +505,8 @@ export function SettingsDrawer({
               {section === "network" && (
                 <SettingsSection
                   title="网络、更新与遥测"
-                  hint="Notebook 不是安全沙箱；关闭偏好不能替代操作系统隔离。"
+                  hint="管理模型 API 网络参数、应用更新和匿名遥测偏好。"
                 >
-                  <div className="check-row">
-                    <Checkbox
-                      id="notebook-network"
-                      checked={Boolean(form.notebook_network)}
-                      onCheckedChange={(checked) => change("notebook_network", checked === true)}
-                    />
-                    <label htmlFor="notebook-network">Notebook 网络偏好开启</label>
-                  </div>
                   <div className="check-row">
                     <Checkbox
                       id="auto-update"

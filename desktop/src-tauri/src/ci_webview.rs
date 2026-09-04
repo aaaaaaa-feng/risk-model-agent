@@ -37,8 +37,8 @@ fn ci_debug_arguments(
 pub(crate) fn configure_ci_webview_probe(context: &mut tauri::Context<tauri::Wry>) {
     let raw_port = std::env::var(CI_DEBUG_PORT_ENV).ok();
     // The port is only configuration for the desktop WebView. Remove it before
-    // the supervisor starts Python so Notebook kernels and model workers never
-    // inherit the CI instrumentation switch.
+    // the supervisor starts Python so model workers never inherit the CI
+    // instrumentation switch.
     std::env::remove_var(CI_DEBUG_PORT_ENV);
 
     let github_actions = std::env::var("GITHUB_ACTIONS").ok();

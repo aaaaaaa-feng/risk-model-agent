@@ -60,4 +60,13 @@ describe("前端 feature-slice 边界", () => {
     expect(session).toMatch(/\buseRunData\b/);
     expect(session).toMatch(/\buseGlobalPolling\b/);
   });
+
+  it("不再暴露 Notebook 页面、接口或配置入口", () => {
+    const sources = { ...appSources, ...featureSources, ...sharedSources };
+    const violations = Object.entries(sources)
+      .filter(([, source]) => /\b(?:notebooks?|ipynb|jupyter)\b/i.test(source))
+      .map(([file]) => file);
+
+    expect(violations).toEqual([]);
+  });
 });

@@ -40,9 +40,6 @@ export function ProjectHeader({ session, settings, theme, onToggleTheme }: Props
           >
             {status}
           </Badge>
-          <Badge variant="network" className="max-[1350px]:hidden">
-            Notebook {settings?.notebook_network === false ? "关闭偏好" : "网络开启"}
-          </Badge>
           {session.selectedProject && (
             <Button variant="outline" size="sm" onClick={session.showDataWorkbench}>
               数据 / 新 Y

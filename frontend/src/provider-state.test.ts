@@ -18,7 +18,6 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     monthly_token_budget: 0,
     proxy: "",
     ca_cert: "",
-    notebook_network: true,
     telemetry: false,
     auto_update: true,
     memory_budget_mb: 1536,

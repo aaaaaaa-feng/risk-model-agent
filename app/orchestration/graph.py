@@ -12,7 +12,12 @@ from app.core.database import Database, new_id, now_iso
 from app.core.errors import normalize_error_code
 from app.core.paths import AppPaths, get_paths
 from app.domain.reviews import review_blocks_progress, review_requires_revision
-from app.governance.manifest import MANIFEST_SCHEMA, build_run_manifest
+from app.governance.manifest import (
+    AGENT_GRAPH_VERSION,
+    MANIFEST_SCHEMA,
+    build_run_manifest,
+    verify_manifest,
+)
 from app.governance.tracing import TraceService
 from app.services.catalog import CatalogService
 from app.services.pipeline import RunPipeline
@@ -93,8 +98,7 @@ class RunEngine:
         builder.add_edge("finalize_binning", "propose_models")
         builder.add_edge("propose_models", "confirm_models")
         self._conditional(builder, "confirm_models", "finalize_models", END)
-        builder.add_edge("finalize_models", "code_review")
-        builder.add_edge("code_review", "train_review")
+        builder.add_edge("finalize_models", "train_review")
         builder.add_edge("train_review", "report_review")
         builder.add_edge("report_review", "write_artifacts")
         builder.add_edge("write_artifacts", "complete")
@@ -238,9 +242,36 @@ class RunEngine:
                     "traces", {"run_id": run["id"]}, order_by="started_at DESC", limit=1
                 )
             )
-            has_manifest = bool(self.database.list("run_manifests", {"run_id": run["id"]}, limit=1))
-            if not has_trace or not has_manifest:
+            manifests = self.database.list("run_manifests", {"run_id": run["id"]}, limit=1)
+            if not has_trace or not manifests:
                 self._block_pre_trace_run(run)
+                continue
+            manifest_record = manifests[0]
+            try:
+                if not isinstance(manifest_record.get("payload"), dict):
+                    raise ValueError("RUN_MANIFEST_PAYLOAD_INVALID")
+                manifest_payload = verify_manifest(
+                    manifest_record.get("payload") or {},
+                    str(manifest_record.get("manifest_hash") or ""),
+                )
+                if (
+                    manifest_record.get("schema_version") != MANIFEST_SCHEMA
+                    or manifest_payload.get("schema_version") != MANIFEST_SCHEMA
+                ):
+                    raise ValueError("RUN_MANIFEST_SCHEMA_UNSUPPORTED")
+            except (TypeError, ValueError) as exc:
+                self._block_incompatible_graph_run(
+                    run,
+                    "invalid",
+                    error_code="RUN_RESTART_REQUIRED_AFTER_MANIFEST_VALIDATION_FAILURE",
+                    manifest_validation_error=normalize_error_code(
+                        exc, "RUN_MANIFEST_INTEGRITY_FAILED"
+                    ),
+                )
+                continue
+            manifest_graph_version = str(manifest_payload.get("agent_graph_version") or "")
+            if manifest_graph_version != AGENT_GRAPH_VERSION:
+                self._block_incompatible_graph_run(run, manifest_graph_version)
                 continue
             if run["status"] == "awaiting_decision":
                 continue
@@ -260,8 +291,7 @@ class RunEngine:
         """Preserve an interrupted pre-v2 run instead of inventing evidence for it."""
         timestamp = now_iso()
         code = "RUN_RESTART_REQUIRED_AFTER_TRACE_SCHEMA_UPGRADE"
-        self.database.update(
-            "runs",
+        self.database.transition_run_with_event(
             run["id"],
             {
                 "status": "blocked",
@@ -269,15 +299,6 @@ class RunEngine:
                 "finished_at": timestamp,
                 "updated_at": timestamp,
             },
-        )
-        if run.get("target_task_id"):
-            self.database.update(
-                "target_tasks",
-                run["target_task_id"],
-                {"status": "blocked", "updated_at": timestamp},
-            )
-        self.database.append_event(
-            run["id"],
             {
                 "stage": run["stage"],
                 "node": run["node"],
@@ -286,7 +307,58 @@ class RunEngine:
                 "status": "blocked",
                 "summary": "升级前未完成 Run 已保留；因缺少可验证 Manifest/Trace，请新建 Run",
                 "evidence": {"error_code": code, "legacy_state_preserved": True},
+                "created_at": timestamp,
             },
+            target_task_id=run.get("target_task_id"),
+            target_task_data={"status": "blocked", "updated_at": timestamp},
+            close_open_decisions_reason=code,
+            finish_open_trace_status="blocked",
+            trace_error_code=code,
+        )
+
+    def _block_incompatible_graph_run(
+        self,
+        run: dict[str, Any],
+        manifest_graph_version: str,
+        *,
+        error_code: str = "RUN_RESTART_REQUIRED_AFTER_GRAPH_UPGRADE",
+        manifest_validation_error: str | None = None,
+    ) -> None:
+        """Preserve an unfinished Run instead of mixing two graph contracts."""
+
+        timestamp = now_iso()
+        code = error_code
+        evidence = {
+            "error_code": code,
+            "legacy_state_preserved": True,
+            "previous_graph_version": manifest_graph_version or "unknown",
+            "current_graph_version": AGENT_GRAPH_VERSION,
+        }
+        if manifest_validation_error:
+            evidence["manifest_validation_error"] = manifest_validation_error
+        self.database.transition_run_with_event(
+            run["id"],
+            {
+                "status": "blocked",
+                "error": code,
+                "finished_at": timestamp,
+                "updated_at": timestamp,
+            },
+            {
+                "stage": run["stage"],
+                "node": run["node"],
+                "agent": "orchestrator",
+                "tool": None,
+                "status": "blocked",
+                "summary": "旧版或不兼容的未完成 Run 已完整保留；请新建 Run",
+                "evidence": evidence,
+                "created_at": timestamp,
+            },
+            target_task_id=run.get("target_task_id"),
+            target_task_data={"status": "blocked", "updated_at": timestamp},
+            close_open_decisions_reason=code,
+            finish_open_trace_status="blocked",
+            trace_error_code=code,
         )
 
     def _submit(self, run_id: str, value: Any) -> None:

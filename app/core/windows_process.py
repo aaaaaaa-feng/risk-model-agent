@@ -45,8 +45,8 @@ def install_frozen_windows_no_console_policy(
     arguments. CPython's Windows ``multiprocessing`` implementation calls
     ``_winapi.CreateProcess`` directly with creation flags set to zero, while
     ``os.system`` bypasses that Python wrapper altogether. Keeping both adapters
-    here covers the bundled Notebook kernel, its shell helpers and modeling
-    workers without coupling business modules to private launcher details.
+    here covers bundled modeling workers without coupling business modules to
+    private launcher details.
 
     The policy is deliberately limited to a frozen Windows application.  Source
     development keeps normal terminal semantics, and the operation is
@@ -103,7 +103,7 @@ def install_frozen_windows_no_console_policy(
         def system_without_console(command: str) -> int:
             # ``os.system`` bypasses Python's ``_winapi.CreateProcess`` wrapper
             # and can therefore create ``cmd.exe`` plus ``conhost.exe`` from an
-            # otherwise windowless Notebook kernel.  Preserve its synchronous
+            # otherwise windowless application process. Preserve its synchronous
             # return-code and audit contracts through the standard subprocess API.
             sys.audit("os.system", command)
             return call(command, shell=True, creationflags=CREATE_NO_WINDOW)

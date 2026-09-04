@@ -119,15 +119,6 @@ PIPELINE_STEPS = (
         "finalize_model_plan",
     ),
     PipelineStepSpec(
-        "code_review",
-        "generate_and_review_code",
-        "code_review",
-        "reviewer_agent",
-        "主 Agent 生成 Notebook，独立 Reviewer 闭环审核",
-        "代码已完成独立质检",
-        "generate_and_review_code",
-    ),
-    PipelineStepSpec(
         "train_review",
         "train_and_review",
         "training",

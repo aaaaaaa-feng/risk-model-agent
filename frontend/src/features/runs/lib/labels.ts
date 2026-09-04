@@ -7,7 +7,8 @@ export const runStageLabel: Record<string, string> = {
   screening: "变量筛选",
   binning: "变量分箱",
   model_plan: "建模方案",
-  code_review: "代码生成与质检",
+  // 仅用于展示升级前已被保留并阻断的历史 Run；新流程不再进入该阶段。
+  code_review: "旧版代码质检（已停用）",
   training: "训练、调参与校准",
   reporting: "报告与模型包",
   completed: "已完成",

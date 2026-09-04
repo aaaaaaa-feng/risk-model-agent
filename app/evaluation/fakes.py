@@ -79,8 +79,6 @@ class ScriptedProviderFactory:
             content = json.dumps(
                 {"models": ["dummy", "scorecard", "regularized_logistic", "xgboost"]}
             )
-        elif "repairing a generated modeling notebook" in system:
-            content = json.dumps({"code": ""})
         else:
             content = json.dumps({"status": "ok"})
         return httpx.Response(

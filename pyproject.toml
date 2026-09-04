@@ -30,9 +30,6 @@ dependencies = [
   "cryptography>=43",
   "keyring>=25",
   "psutil>=6",
-  "nbformat>=5.10",
-  "jupyter-client>=8.6",
-  "ipykernel>=6.29",
 ]
 
 [project.optional-dependencies]

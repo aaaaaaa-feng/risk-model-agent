@@ -71,7 +71,6 @@ export function AppShell() {
       <ProjectSidebar
         projects={session.projects}
         selectedId={session.selectedId}
-        settings={settings}
         open={sidebarOpen}
         onToggle={toggleSidebar}
         width={sidebarOpen ? sidebarWidth.width : undefined}

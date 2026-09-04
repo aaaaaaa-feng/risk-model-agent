@@ -47,8 +47,6 @@ class RunState(TypedDict, total=False):
     report: dict
     report_review: dict
     execution_review: dict
-    code_review: dict
-    generated_code_path: str
     field_aliases: dict[str, str]
     effective_models: list[str]
     model_version_id: str

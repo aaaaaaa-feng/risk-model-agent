@@ -24,7 +24,6 @@ hiddenimports = [
     "openpyxl",
     "xlrd",
     "duckdb",
-    "ipykernel_launcher",
     # 桌面服务固定使用纯 Python H11 与 asyncio，不依赖环境自动探测。
     "uvicorn.protocols.http.h11_impl",
     "uvicorn.loops.asyncio",
@@ -38,7 +37,6 @@ hiddenimports = [
     "catboost.core",
     # 首方适配器通过稳定字符串路径延迟加载，显式列出以免后续静态调用变化漏收。
     "app.workers.model_builders",
-    "app.notebooks.runtime",
     "app.packaging.self_test",
     "app.evaluation.adapter",
     "app.evaluation.harness",
@@ -58,10 +56,23 @@ binaries.extend(collect_dynamic_libs("lightgbm"))
 datas.extend(collect_data_files("xgboost", includes=["VERSION"]))
 datas.extend(collect_data_files("lightgbm", includes=["VERSION.txt"]))
 
-# 产品未提供分布式训练、调试器、代码补全或 Python 绘图能力。前端报告
-# 图表由 Web 层渲染；Notebook 保留数据处理与逐单元执行能力。
+# 产品未提供分布式训练、Notebook、调试器、代码补全或 Python 绘图能力。
+# 前端报告图表由 Web 层渲染。
 excluded_modules = [
     "polars",
+    "IPython",
+    "ipykernel",
+    "ipykernel_launcher",
+    "jupyter",
+    "jupyter_client",
+    "jupyter_core",
+    "nbformat",
+    "notebook",
+    "comm",
+    "prompt_toolkit",
+    "traitlets",
+    "tornado",
+    "zmq",
     "matplotlib",
     "plotly",
     "PIL",
@@ -129,7 +140,7 @@ exe = EXE(
     strip=False,
     upx=False,
     # Windows 后端只作为 Tauri sidecar 运行。windowed 子系统同时保证其
-    # multiprocessing worker 与 Jupyter kernel 不会各自创建 conhost 黑框；
+    # multiprocessing worker 不会创建可见 conhost 黑框；
     # macOS 仍保留可直接执行的诊断入口。
     console=sys.platform != "win32",
     exclude_binaries=True,

@@ -21,10 +21,9 @@ describe("用户友好错误翻译", () => {
   it("隐藏技术堆栈，只保留友好处理建议", () => {
     const text = errorMessage(
       new Error('Traceback (most recent call last): File "worker.py", line 4 TypeError: bad'),
-      { context: "notebook" },
     );
     expect(text).not.toMatch(/Traceback|worker\.py|TypeError/);
-    expect(text).toContain("请检查当前单元格");
+    expect(text).toContain("请重试");
   });
 
   it("诊断码保留在结构化结果，不进入主文案", () => {

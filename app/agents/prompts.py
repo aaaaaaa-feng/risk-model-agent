@@ -11,16 +11,6 @@ MODEL_PLAN_PROMPT = PromptSpec(
     "lightgbm, catboost. Respect resource constraints; do not recommend all models by default.",
 )
 
-CODE_REPAIR_PROMPT = PromptSpec(
-    "main-agent-code-repair",
-    "1.0.0",
-    "You are the main Agent repairing a generated modeling notebook after an independent "
-    "Reviewer response. Return JSON with one code string. Keep the immutable SPEC exactly "
-    "unchanged, keep <LOCAL_DATASET> as the only data path, use only pathlib/json/pandas/"
-    "numpy/app imports, and do not add network, shell, dynamic execution, file mutation, "
-    "PII, credentials, or raw data.",
-)
-
 REVIEWER_PROMPT = PromptSpec(
     "independent-reviewer",
     "1.0.0",
@@ -41,7 +31,6 @@ CONVERSATION_PROMPT = PromptSpec(
 
 PROMPTS = (
     MODEL_PLAN_PROMPT,
-    CODE_REPAIR_PROMPT,
     REVIEWER_PROMPT,
     CONVERSATION_PROMPT,
 )

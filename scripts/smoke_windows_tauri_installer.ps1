@@ -1002,7 +1002,7 @@ function Assert-NoVisibleBackendTerminal {
                 -Value ($ConsoleHostDiagnostics -join " | ") `
                 -MaximumLength 4000
             Write-Host "[终端门禁][$Stage] 可见控制台窗口证据：$SafeDiagnostic"
-            throw "[终端门禁][$Stage] 桌面客户端进程树出现可见控制台窗口，后台建模或 Notebook 会弹出终端。"
+            throw "[终端门禁][$Stage] 桌面客户端进程树出现可见控制台窗口，后台建模可能弹出终端。"
         }
     }
     foreach ($Descendant in $Descendants) {
@@ -1352,7 +1352,7 @@ try {
         throw "1.1.2 卸载器替换负例后未恢复固定白名单文件。"
     }
 
-    Write-Host "[迁移冒烟] 运行真实 1.1.2 冻结服务、Notebook、建模与评分基线…"
+    Write-Host "[迁移冒烟] 运行真实 1.1.2 冻结服务、建模与评分基线…"
     & (Join-Path $RepositoryRoot "scripts\smoke_windows_service.ps1") `
         -ExecutablePath $LegacyExecutable `
         -DataDirectory $LegacyRuntimeDataDirectory `
@@ -1675,12 +1675,12 @@ try {
         throw "运行期恢复过程中检测到新的系统浏览器进程：$($ObservedNewBrowsers -join ', ')。"
     }
 
-    Write-Host "[终端门禁] 恢复完成，在完整 Notebook、建模与评分冒烟前检查客户端进程树…"
+    Write-Host "[终端门禁] 恢复完成，在完整建模与评分冒烟前检查客户端进程树…"
     Assert-NoVisibleBackendTerminal `
         -ClientProcessId $ClientProcess.Id `
         -Stage "恢复后-完整smoke前"
 
-    Write-Host "[桌面冒烟] 本地服务已就绪：$BaseUrl；执行完整 Notebook、建模与评分，并持续监控后台窗口…"
+    Write-Host "[桌面冒烟] 本地服务已就绪：$BaseUrl；执行完整建模与评分，并持续监控后台窗口…"
     $SmokeScript = Join-Path $RepositoryRoot "scripts\smoke_packaged_service.py"
     try {
         # 只让冒烟 Python 子进程继承会话；立即恢复父环境，
@@ -1708,7 +1708,7 @@ try {
         Observe-NewSystemBrowsers
         Assert-NoVisibleBackendTerminal `
             -ClientProcessId $ClientProcess.Id `
-            -Stage "完整Notebook建模评分"
+            -Stage "完整建模评分"
         if ($ObservedNewBrowsers.Count -gt 0) {
             throw "完整建模期间检测到新的系统浏览器进程：$($ObservedNewBrowsers -join ', ')。"
         }

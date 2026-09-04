@@ -64,7 +64,7 @@ export function WorkspaceSetup({ workspace, onSelected, onClose }: Props) {
         </div>
         <div className="workspace-setup-body">
           <p>
-            这是本机的长期工作区。数据库、设置、Notebook、报告、模型包和评测产物都会留在这里；每个项目使用独立的{" "}
+            这是本机的长期工作区。数据库、设置、报告、模型包和评测产物都会留在这里；每个项目使用独立的{" "}
             <code>projects/&lt;项目 ID&gt;</code> 文件夹。
           </p>
           {workspace.needs_setup && workspace.project_count > 0 && (

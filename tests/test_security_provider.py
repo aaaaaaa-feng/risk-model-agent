@@ -5,11 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from app.agents.codegen import (
-    extract_generated_spec,
-    generate_reproducible_notebook_code,
-    review_generated_code,
-)
 from app.agents.evidence import build_safe_evidence
 from app.core.config import PROVIDER_PRESETS, Settings
 from app.core.security import (
@@ -234,28 +229,3 @@ def test_openai_and_anthropic_payload_contracts(app_paths):
     )
     assert anthropic.endpoint() == "https://api.anthropic.com/v1/messages"
     assert anthropic._body("system", {"safe": True}, "claude-sonnet-4-5", 64)["system"] == "system"
-
-
-def test_generated_code_has_immutable_spec_and_import_allowlist():
-    source = generate_reproducible_notebook_code(
-        dataset_file="/local/project/dataset.csv",
-        target="Y",
-        features=["income"],
-        split={
-            "method": "random_stratified",
-            "time_column": None,
-            "customer_key": "customer_id",
-            "random_state": 42,
-        },
-        models=["dummy", "regularized_logistic"],
-        score_config={"minimum": 300, "maximum": 900},
-    )
-    assert extract_generated_spec(source)["models"] == ["dummy", "regularized_logistic"]
-    assert review_generated_code(source)["verdict"] == "pass"
-    unsafe = source.replace("import pandas as pd", "import os\nimport pandas as pd")
-    assert review_generated_code(unsafe)["verdict"] == "block"
-    reflected = (
-        source
-        + "\n# TRAIN_ONLY_SCREENING / OOT 不参与选择 / random_state\ngetattr(__builtins__, 'open')('/tmp/x').read()\n"
-    )
-    assert review_generated_code(reflected)["verdict"] == "block"

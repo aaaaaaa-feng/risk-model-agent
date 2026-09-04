@@ -100,9 +100,7 @@ function Welcome({ onCreate }: { onCreate: () => void }) {
         <div>
           <b>01</b>
           <strong>平台不上传原始数据</strong>
-          <span>
-            外部 LLM 只接收经 DLP 处理的聚合 SafeEvidence；联网 Notebook 另有明确边界提示。
-          </span>
+          <span>外部 LLM 只接收经 DLP 处理的聚合 SafeEvidence，不接收原始数据。</span>
         </div>
         <div>
           <b>02</b>

@@ -1,4 +1,4 @@
-"""PyInstaller-friendly launcher for the Web service and bundled Notebook kernel."""
+"""PyInstaller-friendly launcher for the local Web service and model workers."""
 
 from __future__ import annotations
 
@@ -21,9 +21,9 @@ def _ensure_frozen_stdio() -> None:
 
 def main() -> None:
     _ensure_frozen_stdio()
-    # Install the Windows policy before freeze_support or any application/
-    # Jupyter imports.  This is the one boundary shared by Notebook kernels,
-    # model workers and third-party subprocess helpers in the frozen package.
+    # Install the Windows policy before freeze_support or any application
+    # imports. This boundary is shared by model workers and third-party
+    # subprocess helpers in the frozen package.
     from app.core.windows_process import install_frozen_windows_no_console_policy
 
     install_frozen_windows_no_console_policy()
@@ -31,16 +31,6 @@ def main() -> None:
     # the FastAPI application, which creates databases, thread pools and the
     # LangGraph runtime at module import time.
     multiprocessing.freeze_support()
-    # Jupyter's default Python kernelspec launches ``sys.executable -m
-    # ipykernel_launcher``. In a frozen application ``sys.executable`` is this
-    # launcher, so dispatch to the bundled kernel instead of recursively
-    # starting another Web service.
-    if sys.argv[1:3] == ["-m", "ipykernel_launcher"]:
-        sys.argv = [sys.argv[0], *sys.argv[3:]]
-        from ipykernel.kernelapp import IPKernelApp
-
-        IPKernelApp.launch_instance()
-        return
     if sys.argv[1:] == ["--internal-package-self-test"]:
         from app.packaging.self_test import main as self_test_main
 
