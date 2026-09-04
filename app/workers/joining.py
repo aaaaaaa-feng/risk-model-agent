@@ -29,7 +29,10 @@ def recommend_keys(left: pd.DataFrame, right: pd.DataFrame, max_keys: int = 3) -
         right_non_null = right[column].dropna()
         if left_non_null.empty or right_non_null.empty:
             continue
-        overlap = len(set(left_non_null.astype(str).head(100_000)) & set(right_non_null.astype(str).head(100_000)))
+        overlap = len(
+            set(left_non_null.astype(str).head(100_000))
+            & set(right_non_null.astype(str).head(100_000))
+        )
         base = max(1, min(left_non_null.nunique(), right_non_null.nunique()))
         overlap_rate = overlap / base
         name_bonus = 0.35 if ID_PATTERN.search(str(column)) else 0
@@ -44,7 +47,10 @@ def recommend_keys(left: pd.DataFrame, right: pd.DataFrame, max_keys: int = 3) -
                 "expected_cardinality": "many_to_one" if right_unique >= 0.98 else "many_to_many",
             }
         )
-    scored.sort(key=lambda item: (item["expected_cardinality"] == "many_to_one", item["score"]), reverse=True)
+    scored.sort(
+        key=lambda item: (item["expected_cardinality"] == "many_to_one", item["score"]),
+        reverse=True,
+    )
     return {"recommendations": scored[:max_keys], "requires_manual": not bool(scored)}
 
 
@@ -83,7 +89,14 @@ def validate_join(
             }
         )
     if match_rate < 0.5:
-        issues.append({"code": "LOW_MATCH_RATE", "severity": "warning", "value": match_rate, "message": "关联匹配率低于 50%。"})
+        issues.append(
+            {
+                "code": "LOW_MATCH_RATE",
+                "severity": "warning",
+                "value": match_rate,
+                "message": "关联匹配率低于 50%。",
+            }
+        )
     if customer_key and customer_key in left:
         grain = "customer" if left[customer_key].is_unique else "order_or_event"
     else:

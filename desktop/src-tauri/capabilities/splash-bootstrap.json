@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "splash-bootstrap",
+  "description": "仅允许本地启动页读取后端状态、重试启动和打开固定日志目录。",
+  "windows": ["splash"],
+  "local": true,
+  "permissions": [
+    "allow-backend-status",
+    "allow-retry-backend",
+    "allow-open-log-directory"
+  ]
+}

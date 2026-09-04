@@ -130,9 +130,7 @@ def test_legacy_upgrade_backs_up_copies_and_keeps_old_runs_readonly(
         json.dumps({"provider": "kimi", "telemetry": False}), encoding="utf-8"
     )
     (legacy / "secrets").mkdir()
-    (legacy / "secrets" / "provider_api_key").write_text(
-        "legacy-secret-for-test", encoding="utf-8"
-    )
+    (legacy / "secrets" / "provider_api_key").write_text("legacy-secret-for-test", encoding="utf-8")
 
     result = context.migration.migrate(legacy)
     assert result["status"] == "completed"

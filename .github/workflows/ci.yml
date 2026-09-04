@@ -19,12 +19,53 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
+      - run: npm run typecheck
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
       - run: npm test
         working-directory: frontend
-      - run: npm run typecheck
+      - run: npm run format:check
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+
+  desktop-shell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+          cache-on-failure: true
+      - run: npm ci
+        working-directory: desktop
+      - run: npm run typecheck
+        working-directory: desktop
+      - run: npm run build
+        working-directory: desktop
+      - name: 生成仅用于 Rust 单元测试的后端清单夹具
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist\risk-model-agent -Force | Out-Null
+          "desktop-unit-test-placeholder" | Set-Content -Path dist\risk-model-agent\risk-model-agent.exe -Encoding ascii
+          python scripts/create_backend_manifest.py
+      - run: cargo fmt --manifest-path desktop/src-tauri/Cargo.toml -- --check
+      - run: cargo test --manifest-path desktop/src-tauri/Cargo.toml --locked
+      - run: cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - run: python scripts/verify_desktop_contract.py
 
   python-api-golden:
     runs-on: ubuntu-latest
@@ -40,7 +81,8 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install ".[dev]"
-      - run: ruff check app tests scripts
+      - run: ruff check app tests scripts run_local.py
+      - run: ruff format --check app tests scripts run_local.py
       - run: python -m pytest
         env:
           RISK_AGENT_DATA_DIR: ${{ runner.temp }}/risk-model-agent-tests

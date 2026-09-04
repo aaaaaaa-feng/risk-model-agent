@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import os
 import platform
@@ -19,12 +20,14 @@ from .paths import (
     WORKSPACE_SCHEMA,
     is_synced_path,
     read_workspace_pointer,
+    validate_workspace_root,
     workspace_marker_path,
     workspace_pointer_path,
 )
 
 
 NATIVE_PICKER_TIMEOUT_SECONDS = 60
+WINDOWS_PICKER_OUTPUT_PREFIX = "RMA_PICKER_V1:"
 _NATIVE_PICKER_LOCK = threading.Lock()
 
 
@@ -44,6 +47,22 @@ class WorkspacePickerError(RuntimeError):
             code, self._MESSAGES["WORKSPACE_NATIVE_PICKER_FAILED"]
         )
         super().__init__(code)
+
+
+def _decode_windows_picker_output(value: str) -> str:
+    """Decode the picker result without depending on a Windows console code page."""
+
+    payload = value.strip()
+    if not payload.startswith(WINDOWS_PICKER_OUTPUT_PREFIX):
+        raise WorkspacePickerError("WORKSPACE_NATIVE_PICKER_FAILED")
+    encoded_path = payload.removeprefix(WINDOWS_PICKER_OUTPUT_PREFIX)
+    try:
+        selected = base64.b64decode(encoded_path, validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError) as exc:
+        raise WorkspacePickerError("WORKSPACE_NATIVE_PICKER_FAILED") from exc
+    if not selected:
+        raise WorkspacePickerError("WORKSPACE_NATIVE_PICKER_FAILED")
+    return selected
 
 
 class WorkspaceManager:
@@ -173,9 +192,7 @@ class WorkspaceManager:
         raw = str(requested_path or "").strip()
         if not raw or len(raw) > 4096:
             raise ValueError("WORKSPACE_PATH_REQUIRED")
-        candidate = Path(raw).expanduser().resolve()
-        if candidate in {Path(candidate.anchor), Path.home().resolve()}:
-            raise ValueError("WORKSPACE_PATH_TOO_BROAD")
+        candidate = validate_workspace_root(raw)
         if candidate.exists() and not candidate.is_dir():
             raise ValueError("WORKSPACE_PATH_NOT_DIRECTORY")
         return candidate
@@ -249,27 +266,34 @@ def pick_workspace_directory() -> str | None:
                 raise WorkspacePickerError("WORKSPACE_NATIVE_PICKER_UNAVAILABLE")
             script = (
                 "$ErrorActionPreference = 'Stop'; "
-                "$utf8 = New-Object System.Text.UTF8Encoding($false); "
-                "[Console]::OutputEncoding = $utf8; $OutputEncoding = $utf8; "
+                f"$resultPrefix = '{WINDOWS_PICKER_OUTPUT_PREFIX}'; "
+                "$owner = $null; $dialog = $null; $exitCode = 1; "
+                "try { "
                 "Add-Type -AssemblyName System.Windows.Forms; "
                 "[System.Windows.Forms.Application]::EnableVisualStyles(); "
                 "$owner = New-Object System.Windows.Forms.Form; "
                 "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; "
-                "$exitCode = 1; "
-                "try { "
                 "$owner.Text = 'Risk Model Agent'; "
                 "$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen; "
                 "$owner.Size = New-Object System.Drawing.Size(1, 1); "
-                "$owner.ShowInTaskbar = $false; $owner.TopMost = $true; $owner.Opacity = 0; "
+                "$owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None; "
+                "$owner.ShowInTaskbar = $false; $owner.TopMost = $true; $owner.Opacity = 0.01; "
                 "$dialog.Description = '选择风控建模 Agent 工作文件夹'; "
                 "$dialog.ShowNewFolderButton = $true; "
                 "$null = $owner.Show(); $null = $owner.Activate(); "
                 "$choice = $dialog.ShowDialog($owner); "
                 "if ($choice -eq [System.Windows.Forms.DialogResult]::OK) { "
-                "[Console]::Out.Write($dialog.SelectedPath); $exitCode = 0 "
+                "$encodedPath = [Convert]::ToBase64String("
+                "[System.Text.Encoding]::UTF8.GetBytes($dialog.SelectedPath)); "
+                "[Console]::Out.Write($resultPrefix + $encodedPath); $exitCode = 0 "
                 "} else { $exitCode = 2 } "
-                "} catch { [Console]::Error.Write($_.Exception.Message); $exitCode = 1 } "
-                "finally { $dialog.Dispose(); $owner.Dispose() }; "
+                "} catch { "
+                "try { [Console]::Error.Write($_.Exception.ToString()) } catch {}; "
+                "$exitCode = 1 "
+                "} finally { "
+                "if ($null -ne $dialog) { $dialog.Dispose() }; "
+                "if ($null -ne $owner) { $owner.Dispose() } "
+                "}; "
                 "exit $exitCode"
             )
             encoded_script = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
@@ -336,5 +360,7 @@ def pick_workspace_directory() -> str | None:
         if cancelled:
             return None
         raise WorkspacePickerError("WORKSPACE_NATIVE_PICKER_FAILED")
+    if system == "Windows":
+        return _decode_windows_picker_output(result.stdout)
     selected = result.stdout.strip()
     return selected or None

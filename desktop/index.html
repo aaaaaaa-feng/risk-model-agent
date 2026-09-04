@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>正在启动·风控建模 Agent</title>
+    <script type="module" src="/src/splash.ts"></script>
+  </head>
+  <body>
+    <main class="splash-shell" aria-labelledby="app-title">
+      <div class="brand-mark" aria-hidden="true">
+        <span class="brand-mark__axis"></span>
+        <span class="brand-mark__curve"></span>
+      </div>
+      <section class="splash-copy">
+        <p class="eyebrow">RISK MODEL AGENT</p>
+        <h1 id="app-title">风控建模 Agent</h1>
+        <p class="subtitle">正在启动本地建模引擎；产品不会向 LLM 上传原始数据。</p>
+      </section>
+
+      <section class="startup-status" aria-live="polite" aria-atomic="true">
+        <div id="status-indicator" class="status-indicator status-indicator--working">
+          <span class="status-indicator__dot" aria-hidden="true"></span>
+          <span id="status-message">正在准备本地服务…</span>
+        </div>
+        <div class="progress-track" aria-hidden="true">
+          <span id="progress-bar" class="progress-track__bar"></span>
+        </div>
+        <p id="status-detail" class="status-detail" hidden></p>
+      </section>
+
+      <div id="failure-actions" class="failure-actions" hidden>
+        <button id="retry-button" class="button button--primary" type="button" title="重新校验并启动本地建模服务">重试</button>
+        <button id="logs-button" class="button button--quiet" type="button" title="打开本机日志目录以查看启动诊断">打开日志目录</button>
+      </div>
+
+      <footer>
+        <span>本地运行</span>
+        <span aria-hidden="true">·</span>
+        <span>安全工具白名单</span>
+        <span aria-hidden="true">·</span>
+        <span>v1.2.0</span>
+      </footer>
+    </main>
+  </body>
+</html>

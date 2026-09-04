@@ -24,6 +24,7 @@ import {
 import { useSettings, useWorkspace, type WorkspaceStatus } from "@/features/settings";
 import { errorMessage } from "@/shared/lib/format";
 import { notify } from "@/shared/lib/notify";
+import { removeUiPreference } from "@/shared/lib/uiPreferences";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
@@ -217,7 +218,7 @@ export function AppShell() {
     clearDetail();
     setRunId(null);
     clearRun();
-    localStorage.removeItem("risk-agent-project");
+    removeUiPreference("risk-agent-project");
     await Promise.all([loadProjects(), loadSettings()]);
   };
 

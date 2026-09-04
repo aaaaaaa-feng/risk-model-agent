@@ -7,11 +7,13 @@ on:
     paths:
       - "app/**"
       - "frontend/**"
+      - "desktop/**"
       - "packaging/**"
       - "scripts/**"
       - "run_local.py"
       - "pyproject.toml"
       - ".github/workflows/package.yml"
+      - ".github/workflows/ci.yml"
 
 permissions:
   contents: read
@@ -44,18 +46,40 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os == 'Windows'
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        if: runner.os == 'Windows'
+        with:
+          workspaces: desktop/src-tauri -> target
+          cache-on-failure: true
       - name: Verify runner architecture
         shell: bash
         run: python -c "import platform; expected = 'arm64' if platform.system() == 'Darwin' else 'AMD64'; actual = platform.machine(); print(actual); assert actual == expected, (actual, expected)"
       - run: npm ci
+        working-directory: frontend
+      - run: npm run typecheck
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+      - run: npm test
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
       - run: python -m pip install --upgrade pip
       - run: python -m pip install ".[package]"
       - run: python scripts/verify_packaging.py
+      - run: python scripts/verify_desktop_contract.py
       - run: python -m PyInstaller packaging/risk_model_agent.spec --noconfirm --clean
+      - name: 生成并固定 PyInstaller 后端完整性清单
+        if: runner.os == 'Windows'
+        run: python scripts/create_backend_manifest.py
       - name: 审计冻结目录体积与依赖边界
         shell: bash
         run: >-
@@ -72,7 +96,15 @@ jobs:
         if: runner.os == 'Windows'
         timeout-minutes: 3
         shell: pwsh
-        run: .\dist\risk-model-agent\risk-model-agent.exe --internal-package-self-test
+        run: |
+          $SelfTest = Start-Process `
+            -FilePath .\dist\risk-model-agent\risk-model-agent.exe `
+            -ArgumentList @("--internal-package-self-test") `
+            -Wait `
+            -PassThru
+          if ($SelfTest.ExitCode -ne 0) {
+            throw "Windows 冻结包内部自检失败，退出码 $($SelfTest.ExitCode)。"
+          }
       - name: Smoke test macOS package
         if: runner.os == 'macOS'
         shell: bash
@@ -104,10 +136,19 @@ jobs:
           .\scripts\smoke_windows_service.ps1
           -ExecutablePath dist\risk-model-agent\risk-model-agent.exe
           -DataDirectory (Join-Path $env:RUNNER_TEMP "risk-model-agent-data")
-      - name: Build Windows installer
+      - name: 下载并校验真实 1.1.2 Inno 迁移夹具
         if: runner.os == 'Windows'
         shell: pwsh
-        run: .\scripts\compile_windows_installer.ps1
+        run: .\scripts\prepare_legacy_inno_fixture.ps1
+      - name: 构建 Tauri Windows 客户端与 NSIS 安装包
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 30
+        run: .\scripts\build_windows_tauri.ps1
+      - name: 收集并校验唯一正式 Tauri 安装器
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\collect_tauri_installer.ps1
       - name: 执行 Windows 安装包体积硬门禁
         if: runner.os == 'Windows'
         shell: pwsh
@@ -120,10 +161,13 @@ jobs:
           --maximum-mib 180
           --minimum-reduction-percent 25
           --enforce
-      - name: Install, launch, model, score and uninstall Windows installer
+      - name: 迁移、首次工作区、恢复、建模评分并卸载 Tauri 客户端
         if: runner.os == 'Windows'
         shell: pwsh
-        run: .\scripts\smoke_windows_installer.ps1
+        timeout-minutes: 30
+        run: >-
+          .\scripts\smoke_windows_tauri_installer.ps1
+          -LegacyInstallerPath dist\fixtures\legacy-inno\RiskModelAgent-1.1.2-windows-x64-setup.exe
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}

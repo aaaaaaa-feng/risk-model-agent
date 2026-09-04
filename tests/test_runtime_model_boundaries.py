@@ -12,6 +12,8 @@ from app.notebooks.runtime import (
     JupyterNotebookRuntime,
     NotebookExecution,
     NotebookRuntime,
+    _kernel_launch_options,
+    _notebook_kernel_environment,
     notebook_runtime_capability,
 )
 from app.orchestration.contracts import TOOL_NODES
@@ -154,8 +156,11 @@ def test_notebook_runtime_cleans_started_kernel_when_ready_check_fails(monkeypat
             assert kernel_name == "python3"
             self.client = FakeClient()
 
-        def start_kernel(self, cwd: str):
+        def start_kernel(self, cwd: str, **options):
             assert cwd == str(tmp_path)
+            environment = options.pop("env")
+            assert "RISK_AGENT_API_KEY" not in environment
+            assert options == {}
             events.append("kernel_started")
 
         def blocking_client(self):
@@ -181,6 +186,28 @@ def test_notebook_runtime_cleans_started_kernel_when_ready_check_fails(monkeypat
         "kernel_stopped",
     ]
     assert "project_cleanup" not in runtime._sessions
+
+
+def test_notebook_runtime_hides_windows_kernel_console():
+    assert _kernel_launch_options("win32") == {"creationflags": 0x0800_0000}
+    assert _kernel_launch_options("darwin") == {}
+
+
+def test_notebook_kernel_does_not_inherit_control_or_provider_secrets():
+    environment = _notebook_kernel_environment(
+        {
+            "PATH": "safe-path",
+            "RISK_AGENT_API_KEY": "provider-secret",
+            "RISK_AGENT_DESKTOP_TOKEN": "control-secret",
+            "RISK_AGENT_DESKTOP_BOOTSTRAP_TOKEN": "bootstrap-secret",
+            "RISK_AGENT_BACKEND_LOG_PATH": "internal-log",
+            "RISK_AGENT_INSTALL_DIR": "internal-install",
+            "OPENAI_API_KEY": "external-secret",
+            "CUSTOM_TOKEN": "custom-secret",
+        }
+    )
+
+    assert environment == {"PATH": "safe-path"}
 
 
 def test_training_preserves_explicit_evidence_for_unavailable_candidates(monkeypatch):

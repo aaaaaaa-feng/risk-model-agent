@@ -6,9 +6,10 @@
     <meta name="color-scheme" content="light dark" />
     <title>风控建模 Agent</title>
     <script>
-      /* 首帧前写入 data-theme,避免主题闪屏;与 src/hooks/useTheme.ts 的存储键保持一致 */
+      /* 首帧前写入 data-theme；Cookie 跨随机端口，localStorage 兼容旧版本。 */
       try {
-        var stored = localStorage.getItem("risk-agent-theme");
+        var match = document.cookie.match(/(?:^|; )rma_ui_risk-agent-theme=([^;]*)/);
+        var stored = match ? decodeURIComponent(match[1]) : localStorage.getItem("risk-agent-theme");
         document.documentElement.dataset.theme =
           stored === "light" || stored === "dark"
             ? stored

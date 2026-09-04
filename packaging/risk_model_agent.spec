@@ -1,6 +1,7 @@
 # Build with: python -m PyInstaller packaging/risk_model_agent.spec --noconfirm --clean
 # PyInstaller 在执行 spec 时注入以下构建全局量。
 # ruff: noqa: F821
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
@@ -127,7 +128,10 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=True,
+    # Windows 后端只作为 Tauri sidecar 运行。windowed 子系统同时保证其
+    # multiprocessing worker 与 Jupyter kernel 不会各自创建 conhost 黑框；
+    # macOS 仍保留可直接执行的诊断入口。
+    console=sys.platform != "win32",
     exclude_binaries=True,
 )
 coll = COLLECT(

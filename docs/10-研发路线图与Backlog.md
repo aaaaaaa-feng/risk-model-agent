@@ -42,11 +42,20 @@
 - 机构自定义 Prompt/规则版本、Provider 路由和成本策略。
 - 经过安全评审的 MCP 适配器；仍必须映射到强类型 Registry。
 
-## 5. 明确后置
+## 5. V1.2 Windows 客户端化
+
+- Tauri 2 只承担启动页、窗口和冻结后端生命周期，React/FastAPI/Agent/Worker 业务能力保持单一实现。
+- 主工作台在应用 WebView 内运行；Windows release 使用 GUI subsystem，后端使用无控制台子进程，不再弹出终端或系统浏览器。
+- 随机 loopback 端口、一次性启动凭据、后端版本合同、内置资源 manifest/hash 和最小窗口 capability 共同构成桌面边界。
+- 从固定 AppId 的旧 Inno 安装检测并调用原卸载器；升级失败即停止，不扫描其他软件，不删除控制目录、工作区和项目数据。
+- 正式候选必须由 Windows Runner 证明安装、升级、启动、八模型与 Notebook、完整建模评分、退出清理、卸载和数据保留；本机 macOS 编译不能替代该证据。
+- 当前使用 WebView2 小型下载引导模式；目标机缺少 WebView2 时安装需要联网。Authenticode 签名仍后置，未签名包可能触发 SmartScreen。
+
+## 6. 明确后置
 
 多分类/回归/时序、任意 Agent 工具发现、云端原始数据处理、远程任意代码执行、未隔离 Notebook、自动替代业务审批均不进入当前 V1。
 
-## 6. 研发纪律
+## 7. 研发纪律
 
 - 先读正式规格和现状，再计划、修改、测试、检查 diff、提交。
 - 不把合成演示、框架测试、CI 候选包或供应商文档当成生产验证。

@@ -36,27 +36,42 @@ def test_server_uses_h11_when_upgrade_leaves_partial_httptools(monkeypatch):
 
     selected: dict[str, Any] = {}
 
-    def inspect_run(server_app: Any, **options: Any) -> None:
-        config = uvicorn.Config(
-            server_app,
-            http=options["http"],
-            loop=options["loop"],
-            log_config=None,
-        )
+    def inspect_run(server: uvicorn.Server) -> None:
+        config = server.config
+        config.log_config = None
         config.load()
         selected.update(
             {
-                "http": options["http"],
-                "loop": options["loop"],
+                "http": config.http,
+                "loop": config.loop,
                 "protocol": config.http_protocol_class,
+                "access_log": config.access_log,
             }
         )
 
     monkeypatch.setenv("RISK_AGENT_OPEN_BROWSER", "0")
-    monkeypatch.setattr(main_module.uvicorn, "run", inspect_run)
+    monkeypatch.delenv("RISK_AGENT_DESKTOP_TOKEN", raising=False)
+    monkeypatch.setattr(main_module.app.state, "desktop_mode", False)
+    monkeypatch.setattr(main_module.uvicorn.Server, "run", inspect_run)
 
     main_module.run()
 
     assert selected["http"] == "h11"
     assert selected["loop"] == "asyncio"
     assert selected["protocol"].__module__ == "uvicorn.protocols.http.h11_impl"
+    assert selected["access_log"] is True
+
+
+def test_desktop_server_disables_access_log_for_bootstrap_query(monkeypatch):
+    selected: dict[str, Any] = {}
+
+    def inspect_run(server: uvicorn.Server) -> None:
+        selected["access_log"] = server.config.access_log
+
+    monkeypatch.setenv("RISK_AGENT_OPEN_BROWSER", "0")
+    monkeypatch.setattr(main_module.app.state, "desktop_mode", True)
+    monkeypatch.setattr(main_module.uvicorn.Server, "run", inspect_run)
+
+    main_module.run()
+
+    assert selected["access_log"] is False

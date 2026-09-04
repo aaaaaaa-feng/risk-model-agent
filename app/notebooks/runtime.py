@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import queue
+import sys
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -9,6 +11,8 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+
+from app.core.windows_process import CREATE_NO_WINDOW
 
 
 def _module_available(name: str) -> bool:
@@ -128,7 +132,11 @@ class JupyterNotebookRuntime(NotebookRuntime):
             manager = KernelManager(kernel_name="python3")
             client = None
             try:
-                manager.start_kernel(cwd=str(working_directory))
+                manager.start_kernel(
+                    cwd=str(working_directory),
+                    env=_notebook_kernel_environment(),
+                    **_kernel_launch_options(),
+                )
                 client = manager.blocking_client()
                 client.start_channels()
                 client.wait_for_ready(timeout=30)
@@ -219,3 +227,41 @@ def _nbformat() -> Any:
     except ImportError as exc:  # pragma: no cover - dependency contract
         raise RuntimeError("NBFORMAT_DEPENDENCY_REQUIRED") from exc
     return nbformat
+
+
+def _kernel_launch_options(platform_name: str | None = None) -> dict[str, Any]:
+    """确保 Windows 冻结版 Notebook kernel 不创建额外控制台窗口。"""
+
+    current = platform_name or sys.platform
+    if current != "win32":
+        return {}
+    # subprocess.CREATE_NO_WINDOW 只在 Windows Python 暴露；常量值属于稳定的
+    # Win32 CreateProcess 标志，显式写出也便于在非 Windows CI 做契约测试。
+    return {"creationflags": CREATE_NO_WINDOW}
+
+
+def _notebook_kernel_environment(
+    source: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Copy the runtime environment without app/provider credentials.
+
+    Notebook code is deliberately user-controlled and is not a sandbox, but it
+    still must not receive desktop control tokens or Provider secrets merely
+    because the parent process owns them. Users can explicitly configure any
+    environment needed by their own Notebook code.
+    """
+
+    environment = dict(source if source is not None else os.environ)
+    internal_names = {
+        "RISK_AGENT_API_KEY",
+        "RISK_AGENT_BACKEND_LOG_PATH",
+        "RISK_AGENT_DESKTOP_BOOTSTRAP_TOKEN",
+        "RISK_AGENT_DESKTOP_TOKEN",
+        "RISK_AGENT_INSTALL_DIR",
+    }
+    secret_suffixes = ("_API_KEY", "_TOKEN", "_SECRET", "_PASSWORD")
+    for name in tuple(environment):
+        upper = name.upper()
+        if upper in internal_names or upper.endswith(secret_suffixes):
+            environment.pop(name, None)
+    return environment

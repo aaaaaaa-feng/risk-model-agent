@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="风控建模 Agent">
+  <defs>
+    <linearGradient id="surface" x1="130" y1="80" x2="900" y2="940" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1B2420"/>
+      <stop offset="1" stop-color="#0B0F0D"/>
+    </linearGradient>
+    <linearGradient id="signal" x1="276" y1="696" x2="774" y2="298" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5DBA7A"/>
+      <stop offset="1" stop-color="#A2E4B6"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="218" fill="url(#surface)"/>
+  <rect x="82" y="82" width="860" height="860" rx="168" fill="none" stroke="#B2DEC0" stroke-opacity=".18" stroke-width="18"/>
+  <path d="M262 250v512h520" fill="none" stroke="#DFE9E2" stroke-opacity=".38" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M310 674 438 552l112 58 202-260" fill="none" stroke="url(#signal)" stroke-width="66" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="438" cy="552" r="35" fill="#101713" stroke="#98DEAC" stroke-width="24"/>
+  <circle cx="752" cy="350" r="35" fill="#101713" stroke="#B2E9C1" stroke-width="24"/>
+</svg>

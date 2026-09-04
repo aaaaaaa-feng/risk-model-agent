@@ -5,7 +5,13 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import average_precision_score, brier_score_loss, log_loss, roc_auc_score, roc_curve
+from sklearn.metrics import (
+    average_precision_score,
+    brier_score_loss,
+    log_loss,
+    roc_auc_score,
+    roc_curve,
+)
 
 
 def binary_metrics(y_true: np.ndarray, probability: np.ndarray) -> dict[str, Any]:
@@ -78,11 +84,15 @@ def lift_table(y_true: np.ndarray, probability: np.ndarray, bins: int = 10) -> l
     return rows
 
 
-def calibration_table(y_true: np.ndarray, probability: np.ndarray, bins: int = 10) -> list[dict[str, Any]]:
+def calibration_table(
+    y_true: np.ndarray, probability: np.ndarray, bins: int = 10
+) -> list[dict[str, Any]]:
     frame = pd.DataFrame({"target": y_true, "probability": probability})
     frame["bucket"] = pd.cut(frame["probability"], np.linspace(0, 1, bins + 1), include_lowest=True)
     grouped = frame.groupby("bucket", observed=True).agg(
-        count=("target", "size"), actual_rate=("target", "mean"), predicted_rate=("probability", "mean")
+        count=("target", "size"),
+        actual_rate=("target", "mean"),
+        predicted_rate=("probability", "mean"),
     )
     return [
         {
