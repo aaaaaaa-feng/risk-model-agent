@@ -12,6 +12,7 @@ import pytest
 from app.evaluation.contracts import EvalCase, EvalGate, EvalSuite
 from app.evaluation.harness import EvaluationHarness, _evaluate_gate, _summarize
 from app.evaluation.adapter import run_eval_case
+from app.evaluation.integrity import trace_errors
 from app.governance.manifest import canonical_hash
 
 
@@ -129,6 +130,13 @@ def test_baseline_pairs_trials_by_identity_and_rejects_missing_or_tampered_evide
         )
         trace = Path(results[0]["trace_bundle_path"])
         original = trace.read_text(encoding="utf-8")
+        incomplete = json.loads(original)
+        assert len(incomplete["events"]) > 2
+        incomplete["events"].pop(1)
+        assert trace_errors(incomplete, results[0]) == ["EVAL_TRACE_EVENT_SEQUENCE_INVALID"]
+        truncated = json.loads(original)
+        truncated["events"].pop()
+        assert trace_errors(truncated, results[0]) == ["EVAL_TRACE_EVENT_SEQUENCE_INVALID"]
         bundle = json.loads(original)
         bundle["manifest"]["provider"]["model"] = "tampered"
         trace.write_text(json.dumps(bundle), encoding="utf-8")

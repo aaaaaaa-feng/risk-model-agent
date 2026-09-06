@@ -241,6 +241,7 @@ class TraceService:
                     "stage",
                     "node",
                     "mode",
+                    "seq",
                     "error",
                     "started_at",
                     "finished_at",

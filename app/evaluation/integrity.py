@@ -128,8 +128,16 @@ def _validate_trace(bundle: dict[str, Any], result: dict[str, Any]) -> None:
         for key in ("evidence", "usage", "security"):
             validate_safe_evidence(span.get(key) or {})
     sequences = [event["sequence"] for event in bundle["events"]]
-    if not sequences or sequences != sorted(set(sequences)):
+    if (
+        not sequences
+        or type(run.get("seq")) is not int
+        or run["seq"] != len(sequences)
+        or any(type(value) is not int or value != index for index, value in enumerate(sequences, 1))
+        or len({event["id"] for event in bundle["events"]}) != len(sequences)
+    ):
         raise ValueError("EVAL_TRACE_EVENT_SEQUENCE_INVALID")
+    if bundle["events"][-1]["status"] != terminal:
+        raise ValueError("EVAL_TRACE_EVENT_TERMINAL_MISMATCH")
     for event in bundle["events"]:
         evidence = event.get("evidence") or {}
         validate_safe_evidence(evidence)
