@@ -42,7 +42,7 @@ export function ReportView({ project, run }: Props) {
       .then((value) => {
         if (!active) return;
         setModels(value.models);
-        setModelId(value.models[0]?.id || "");
+        setModelId(value.models.find((model) => model.run_id === run?.id)?.id || "");
       })
       .catch((error) => {
         if (active && !isAbort(error)) notify(errorMessage(error, { context: "model" }), true);
@@ -373,7 +373,14 @@ export function ReportView({ project, run }: Props) {
         </div>
         <label>
           模型版本
-          <Select value={modelId} onValueChange={setModelId}>
+          <Select
+            value={modelId}
+            disabled={busy}
+            onValueChange={(value) => {
+              setModelId(value);
+              setScoreJob(null);
+            }}
+          >
             <SelectTrigger>
               <SelectValue placeholder="选择模型" />
             </SelectTrigger>

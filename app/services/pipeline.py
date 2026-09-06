@@ -21,7 +21,7 @@ from app.governance.tracing import TraceService
 from app.providers.gateway import ProviderGateway
 from app.tooling.registry import ToolRegistry
 from app.workers.binning import apply_manual_binning, fit_binning
-from app.workers.io import plan_resources, read_table
+from app.workers.io import plan_resources
 from app.workers.modeling import ModelBundle, available_models, recommend_models, train_candidates
 from app.workers.package_runtime import (
     SKOPS_POLICY_VERSION,
@@ -586,7 +586,7 @@ class RunPipeline:
         report_run = {**run, "status": "succeeded", "stage": "completed"}
         report = self.artifacts.build_structured_report(report_run, state, frame)
         report["artifacts"] = [
-            {"name": f"{model_version['name']}-model-package.zip", "kind": "model_package"},
+            {"name": model_artifact["name"], "kind": "model_package"},
         ]
         report, report_artifacts = self.artifacts.write_report_artifacts(report_run, report)
         return {
@@ -604,15 +604,13 @@ class RunPipeline:
         return (
             task,
             dataset,
-            read_table(Path(dataset["stored_path"]), dataset.get("sheet"), memory_budget_mb=budget),
+            self.catalog.read_verified_frame(dataset, memory_budget_mb=budget),
         )
 
     def _working_frame(self, state: dict[str, Any]) -> pd.DataFrame:
         dataset = self.catalog.require("dataset_versions", state["working_dataset_version_id"])
         budget = SettingsStore(self.paths).load().memory_budget_mb
-        return read_table(
-            Path(dataset["stored_path"]), dataset.get("sheet"), memory_budget_mb=budget
-        )
+        return self.catalog.read_verified_frame(dataset, memory_budget_mb=budget)
 
     def _reviewer(self, run_id: str) -> IndependentReviewer:
         return self.reviewer_factory(self._gateway(run_id))

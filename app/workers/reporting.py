@@ -245,6 +245,10 @@ def _finish_sheet(sheet: Any) -> None:
         sheet.column_dimensions[get_column_letter(column_cells[0].column)].width = width
     for row in sheet.iter_rows():
         for cell in row:
+            # Report values are data, including user-provided project/column names.
+            # Preserve the exact visible text without letting Excel execute formulas.
+            if cell.data_type == "f":
+                cell.data_type = "s"
             cell.alignment = Alignment(vertical="top", wrap_text=True)
 
 

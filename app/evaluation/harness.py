@@ -8,21 +8,28 @@ the product Run graph and it never receives raw customer files.
 from __future__ import annotations
 
 import json
+import os
 import secrets
 import threading
+import tempfile
+import weakref
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import psutil
+
 from app.core.paths import AppPaths
 
 from .adapter import run_eval_case
 from .contracts import EvalResult, EvalRun, EvalSuite
-from app.governance.manifest import compare_manifests
+from app.governance.manifest import canonical_hash, compare_manifests
+from .integrity import trace_errors, validate_identifier
 
 
 HARNESS_SCHEMA = "risk-agent-eval-harness/v1"
+_LIVE_HARNESSES: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
 
 class EvaluationHarness:
@@ -30,7 +37,7 @@ class EvaluationHarness:
 
     def __init__(self, paths: AppPaths, *, max_workers: int = 1):
         self.paths = paths.ensure()
-        self.root = self.paths.evaluations
+        self.root = self.paths.evaluations.resolve()
         self.suite_root = self.root / "suites"
         self.run_root = self.root / "runs"
         self.suite_root.mkdir(parents=True, exist_ok=True)
@@ -38,9 +45,34 @@ class EvaluationHarness:
         self._executor = ThreadPoolExecutor(max_workers=max(1, min(max_workers, 2)))
         self._futures: dict[str, Future[dict[str, Any]]] = {}
         self._lock = threading.RLock()
+        self._cancel_events: dict[str, threading.Event] = {}
+        self._closed = False
+        self._owner_token = secrets.token_hex(16)
+        _LIVE_HARNESSES[self._owner_token] = self
+        # Harness runs cannot be resumed from an arbitrary partially executed trial.
+        # Preserve all evidence and mark the interruption instead of showing a live run.
+        for record in self.list_runs():
+            if record.get("status") in {"queued", "running"} and not _owner_alive(record):
+                record.update(
+                    status="failed", finished_at=_now(), error={"code": "EVAL_PROCESS_INTERRUPTED"}
+                )
+                self._write(self._run_path(record["run_id"]), record)
 
     def shutdown(self) -> None:
+        with self._lock:
+            self._closed = True
+            for event in self._cancel_events.values():
+                event.set()
         self._executor.shutdown(wait=True, cancel_futures=False)
+        _LIVE_HARNESSES.pop(self._owner_token, None)
+
+    def cancel_run(self, run_id: str) -> dict[str, Any]:
+        record = self.get_run(run_id)
+        with self._lock:
+            event = self._cancel_events.get(run_id)
+            if event is not None:
+                event.set()
+        return record
 
     def list_suites(self) -> list[dict[str, Any]]:
         return [
@@ -52,14 +84,33 @@ class EvaluationHarness:
     def save_suite(self, suite: EvalSuite | dict[str, Any]) -> dict[str, Any]:
         parsed = suite if isinstance(suite, EvalSuite) else EvalSuite.model_validate(suite)
         payload = parsed.model_dump(mode="json")
-        self._write(self._suite_path(parsed.suite_id), payload)
+        payload["suite_sha256"] = canonical_hash(payload)
+        with self._lock:
+            path = self._suite_path(parsed.suite_id)
+            if path.exists():
+                existing = self.get_suite(parsed.suite_id)
+                if existing["suite_sha256"] != payload["suite_sha256"]:
+                    raise ValueError("EVAL_SUITE_IMMUTABLE")
+                return existing
+            try:
+                self._write(path, payload, exclusive=True)
+            except FileExistsError:
+                existing = self.get_suite(parsed.suite_id)
+                if existing["suite_sha256"] != payload["suite_sha256"]:
+                    raise ValueError("EVAL_SUITE_IMMUTABLE") from None
+                return existing
         return payload
 
     def get_suite(self, suite_id: str) -> dict[str, Any]:
         path = self._suite_path(suite_id)
         if not path.is_file():
             raise KeyError(f"EVAL_SUITE_NOT_FOUND: {suite_id}")
-        return self._read(path)
+        stored = self._read(path)
+        payload = EvalSuite.model_validate(stored).model_dump(mode="json")
+        digest = canonical_hash(payload)
+        if stored.get("suite_sha256", digest) != digest:
+            raise ValueError("EVAL_SUITE_CHECKSUM_MISMATCH")
+        return {**payload, "suite_sha256": digest}
 
     def list_runs(self, suite_id: str | None = None) -> list[dict[str, Any]]:
         values = []
@@ -93,25 +144,10 @@ class EvaluationHarness:
         provider: dict[str, Any] | None = None,
         baseline_run_id: str | None = None,
     ) -> dict[str, Any]:
-        suite = EvalSuite.model_validate(self.get_suite(suite_id))
-        if baseline_run_id:
-            baseline = self.get_run(baseline_run_id)
-            if baseline.get("suite_id") != suite_id:
-                raise ValueError("EVAL_BASELINE_SUITE_MISMATCH")
-        run_id = f"eval_{secrets.token_hex(8)}"
-        started = _now()
-        record = EvalRun(
-            run_id=run_id,
-            suite_id=suite.suite_id,
-            suite_version=suite.version,
-            status="queued",
-            started_at=started,
-            baseline_run_id=baseline_run_id,
-        ).model_dump(mode="json")
-        self._write(self._run_path(run_id), record)
         with self._lock:
-            self._futures[run_id] = self._executor.submit(
-                self._execute, run_id, suite, provider, baseline_run_id
+            suite, record = self._prepare_run(suite_id, baseline_run_id)
+            self._futures[record["run_id"]] = self._executor.submit(
+                self._execute, record["run_id"], suite, provider, baseline_run_id
             )
         return record
 
@@ -122,22 +158,48 @@ class EvaluationHarness:
         provider: dict[str, Any] | None = None,
         baseline_run_id: str | None = None,
     ) -> dict[str, Any]:
+        with self._lock:
+            suite, record = self._prepare_run(suite_id, baseline_run_id)
+        return self._execute(record["run_id"], suite, provider, baseline_run_id)
+
+    def _prepare_run(
+        self, suite_id: str, baseline_run_id: str | None
+    ) -> tuple[EvalSuite, dict[str, Any]]:
+        if self._closed:
+            raise ValueError("EVAL_HARNESS_CLOSED")
         suite = EvalSuite.model_validate(self.get_suite(suite_id))
+        snapshot = suite.model_dump(mode="json")
+        digest = canonical_hash(snapshot)
         if baseline_run_id:
             baseline = self.get_run(baseline_run_id)
             if baseline.get("suite_id") != suite_id:
+                raise ValueError("EVAL_BASELINE_SUITE_MISMATCH")
+            if baseline.get("status") != "completed":
+                raise ValueError("EVAL_BASELINE_NOT_COMPLETED")
+            if (
+                baseline.get("suite_sha256") != digest
+                or canonical_hash(baseline.get("suite_snapshot")) != digest
+            ):
                 raise ValueError("EVAL_BASELINE_SUITE_MISMATCH")
         run_id = f"eval_{secrets.token_hex(8)}"
         record = EvalRun(
             run_id=run_id,
             suite_id=suite.suite_id,
             suite_version=suite.version,
+            suite_sha256=digest,
+            suite_snapshot=snapshot,
             status="queued",
             started_at=_now(),
             baseline_run_id=baseline_run_id,
         ).model_dump(mode="json")
+        record.update(
+            owner_pid=os.getpid(),
+            owner_started_at=psutil.Process().create_time(),
+            owner_token=self._owner_token,
+        )
         self._write(self._run_path(run_id), record)
-        return self._execute(run_id, suite, provider, baseline_run_id)
+        self._cancel_events[run_id] = threading.Event()
+        return suite, record
 
     def _execute(
         self,
@@ -157,18 +219,28 @@ class EvaluationHarness:
         try:
             for case in suite.cases:
                 for trial_number in range(1, suite.trials + 1):
+                    if self._cancel_events[run_id].is_set():
+                        raise InterruptedError("EVAL_CANCELLED")
                     trial_id = f"trial_{trial_number:03d}"
                     result = run_eval_case(
                         case=case,
                         trial_id=trial_id,
                         artifact_root=run_path.parent / "artifacts",
                         provider=provider,
+                        cancel_event=self._cancel_events[run_id],
                     )
                     parsed = EvalResult.model_validate(result).model_dump(mode="json")
                     destination = result_dir / f"{case.case_id}__{trial_id}.json"
+                    parsed.update(
+                        category=case.category,
+                        severity=case.severity,
+                        case_config_sha256=canonical_hash(case.model_dump(mode="json")),
+                    )
                     self._write(destination, parsed)
                     result_paths.append(str(destination))
-                    results.append({**parsed, "category": case.category, "severity": case.severity})
+                    results.append(parsed)
+            if self._cancel_events[run_id].is_set():
+                raise InterruptedError("EVAL_CANCELLED")
             summary = _summarize(results, suite)
             gate = _evaluate_gate(summary, suite)
             comparison = None
@@ -196,15 +268,21 @@ class EvaluationHarness:
         except Exception as exc:
             record.update(
                 {
-                    "status": "failed",
+                    "status": "cancelled" if isinstance(exc, InterruptedError) else "failed",
                     "finished_at": _now(),
                     "result_paths": result_paths,
-                    "error": {"code": str(exc).split(":", 1)[0], "type": type(exc).__name__},
+                    "error": {
+                        "code": "EVAL_CANCELLED"
+                        if isinstance(exc, InterruptedError)
+                        else "EVAL_EXECUTION_FAILED",
+                        "type": type(exc).__name__,
+                    },
                 }
             )
         self._write(run_path, record)
         with self._lock:
             self._futures.pop(run_id, None)
+            self._cancel_events.pop(run_id, None)
         return record
 
     def _compare_baseline(
@@ -214,19 +292,50 @@ class EvaluationHarness:
         candidate_results: list[dict[str, Any]],
     ) -> dict[str, Any]:
         baseline = self.get_run(baseline_run_id)
-        baseline_results = [self._read(Path(path)) for path in baseline.get("result_paths") or []]
+        baseline_results = self.list_results(baseline_run_id)
+        expected_suite = EvalSuite.model_validate(baseline["suite_snapshot"])
+        expected_keys = {
+            (case.case_id, f"trial_{number:03d}")
+            for case in expected_suite.cases
+            for number in range(1, expected_suite.trials + 1)
+        }
+        left_index = {
+            (item.get("case_id"), item.get("trial_id")): item for item in baseline_results
+        }
+        right_index = {
+            (item.get("case_id"), item.get("trial_id")): item for item in candidate_results
+        }
+        paired = (
+            len(left_index) == len(baseline_results)
+            and len(right_index) == len(candidate_results)
+            and set(left_index) == set(right_index) == expected_keys
+        )
         manifest_comparisons: list[dict[str, Any]] = []
-        for left, right in zip(baseline_results, candidate_results, strict=False):
+        for key in sorted(set(left_index) & set(right_index)):
+            left, right = left_index[key], right_index[key]
             left_manifest = _load_manifest(left)
             right_manifest = _load_manifest(right)
-            if left_manifest is not None and right_manifest is not None:
-                manifest_comparisons.append(compare_manifests(left_manifest, right_manifest))
+            valid = not trace_errors(_load_bundle(left), left) and not trace_errors(
+                _load_bundle(right), right
+            )
+            comparison = (
+                compare_manifests(left_manifest, right_manifest)
+                if valid and left_manifest is not None and right_manifest is not None
+                else {
+                    "comparable": False,
+                    "differences": [],
+                    "error": "EVAL_BASELINE_TRACE_INVALID",
+                }
+            )
+            manifest_comparisons.append({"case_id": key[0], "trial_id": key[1], **comparison})
         baseline_summary = baseline.get("summary") or {}
         return {
             "schema_version": "risk-agent-eval-baseline-diff/v1",
             "baseline_run_id": baseline_run_id,
-            "comparable": bool(manifest_comparisons)
+            "comparable": paired
+            and bool(manifest_comparisons)
             and all(item["comparable"] for item in manifest_comparisons),
+            "trial_keys_match": paired,
             "expectation_rate_delta": _delta(
                 candidate_summary.get("outcome", {}).get("expectation_rate"),
                 baseline_summary.get("outcome", {}).get("expectation_rate"),
@@ -240,20 +349,40 @@ class EvaluationHarness:
 
     def _suite_path(self, suite_id: str) -> Path:
         _validate_identifier(suite_id, "EVAL_SUITE_ID_INVALID")
-        return self.suite_root / f"{suite_id}.json"
+        path = self.suite_root / f"{suite_id}.json"
+        if not path.resolve().is_relative_to(self.suite_root.resolve()):
+            raise ValueError("EVAL_SUITE_PATH_INVALID")
+        return path
 
     def _run_path(self, run_id: str) -> Path:
         _validate_identifier(run_id, "EVAL_RUN_ID_INVALID")
-        return self.run_root / run_id / "run.json"
+        path = self.run_root / run_id / "run.json"
+        if not path.resolve().is_relative_to(self.run_root.resolve()):
+            raise ValueError("EVAL_RUN_PATH_INVALID")
+        return path
 
     @staticmethod
-    def _write(path: Path, payload: dict[str, Any]) -> None:
+    def _write(path: Path, payload: dict[str, Any], *, exclusive: bool = False) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
-        )
-        temporary.replace(path)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix=".eval-",
+            suffix=".tmp",
+            dir=path.parent,
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            json.dump(
+                payload, stream, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False
+            )
+        try:
+            if exclusive:
+                os.link(temporary, path)
+            else:
+                temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     @staticmethod
     def _read(path: Path) -> dict[str, Any]:
@@ -270,11 +399,43 @@ def _summarize(results: list[dict[str, Any]], suite: EvalSuite) -> dict[str, Any
     total = len(results)
     if not total:
         raise ValueError("EVAL_SUITE_EMPTY")
-    met = sum(bool(item.get("expectation_met")) for item in results)
+    case_index = {case.case_id: case for case in suite.cases}
+    expected_keys = {
+        (case.case_id, f"trial_{number:03d}")
+        for case in suite.cases
+        for number in range(1, suite.trials + 1)
+    }
+    actual_keys = [(item.get("case_id"), item.get("trial_id")) for item in results]
+    expectations = [
+        bool(item.get("expectation_met"))
+        and not item.get("error")
+        and item.get("terminal_state")
+        == (
+            case_index[item["case_id"]].expected_terminal_state
+            if item.get("case_id") in case_index
+            else None
+        )
+        for item in results
+    ]
+    met = sum(expectations)
     errors = sum(bool(item.get("error")) for item in results)
     security_events = sum(bool(item.get("security_events")) for item in results)
     traces = [_load_bundle(item) for item in results]
-    trace_complete = sum(_trace_is_complete(bundle) for bundle in traces if bundle is not None)
+    integrity_errors = [
+        trace_errors(
+            bundle,
+            {
+                **item,
+                "case_config_sha256": canonical_hash(
+                    case_index[item["case_id"]].model_dump(mode="json")
+                ),
+            }
+            if item.get("case_id") in case_index
+            else item,
+        )
+        for item, bundle in zip(results, traces, strict=True)
+    ]
+    trace_complete = sum(not errors for errors in integrity_errors)
     trace_count = sum(bundle is not None for bundle in traces)
     tokens = [int((item.get("usage") or {}).get("total_tokens") or 0) for item in results]
     durations = [_trace_duration(bundle) for bundle in traces if bundle is not None]
@@ -294,6 +455,25 @@ def _summarize(results: list[dict[str, Any]], suite: EvalSuite) -> dict[str, Any
         "suite_version": suite.version,
         "cases": total,
         "trials": suite.trials,
+        "integrity": {
+            "trial_keys_match": len(actual_keys) == len(set(actual_keys))
+            and set(actual_keys) == expected_keys,
+            "trace_valid": all(
+                not errors or (bundle is None and not suite.gate.require_trace_for_each_case)
+                for errors, bundle in zip(integrity_errors, traces, strict=True)
+            ),
+            "trace_errors": [
+                {"case_id": item.get("case_id"), "trial_id": item.get("trial_id"), "codes": errors}
+                for item, errors in zip(results, integrity_errors, strict=True)
+                if errors
+            ],
+            "critical_cases_passed": all(
+                matched
+                for item, matched in zip(results, expectations, strict=True)
+                if item.get("case_id") in case_index
+                and case_index[item["case_id"]].severity in {"high", "critical"}
+            ),
+        },
         "outcome": {
             "expectation_rate": _ratio(met, total),
             "error_rate": _ratio(errors, total),
@@ -358,6 +538,14 @@ def _evaluate_gate(summary: dict[str, Any], suite: EvalSuite) -> dict[str, Any]:
             "passed": risk["security_event_rate"] <= gate.max_security_event_rate,
         },
     ]
+    for name, passed in summary["integrity"].items():
+        if name == "trace_errors":
+            continue
+        checks.append({"name": name, "actual": passed, "expected": True, "passed": passed is True})
+    for name in ("raw_records_included", "hidden_chain_of_thought_included"):
+        checks.append(
+            {"name": name, "actual": risk[name], "expected": False, "passed": risk[name] is False}
+        )
     if gate.require_trace_for_each_case:
         checks.append(
             {
@@ -401,16 +589,6 @@ def _load_manifest(result: dict[str, Any]) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def _trace_is_complete(bundle: dict[str, Any] | None) -> bool:
-    if not bundle:
-        return False
-    trace = bundle.get("trace") or {}
-    spans = bundle.get("spans") or []
-    return bool(
-        trace.get("id") and trace.get("root_span_id") and spans and bundle.get("events") is not None
-    )
-
-
 def _trace_duration(bundle: dict[str, Any] | None) -> float:
     if not bundle:
         return 0.0
@@ -436,16 +614,25 @@ def _delta(candidate: Any, baseline: Any) -> float | None:
 
 
 def _validate_identifier(value: str, code: str) -> None:
-    if (
-        not value
-        or len(value) > 120
-        or any(
-            char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
-            for char in value
-        )
-    ):
-        raise ValueError(code)
+    validate_identifier(value, code)
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _owner_alive(record: dict[str, Any]) -> bool:
+    pid = record.get("owner_pid")
+    if pid == os.getpid():
+        owner = _LIVE_HARNESSES.get(record.get("owner_token"))
+        return owner is not None and not owner._closed
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        process = psutil.Process(pid)
+        return process.is_running() and process.create_time() == record.get("owner_started_at")
+    except psutil.NoSuchProcess:
+        return False
+    except (psutil.AccessDenied, PermissionError):
+        # Inability to inspect an owner is not proof it stopped.
+        return True

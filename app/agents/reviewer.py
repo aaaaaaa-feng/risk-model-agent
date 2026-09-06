@@ -172,8 +172,35 @@ class IndependentReviewer:
                     "deterministic_review_retained": True,
                 },
             }
-        issues = payload.get("issues") if isinstance(payload.get("issues"), list) else []
+        issues = payload.get("issues")
         source_status = payload.get("status")
+        if (
+            not isinstance(source_status, str)
+            or source_status not in {"pass", "revise", "block"}
+            or not isinstance(issues, list)
+            or any(
+                not isinstance(item, dict)
+                or any(
+                    not isinstance(item.get(key), str) or not item[key].strip()
+                    for key in ("code", "severity", "message", "suggested_fix")
+                )
+                or item["severity"] not in {"blocking", "warning", "info"}
+                for item in issues
+            )
+        ):
+            return {
+                "scope": scope,
+                "status": "revise",
+                "issues": [
+                    {
+                        "code": "REVIEWER_RESPONSE_SCHEMA_INVALID",
+                        "severity": "warning",
+                        "message": "Reviewer 响应不符合审查协议，不能作为通过证据。",
+                        "suggested_fix": "修正 Provider 响应格式后重新审查。",
+                    }
+                ],
+                "evidence": {"payload_hash": result.payload_hash, "schema_valid": False},
+            }
         status = {
             "pass": "llm_reviewer_pass",
             "revise": "revise",

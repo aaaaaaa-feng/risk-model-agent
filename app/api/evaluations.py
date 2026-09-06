@@ -61,3 +61,8 @@ def get_evaluation_run(run_id: str, ctx: AppContext = Depends(context)) -> dict[
         "run": ctx.evaluations.get_run(run_id),
         "results": ctx.evaluations.list_results(run_id),
     }
+
+
+@router.post("/runs/{run_id}/cancel", status_code=202)
+def cancel_evaluation_run(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
+    return {"run": ctx.evaluations.cancel_run(run_id)}

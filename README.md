@@ -25,7 +25,7 @@
 
 - 原始表、客户级记录、逐行预测和模型文件保存在应用专属本地目录，不由产品上传到外部 LLM。
 - DeepSeek、Kimi、Kimi Code、OpenAI、Anthropic 与自定义 Provider 只能接收通过 DLP 的聚合 `SafeEvidence`；小于 30 个样本的分组被抑制。
-- API Key 优先使用系统凭据存储，失败时使用权限受限的本地密钥文件；页面不回显密钥，并可在保存前测试当前表单连接。
+- API Key 保存在权限受限的本地密钥文件，也支持环境变量；旧系统凭据仅在升级时迁移。页面不回显密钥，并可在保存前测试当前表单连接。
 - 产品不再提供 Notebook 或任意本地代码执行入口；数据处理只通过强类型工具和可审核参数执行。
 - 项目迁移包使用 AES-256-GCM；密码经 scrypt 派生，并支持独立恢复密钥。
 - 本地 Web 服务只允许绑定 loopback，并校验 Host、Origin、跨站写入和临时本机会话。Tauri 模式再通过一次性 WebView bootstrap 换取 `HttpOnly` / `SameSite=Strict` Cookie，除最小启动接口外保护首页、业务 API、SSE 和下载；V1 不提供远程绑定或多人访问模式。
@@ -42,7 +42,7 @@
 
 ## 本地开发
 
-需要 Python 3.11—3.13、Node.js 22+。
+需要 Python 3.11—3.13、Node.js 22.12+（或 24 LTS）。
 
 ```bash
 python3.11 -m venv .venv
@@ -69,6 +69,8 @@ cd frontend && npm test && npm run typecheck && npm run build
 
 评测预埋的隔离合成案例由 `tests/test_evaluation_contract.py` 和 `tests/test_evaluation_harness.py` 验证。可运行 `python scripts/run_harness.py` 执行本地合成 Smoke Suite；它证明的是框架和确定性门禁，不是实际业务效果、真实 Provider 稳定性或企业级多人评测平台。
 
+Suite ID 对应不可变定义；修改案例或 Trial 数时使用新 `--suite-id`。Run 保留完整 Suite 快照和哈希，Baseline 按 Case/Trial 身份配对并校验 Trace、Manifest 与高风险案例。`--async` 将任务提交给已启动的本地服务（可用 `--server` 指定 loopback 地址）；取消接口为 `POST /api/v1/evaluations/runs/{run_id}/cancel`。超时和取消会停止评测子进程，未完成的证据不会标记为通过。
+
 打包前检查与本机 macOS 构建：
 
 ```bash
@@ -83,7 +85,7 @@ Windows 使用 `scripts/build_windows.ps1`，它会依次构建 React 前端、P
 .\scripts\build_windows.ps1
 ```
 
-离线依赖包只接受预先准备好的 wheel 缓存，不会由脚本联网下载；缺少锁定依赖时会直接失败：
+离线依赖包需在目标 OS/Python 上运行，传入预先准备好的完整 `requirements.lock`（每项精确 `==` 版本及 `--hash=sha256:...`）和 wheel 缓存。仓库不附带适用于所有平台的通用锁文件。脚本只做断网解析，验证版本、哈希、平台标签及依赖闭包，不联网下载或安装；不满足条件时直接失败：
 
 ```bash
 .venv/bin/python scripts/build_offline_bundle.py --wheel-dir ./wheelhouse --lock requirements.lock --output ./dist/offline

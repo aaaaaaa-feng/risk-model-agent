@@ -208,7 +208,7 @@ class CatalogService:
 
     def choose_asset_sheet(self, asset_id: str, sheet: str) -> dict[str, Any]:
         asset = self.require("data_assets", asset_id)
-        estimate = estimate_table(Path(asset["stored_path"]), sheet)
+        estimate = estimate_table(self.verified_data_path(asset), sheet)
         return self.database.update(
             "data_assets",
             asset_id,
@@ -230,9 +230,7 @@ class CatalogService:
         dictionary_asset = self.require("data_assets", dictionary_asset_id)
         if asset["project_id"] != dictionary_asset["project_id"]:
             raise ValueError("CROSS_PROJECT_DICTIONARY_FORBIDDEN")
-        dictionary_frame = read_table(
-            Path(dictionary_asset["stored_path"]), dictionary_asset.get("sheet")
-        )
+        dictionary_frame = self.read_verified_frame(dictionary_asset)
         dictionary = parse_data_dictionary(dictionary_frame)
         metadata = dict(asset.get("metadata") or {})
         metadata["dictionary_asset_id"] = dictionary_asset_id
@@ -243,7 +241,7 @@ class CatalogService:
         asset = self.require("data_assets", asset_id)
         if asset["status"] != "ready":
             raise ValueError("DATA_ASSET_NOT_READY")
-        frame = read_table(Path(asset["stored_path"]), asset.get("sheet"))
+        frame = self.read_verified_frame(asset)
         dictionary = (asset.get("metadata") or {}).get("dictionary")
         return self.create_dataset_version(
             asset["project_id"],
@@ -309,17 +307,42 @@ class CatalogService:
             lineage,
         )
 
+    def verified_data_path(self, record: dict[str, Any]) -> Path:
+        path = Path(record["stored_path"]).resolve()
+        if not path.is_relative_to(self.paths.root.resolve()):
+            raise ValueError("DATA_FILE_PATH_INVALID")
+        lineage = record.get("lineage") or {}
+        expected = record.get("sha256") or lineage.get("output_sha256")
+        # Existing V0 imports retain the original hash on their parent asset.
+        if not expected and lineage.get("kind") == "legacy_v0":
+            for parent_id in record.get("parent_ids") or []:
+                asset = self.database.get("data_assets", parent_id)
+                if asset and Path(asset["stored_path"]).resolve() == path:
+                    expected = asset.get("sha256")
+                    break
+        if not expected or not path.is_file() or sha256_file(path) != expected:
+            raise ValueError("DATA_FILE_CHECKSUM_MISMATCH")
+        return path
+
+    def read_verified_frame(
+        self, record: dict[str, Any], *, memory_budget_mb: int = 1536
+    ) -> pd.DataFrame:
+        path = self.verified_data_path(record)
+        frame = read_table(path, record.get("sheet"), memory_budget_mb=memory_budget_mb)
+        self.verified_data_path(record)
+        return frame
+
     def dataset_frame(self, dataset_version_id: str) -> pd.DataFrame:
         dataset = self.require("dataset_versions", dataset_version_id)
-        return read_table(Path(dataset["stored_path"]), dataset.get("sheet"))
+        return self.read_verified_frame(dataset)
 
     def recommend_join(self, left_asset_id: str, right_asset_id: str) -> dict[str, Any]:
         left = self.require("data_assets", left_asset_id)
         right = self.require("data_assets", right_asset_id)
         self._same_project(left, right)
         return recommend_keys(
-            read_table(Path(left["stored_path"]), left.get("sheet")),
-            read_table(Path(right["stored_path"]), right.get("sheet")),
+            self.read_verified_frame(left),
+            self.read_verified_frame(right),
         )
 
     def preview_join(
@@ -335,8 +358,8 @@ class CatalogService:
         right = self.require("data_assets", right_asset_id)
         self._same_project(left, right)
         return validate_join(
-            read_table(Path(left["stored_path"]), left.get("sheet")),
-            read_table(Path(right["stored_path"]), right.get("sheet")),
+            self.read_verified_frame(left),
+            self.read_verified_frame(right),
             left_keys,
             right_keys,
             target_columns,
@@ -382,7 +405,7 @@ class CatalogService:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         plan = self.require("join_plans", plan_id)
         base_asset = self.require("data_assets", plan["base_asset_id"])
-        frame = read_table(Path(base_asset["stored_path"]), base_asset.get("sheet"))
+        frame = self.read_verified_frame(base_asset)
         checked_targets = list(target_columns) or [
             str(column) for column in frame.columns if target_candidate(frame[column]) is not None
         ]
@@ -407,7 +430,7 @@ class CatalogService:
             dictionary_mapping.update(source_dictionary.get("mapping") or {})
             frame, evidence = execute_join(
                 frame,
-                read_table(Path(right["stored_path"]), right.get("sheet")),
+                self.read_verified_frame(right),
                 step,
                 checked_targets,
                 inferred_customer_key,

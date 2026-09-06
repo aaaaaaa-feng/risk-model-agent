@@ -12,7 +12,7 @@ from app.core.errors import normalize_error_code
 from app.core.paths import AppPaths, get_paths
 from app.core.security import sha256_file
 from app.workers.binning import bin_report
-from app.workers.io import read_table, write_table
+from app.workers.io import safe_file_name, write_table
 from app.workers.model_package import build_model_package
 from app.workers.modeling import ModelBundle
 from app.workers.package_runtime import (
@@ -150,7 +150,7 @@ class ArtifactService:
         package, manifest = build_model_package(
             bundle,
             contract,
-            directory / f"{model_name}-model-package.zip",
+            directory / f"model-{safe_file_name(model_name)}-model-package.zip",
             dependencies,
         )
         model_version = self.database.insert(
@@ -184,7 +184,7 @@ class ArtifactService:
         if asset["project_id"] != run["project_id"]:
             raise ValueError("CROSS_PROJECT_SCORING_FORBIDDEN")
         try:
-            frame = read_table(Path(asset["stored_path"]), asset.get("sheet"))
+            frame = self.catalog.read_verified_frame(asset)
         except Exception as exc:
             code = normalize_error_code(exc, "SCORE_INPUT_READ_FAILED")
             raise ValueError(code) from exc

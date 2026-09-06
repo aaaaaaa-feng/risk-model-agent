@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import time
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from app.core.paths import AppPaths
 from app.core.security import sha256_file
 from app.evaluation.contracts import EvalCase, EvalResult
 from app.evaluation.fakes import ScriptedProviderFactory
+from app.evaluation.integrity import validate_identifier
 from app.governance.manifest import canonical_hash
 from app.governance.tracing import TraceService
 from app.orchestration.graph import RunEngine
@@ -43,6 +45,27 @@ def run_eval_case(
     trial_id: str,
     artifact_root: Path,
     provider: dict[str, Any] | None = None,
+    cancel_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    from app.evaluation.process import run_isolated_case
+
+    parsed = case if isinstance(case, EvalCase) else EvalCase.model_validate(case)
+    validate_identifier(parsed.case_id, "EVAL_CASE_ID_INVALID")
+    validate_identifier(trial_id, "EVAL_TRIAL_ID_INVALID")
+    _provider_settings(parsed.provider_profile, provider)
+    root = artifact_root.resolve()
+    trial_root = root / parsed.case_id / trial_id
+    if not trial_root.resolve().is_relative_to(root) or trial_root.exists():
+        raise ValueError("EVAL_TRIAL_ALREADY_EXISTS_OR_PATH_INVALID")
+    return run_isolated_case(parsed, trial_id, root, provider, cancel_event)
+
+
+def _run_eval_case_in_process(
+    *,
+    case: EvalCase | dict[str, Any],
+    trial_id: str,
+    artifact_root: Path,
+    provider: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one isolated local case through the same graph and deterministic tools.
 
@@ -50,21 +73,10 @@ def run_eval_case(
     contain scoring rubrics, leaderboards, LLM-as-a-Judge, or an evaluation UI.
     """
     parsed = case if isinstance(case, EvalCase) else EvalCase.model_validate(case)
-    if (
-        not trial_id
-        or len(trial_id) > 120
-        or any(
-            char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
-            for char in trial_id
-        )
-    ):
-        raise ValueError("EVAL_TRIAL_ID_INVALID")
     # Validate external-provider input before creating an isolated directory so
     # an invalid secret/configuration cannot leave a misleading partial trial.
     provider_payload = _provider_settings(parsed.provider_profile, provider)
     case_root = artifact_root.resolve() / parsed.case_id / trial_id
-    if case_root.exists():
-        raise ValueError("EVAL_TRIAL_ALREADY_EXISTS")
     workspace = case_root / "workspace"
     export_root = case_root / "exports"
     paths = AppPaths(workspace / "RiskModelAgent").ensure()
@@ -127,9 +139,9 @@ def run_eval_case(
             },
         )
         run_id = created["id"]
-        deadline = time.monotonic() + parsed.timeout_seconds
         used_decisions: set[int] = set()
-        while time.monotonic() < deadline:
+        # The parent owns the hard deadline, including setup, tools, Provider and shutdown.
+        while True:
             run = catalog.require("runs", run_id)
             terminal = str(run["status"])
             if terminal in {"succeeded", "failed", "blocked"}:
@@ -152,10 +164,8 @@ def run_eval_case(
                         selection.edits,
                     )
             time.sleep(0.05)
-        else:
-            terminal = "cancelled"
-            error = {"code": "EVAL_TIMEOUT", "type": "TimeoutError"}
-
+        engine.shutdown()
+        engine = None
         traces = TraceService(database)
         trace_path = traces.export_bundle(run_id, export_root / "trace-bundle.json")
         artifact_path = _write_artifact_manifest(database, run_id, export_root)

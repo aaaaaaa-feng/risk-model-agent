@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import SettingsStore
-from app.core.database import Database, new_id, now_iso, snapshot_legacy_database
+from app.core.database import ClosingConnection, Database, new_id, now_iso, snapshot_legacy_database
 from app.core.paths import AppPaths, get_paths
 from app.core.security import sha256_file
 from app.providers.secrets import SecretStore
@@ -82,7 +82,7 @@ class LegacyMigrator:
         imported_projects = 0
         imported_datasets = 0
         imported_runs = 0
-        with sqlite3.connect(legacy_database) as connection:
+        with sqlite3.connect(legacy_database, factory=ClosingConnection) as connection:
             connection.row_factory = sqlite3.Row
             for raw in connection.execute("SELECT * FROM projects ORDER BY created_at"):
                 row = dict(raw)

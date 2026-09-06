@@ -46,6 +46,7 @@ export function ProjectWorkspace({ session, onCreate }: Props) {
         session.view === "workbench" &&
         (session.dataMode || !session.run) ? (
           <DataWorkbench
+            key={session.selectedProject.id}
             detail={session.detail}
             onRefresh={session.refreshDetail}
             onRunsStarted={session.selectRun}
@@ -57,6 +58,7 @@ export function ProjectWorkspace({ session, onCreate }: Props) {
         session.run &&
         session.decision ? (
           <DecisionWorkbench
+            key={session.decision.id}
             run={session.run}
             decision={session.decision}
             onResolved={() => {
@@ -73,7 +75,11 @@ export function ProjectWorkspace({ session, onCreate }: Props) {
           <RunWorkbench run={session.run} events={session.events} onRetry={session.retry} />
         ) : null}
         {session.selectedProject && session.view === "report" && (
-          <ReportView project={session.selectedProject} run={session.run} />
+          <ReportView
+            key={`${session.selectedProject.id}:${session.run?.id || "none"}`}
+            project={session.selectedProject}
+            run={session.run}
+          />
         )}
         {session.selectedProject && session.view === "history" && (
           <HistoryView

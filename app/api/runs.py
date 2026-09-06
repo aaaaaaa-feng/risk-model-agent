@@ -17,6 +17,7 @@ from .dependencies import context
 
 
 router = APIRouter(tags=["runs-and-events"])
+EVENT_BATCH_SIZE = 5000
 
 
 class RunCreate(BaseModel):
@@ -104,11 +105,7 @@ def list_events(
     ctx: AppContext = Depends(context),
 ) -> dict[str, Any]:
     ctx.catalog.require("runs", run_id)
-    events = [
-        _event(item)
-        for item in ctx.database.list("events", {"run_id": run_id}, order_by="seq ASC", limit=5000)
-        if int(item["seq"]) > after
-    ]
+    events = [_event(item) for item in _events_after(ctx, run_id, after)]
     return {"events": events, "next_sequence": events[-1]["sequence"] if events else after}
 
 
@@ -131,13 +128,7 @@ async def stream_events(
         current = cursor
         quiet_ticks = 0
         while True:
-            values = [
-                item
-                for item in ctx.database.list(
-                    "events", {"run_id": run_id}, order_by="seq ASC", limit=5000
-                )
-                if int(item["seq"]) > current
-            ]
+            values = _events_after(ctx, run_id, current)
             for item in values:
                 payload = _event(item)
                 current = payload["sequence"]
@@ -147,6 +138,8 @@ async def stream_events(
             if run["status"] in {"succeeded", "failed", "blocked"} and current >= int(run["seq"]):
                 yield f"event: stream_end\ndata: {json.dumps({'run_id': run_id, 'status': run['status'], 'sequence': current}, ensure_ascii=False)}\n\n"
                 return
+            if len(values) == EVENT_BATCH_SIZE:
+                continue
             quiet_ticks += 1
             if quiet_ticks >= 30:
                 yield f": keepalive {current}\n\n"
@@ -196,6 +189,15 @@ def run_manifest(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, A
 def trace_bundle(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
     ctx.catalog.require("runs", run_id)
     return _public_trace_bundle(TraceService(ctx.database).bundle(run_id))
+
+
+def _events_after(ctx: AppContext, run_id: str, after: int) -> list[dict[str, Any]]:
+    with ctx.database.connect() as connection:
+        rows = connection.execute(
+            "SELECT * FROM events WHERE run_id=? AND seq>? ORDER BY seq ASC LIMIT ?",
+            (run_id, after, EVENT_BATCH_SIZE),
+        ).fetchall()
+    return [ctx.database._decode(row) or {} for row in rows]
 
 
 def _event(item: dict[str, Any]) -> dict[str, Any]:

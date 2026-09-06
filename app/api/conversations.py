@@ -88,16 +88,7 @@ def list_conversation_events(
     ctx: AppContext = Depends(context),
 ) -> dict[str, Any]:
     ctx.catalog.require("conversations", conversation_id)
-    values = [
-        _event(item)
-        for item in ctx.database.list(
-            "conversation_events",
-            {"conversation_id": conversation_id},
-            order_by="seq ASC",
-            limit=5000,
-        )
-        if int(item["seq"]) > after
-    ]
+    values = [_event(item) for item in _events_after(ctx, conversation_id, after, None)]
     return {"events": values, "next_sequence": values[-1]["sequence"] if values else after}
 
 

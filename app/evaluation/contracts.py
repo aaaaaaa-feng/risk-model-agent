@@ -4,6 +4,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .integrity import validate_identifier
+
 
 class EvalDecision(BaseModel):
     stage: str | None = None
@@ -31,6 +33,11 @@ class EvalCase(BaseModel):
     rows: int = Field(default=600, ge=500, le=10_000)
     timeout_seconds: int = Field(default=300, ge=10, le=3600)
     cleanup_workspace: bool = True
+
+    @field_validator("case_id")
+    @classmethod
+    def validate_case_id(cls, value: str) -> str:
+        return validate_identifier(value, "EVAL_CASE_ID_INVALID")
 
     @field_validator("faults")
     @classmethod
@@ -106,6 +113,11 @@ class EvalSuite(BaseModel):
     gate: EvalGate = Field(default_factory=EvalGate)
     holdout: bool = False
 
+    @field_validator("suite_id")
+    @classmethod
+    def validate_suite_id(cls, value: str) -> str:
+        return validate_identifier(value, "EVAL_SUITE_ID_INVALID")
+
     @model_validator(mode="after")
     def validate_unique_cases(self) -> Self:
         identifiers = [item.case_id for item in self.cases]
@@ -121,7 +133,9 @@ class EvalRun(BaseModel):
     run_id: str
     suite_id: str
     suite_version: str
-    status: Literal["queued", "running", "completed", "failed"]
+    status: Literal["queued", "running", "completed", "failed", "cancelled"]
+    suite_sha256: str = ""
+    suite_snapshot: dict[str, Any] = Field(default_factory=dict)
     started_at: str | None = None
     finished_at: str | None = None
     result_paths: list[str] = Field(default_factory=list)

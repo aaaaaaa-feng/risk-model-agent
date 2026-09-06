@@ -150,6 +150,7 @@ async def upload_asset(
     ctx: AppContext = Depends(context),
 ) -> dict[str, Any]:
     name = file.filename or "upload.csv"
+    ctx.catalog.get_project(project_id)
     if Path(name).suffix.lower() not in SUPPORTED_SUFFIXES:
         raise HTTPException(400, detail={"code": "UPLOAD_FORMAT_UNSUPPORTED"})
     incoming = ctx.paths.project_dir(project_id) / "incoming"

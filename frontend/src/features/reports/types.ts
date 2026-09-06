@@ -1,6 +1,7 @@
 export interface ModelVersion {
   id: string;
   name: string;
+  run_id: string;
 }
 
 export interface ScoreJob {

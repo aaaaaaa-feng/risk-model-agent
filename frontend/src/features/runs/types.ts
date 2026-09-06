@@ -225,6 +225,7 @@ export interface RunResponse {
 
 export interface EventsResponse {
   events: RunEvent[];
+  next_sequence?: number;
 }
 
 export interface RunCreatedResponse {

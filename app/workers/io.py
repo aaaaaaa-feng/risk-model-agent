@@ -265,7 +265,23 @@ def write_table(frame: pd.DataFrame, path: Path, sheet_name: str = "data") -> Pa
 
 def safe_file_name(name: str) -> str:
     cleaned = "".join(char if char.isalnum() or char in "-_." else "_" for char in name)
-    return cleaned.strip("._")[:160] or "data.csv"
+    cleaned = cleaned.strip("._") or "data.csv"
+    if cleaned.split(".", 1)[0].upper() in {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    }:
+        cleaned = "_" + cleaned
+    suffix = Path(cleaned).suffix
+    if suffix.lower() not in {".csv", ".xlsx", ".xlsm", ".xls", ".json", ".zip", ".html"}:
+        suffix = ""
+    stem = cleaned[: -len(suffix)] if suffix else cleaned
+    # Bound bytes too: 160 Chinese characters exceed common 255-byte filenames.
+    stem = stem.encode("utf-8")[: 160 - len(suffix)].decode("utf-8", errors="ignore").rstrip(".")
+    return (stem or "data") + suffix
 
 
 def recommended_batches(frame: pd.DataFrame, memory_budget_mb: int = 1536) -> list[list[str]]:

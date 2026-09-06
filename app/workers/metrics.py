@@ -110,10 +110,16 @@ def psi(reference: np.ndarray, current: np.ndarray, bins: int = 10) -> float | N
     current = np.asarray(current, dtype=float)
     if not len(reference) or not len(current):
         return None
+    if not np.isfinite(reference).all() or not np.isfinite(current).all():
+        return None
     edges = np.unique(np.quantile(reference, np.linspace(0, 1, bins + 1)))
-    if len(edges) < 2:
-        return 0.0
-    edges[0], edges[-1] = -np.inf, np.inf
+    if len(edges) == 1:
+        value = float(edges[0])
+        edges = np.array([-np.inf, value, np.nextafter(value, np.inf), np.inf])
+    elif len(edges) == 2:
+        edges = np.array([-np.inf, edges[0] / 2 + edges[1] / 2, np.inf])
+    else:
+        edges[0], edges[-1] = -np.inf, np.inf
     ref_counts, _ = np.histogram(reference, edges)
     cur_counts, _ = np.histogram(current, edges)
     ref_share = np.clip(ref_counts / max(ref_counts.sum(), 1), 1e-6, None)

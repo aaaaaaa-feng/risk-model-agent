@@ -17,6 +17,16 @@ from .security import sha256_file
 SCHEMA_VERSION = 2
 
 
+class ClosingConnection(sqlite3.Connection):
+    """Commit/rollback the transaction and then deterministically release the file."""
+
+    def __exit__(self, *args: Any) -> bool:
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -274,7 +284,9 @@ class Database:
             self._register_schema_snapshot(*schema_snapshot)
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
+        connection = sqlite3.connect(
+            self.path, timeout=30, check_same_thread=False, factory=ClosingConnection
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA foreign_keys=ON")
@@ -294,7 +306,7 @@ class Database:
             return None
         old_version = "unknown"
         try:
-            with sqlite3.connect(self.path) as connection:
+            with sqlite3.connect(self.path, factory=ClosingConnection) as connection:
                 exists = connection.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_meta'"
                 ).fetchone()
@@ -307,15 +319,22 @@ class Database:
         except sqlite3.Error as exc:
             raise ValueError("DATABASE_SCHEMA_READ_FAILED") from exc
         try:
-            if old_version != "unknown" and int(old_version) >= SCHEMA_VERSION:
-                return None
+            version_number = int(old_version)
         except ValueError:
-            pass
+            version_number = -1
+            old_version = "unknown"
+        if version_number > SCHEMA_VERSION:
+            raise ValueError("DATABASE_SCHEMA_NEWER_THAN_APPLICATION")
+        if version_number == SCHEMA_VERSION:
+            return None
         destination = self.paths.backups / f"pre-schema-v{old_version}-to-v{SCHEMA_VERSION}.sqlite3"
         if not destination.exists():
             temporary = destination.with_suffix(".tmp")
             try:
-                with sqlite3.connect(self.path) as source, sqlite3.connect(temporary) as target:
+                with (
+                    sqlite3.connect(self.path, factory=ClosingConnection) as source,
+                    sqlite3.connect(temporary, factory=ClosingConnection) as target,
+                ):
                     source.backup(target)
                     integrity = target.execute("PRAGMA integrity_check").fetchone()[0]
                     if integrity != "ok":
@@ -324,7 +343,7 @@ class Database:
             finally:
                 temporary.unlink(missing_ok=True)
         else:
-            with sqlite3.connect(destination) as backup:
+            with sqlite3.connect(destination, factory=ClosingConnection) as backup:
                 if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                     raise ValueError("SCHEMA_BACKUP_INTEGRITY_CHECK_FAILED")
         return destination, old_version
@@ -415,6 +434,7 @@ class Database:
     ) -> None:
         table = self._table(table)
         encoded = self._encode(data)
+        self._validate_columns(connection, table, encoded)
         columns = ", ".join(encoded)
         placeholders = ", ".join("?" for _ in encoded)
         connection.execute(
@@ -449,8 +469,9 @@ class Database:
         filters = filters or {}
         if not re_safe_order(order_by):
             raise ValueError("UNSAFE_ORDER_BY")
-        where = " AND ".join(f"{key}=?" for key in filters) or "1=1"
         with self.connect() as connection:
+            self._validate_columns(connection, table, filters)
+            where = " AND ".join(f"{key}=?" for key in filters) or "1=1"
             rows = connection.execute(
                 f"SELECT * FROM {table} WHERE {where} ORDER BY {order_by} LIMIT ?",
                 (*filters.values(), min(max(limit, 1), 5000)),
@@ -506,12 +527,19 @@ class Database:
         encoded = self._encode(data)
         if not encoded:
             return
+        self._validate_columns(connection, table, encoded)
         assignments = ", ".join(f"{key}=?" for key in encoded)
         cursor = connection.execute(
             f"UPDATE {table} SET {assignments} WHERE id=?", (*encoded.values(), identifier)
         )
         if cursor.rowcount != 1:
             raise KeyError(identifier)
+
+    @staticmethod
+    def _validate_columns(connection: sqlite3.Connection, table: str, data: dict[str, Any]) -> None:
+        columns = {str(row["name"]) for row in connection.execute(f"PRAGMA table_info({table})")}
+        if not set(data).issubset(columns):
+            raise ValueError("UNKNOWN_COLUMN")
 
     def transition_run_with_event(
         self,
@@ -749,7 +777,10 @@ class Database:
 
     def backup(self, destination: Path) -> Path:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with self.connect() as source, sqlite3.connect(destination) as target:
+        with (
+            self.connect() as source,
+            sqlite3.connect(destination, factory=ClosingConnection) as target,
+        ):
             source.backup(target)
         return destination
 
@@ -760,8 +791,13 @@ class Database:
         with self._lock:
             try:
                 shutil.copy2(source, staged)
-                with sqlite3.connect(staged) as candidate:
+                with sqlite3.connect(staged, factory=ClosingConnection) as candidate:
                     integrity = candidate.execute("PRAGMA integrity_check").fetchone()[0]
+                    version = candidate.execute(
+                        "SELECT value FROM schema_meta WHERE key='version'"
+                    ).fetchone()
+                    if version and int(version[0]) > SCHEMA_VERSION:
+                        raise ValueError("DATABASE_SCHEMA_NEWER_THAN_APPLICATION")
                 if integrity != "ok":
                     raise ValueError("BACKUP_INTEGRITY_CHECK_FAILED")
                 with self.connect() as active:

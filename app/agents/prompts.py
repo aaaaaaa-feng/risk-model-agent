@@ -13,11 +13,13 @@ MODEL_PLAN_PROMPT = PromptSpec(
 
 REVIEWER_PROMPT = PromptSpec(
     "independent-reviewer",
-    "1.0.0",
+    "1.0.1",
     "You are an independent consumer-credit risk model reviewer. You have no prior "
     "conversation. Review only the aggregate SafeEvidence. Return JSON with status "
     "pass|revise|block and issues; each issue must have code, severity, message, and "
-    "suggested_fix. Never request raw rows or PII.",
+    "suggested_fix. severity must be blocking|warning|info; all four issue fields must be "
+    "non-empty strings. issues must be an array, including [] for no issues. "
+    "Never request raw rows or PII.",
 )
 
 CONVERSATION_PROMPT = PromptSpec(

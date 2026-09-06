@@ -98,6 +98,7 @@ class WorkerProcessRunner:
         self.paths = paths
         self._lock = threading.RLock()
         self._active: set[multiprocessing.Process] = set()
+        self._closed = False
 
     def invoke(self, tool: str, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
         return self._run(
@@ -117,6 +118,9 @@ class WorkerProcessRunner:
         return dict(result["job"]), dict(result["artifact"])
 
     def _run(self, target: Any, arguments: tuple[Any, ...], label: str) -> dict[str, Any]:
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("WORKER_RUNNER_CLOSED")
         settings = SettingsStore(self.paths).load()
         memory_limit = max(512, int(settings.memory_budget_mb)) * 1024**2
         timeout = max(1, WORKER_TIMEOUT_SECONDS)
@@ -129,10 +133,12 @@ class WorkerProcessRunner:
             daemon=False,
         )
         started = time.monotonic()
-        with self._lock:
-            self._active.add(process)
         try:
-            process.start()
+            with self._lock:
+                if self._closed:
+                    raise RuntimeError("WORKER_RUNNER_CLOSED")
+                process.start()
+                self._active.add(process)
             while process.is_alive():
                 process.join(0.1)
                 if time.monotonic() - started > timeout:
@@ -164,13 +170,15 @@ class WorkerProcessRunner:
                 self._active.discard(process)
             if process.is_alive():
                 self._terminate(process)
+            process.close()
             shutil.rmtree(working, ignore_errors=True)
 
     def shutdown(self) -> None:
         with self._lock:
+            self._closed = True
             processes = list(self._active)
-        for process in processes:
-            self._terminate(process)
+            for process in processes:
+                self._terminate(process)
 
     @staticmethod
     def _terminate(process: multiprocessing.Process) -> None:
