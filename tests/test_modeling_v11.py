@@ -34,3 +34,36 @@ def test_controlled_train_cv_search_is_recorded_without_oot_selection():
     assert candidate["search"]["enabled"] is True
     assert len(candidate["search"]["trials"]) == 2
     assert result["oot_used_for_selection"] is False
+
+
+def test_development_training_never_predicts_holdout(monkeypatch):
+    from app.workers.modeling import ModelBundle, evaluate_final_holdout
+
+    frame = pd.DataFrame({"x": np.arange(100), "Y": np.arange(100) % 2})
+    split = {
+        "indices": {
+            "train": list(range(60)),
+            "test": list(range(60, 80)),
+            "oot": list(range(80, 100)),
+        }
+    }
+    original = ModelBundle.predict_proba
+    accessed = []
+
+    def observe(self, sample):
+        accessed.extend(sample.index.tolist())
+        return original(self, sample)
+
+    monkeypatch.setattr(ModelBundle, "predict_proba", observe)
+    result, bundles = train_candidates(
+        frame, "Y", ["x"], split, models=["dummy"], evaluate_oot=False
+    )
+    assert not set(range(80, 100)).intersection(accessed)
+    assert result["champion_metrics"]["oot"] is None
+    evaluate_final_holdout(frame, "Y", split, result, bundles["dummy"])
+    assert set(range(80, 100)).issubset(accessed)
+    assert result["final_holdout_evaluated"] is True
+    import pytest
+
+    with pytest.raises(ValueError, match="FINAL_HOLDOUT_ALREADY_EVALUATED"):
+        evaluate_final_holdout(frame, "Y", split, result, bundles["dummy"])

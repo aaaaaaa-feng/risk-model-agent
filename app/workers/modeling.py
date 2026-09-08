@@ -284,6 +284,8 @@ def train_candidates(
     resource: ResourcePlan | None = None,
     score_config: dict[str, float] | None = None,
     search_budget: int = 0,
+    evaluate_oot: bool = True,
+    candidate_parameters: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, ModelBundle]]:
     selected_models = list(models or recommend_models(resource))
     availability = available_models()
@@ -298,7 +300,6 @@ def train_candidates(
     indices = {key: np.asarray(value, dtype=int) for key, value in split["indices"].items()}
     train = frame.iloc[indices["train"]]
     test = frame.iloc[indices["test"]]
-    oot = frame.iloc[indices["oot"]] if len(indices["oot"]) else frame.iloc[[]]
     y_train = train[target].astype(int)
     positive = int(y_train.sum())
     negative = len(y_train) - positive
@@ -327,6 +328,8 @@ def train_candidates(
     for name in runnable_models:
         try:
             base = _candidate(name, train, features, positive, negative)
+            if candidate_parameters and name in candidate_parameters:
+                base.set_params(**candidate_parameters[name])
             candidate, bundle = _fit_one_candidate(
                 name,
                 base,
@@ -363,17 +366,11 @@ def train_candidates(
     non_dummy = [item for item in successful if item["candidate"] != "dummy"] or successful
     champion = max(non_dummy, key=lambda item: item["selection_score"])
     champion_bundle = bundles[champion["candidate"]]
-    if len(oot):
-        oot_probability = champion_bundle.predict_proba(oot)
-        champion["oot_metrics"] = binary_metrics(oot[target].to_numpy(dtype=int), oot_probability)
-        champion["lift"]["oot"] = lift_table(oot[target].to_numpy(dtype=int), oot_probability)
-        champion["oot_monotonicity"] = score_monotonicity(champion["lift"]["oot"])
-        champion["test_oot_score_psi"] = psi(champion_bundle.predict_proba(test), oot_probability)
-        champion["oot_calibration"] = calibration_table(
-            oot[target].to_numpy(dtype=int), oot_probability
-        )
-    all_probability = champion_bundle.predict_proba(frame)
-    score_result = probability_to_score(all_probability, **(score_config or {}))
+    # Development scoring cannot even predict final holdout rows.
+    development = pd.concat([train, test])
+    score_result = probability_to_score(
+        champion_bundle.predict_proba(development), **(score_config or {})
+    )
     report = {
         "candidates": candidates,
         "champion": champion["candidate"],
@@ -391,4 +388,37 @@ def train_candidates(
         "resource_plan": resource.as_dict() if resource else None,
         "search_budget": max(0, min(int(search_budget), 12)),
     }
+    report["final_holdout_evaluated"] = False
+    if evaluate_oot:
+        evaluate_final_holdout(frame, target, split, report, champion_bundle)
     return report, bundles
+
+
+def evaluate_final_holdout(
+    frame: pd.DataFrame,
+    target: str,
+    split: dict[str, Any],
+    report: dict[str, Any],
+    bundle: ModelBundle,
+) -> None:
+    """Only call after the global winner is frozen; never feed output to optimization."""
+    if report.get("final_holdout_evaluated"):
+        raise ValueError("FINAL_HOLDOUT_ALREADY_EVALUATED")
+    champion = next(
+        item for item in report["candidates"] if item["candidate"] == report["champion"]
+    )
+    oot_indices = split["indices"].get("oot", [])
+    if len(oot_indices):
+        oot = frame.iloc[oot_indices]
+        test = frame.iloc[split["indices"]["test"]]
+        probability = bundle.predict_proba(oot)
+        champion["oot_metrics"] = binary_metrics(oot[target].to_numpy(dtype=int), probability)
+        champion["lift"]["oot"] = lift_table(oot[target].to_numpy(dtype=int), probability)
+        champion["oot_monotonicity"] = score_monotonicity(champion["lift"]["oot"])
+        champion["test_oot_score_psi"] = psi(bundle.predict_proba(test), probability)
+        champion["oot_calibration"] = calibration_table(
+            oot[target].to_numpy(dtype=int), probability
+        )
+    report["champion_metrics"]["oot"] = champion.get("oot_metrics")
+    report["final_holdout_evaluated"] = True
+    report["final_holdout_status"] = "evaluated" if len(oot_indices) else "unavailable"
