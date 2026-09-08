@@ -98,9 +98,20 @@ def assert_sha256(value: Any, label: str) -> None:
         raise AssertionError(f"{label} does not contain a SHA-256 checksum")
 
 
+def is_legacy_migration_fixture(
+    requested: bool, health: dict[str, Any], evidence_output: str
+) -> bool:
+    if not requested:
+        return False
+    if health.get("version") != "1.1.2" or health.get("desktop") or not evidence_output:
+        raise AssertionError("旧版检查仅限带迁移证据输出的真实 1.1.2 Inno 夹具。")
+    return True
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:8765")
+    parser.add_argument("--legacy-inno-112", action="store_true")
     parser.add_argument(
         "--evidence-output",
         default="",
@@ -112,6 +123,7 @@ def main() -> None:
     health = request_json(base_url, "GET", "/api/v1/health", timeout=30)
     assert health["status"] == "ok"
     assert health["runtime"] == "local"
+    legacy_fixture = is_legacy_migration_fixture(args.legacy_inno_112, health, args.evidence_output)
     if health.get("desktop") is True:
         if not _desktop_session_headers():
             raise AssertionError("桌面后端冒烟未携带 WebView 已建立的会话。")
@@ -193,47 +205,48 @@ def main() -> None:
     assert job["metadata"]["score_column"].startswith("FPD0_")
     assert_sha256(job["metadata"]["output_sha256"], "score output")
 
-    with tempfile.TemporaryDirectory(prefix="risk-export-") as temporary:
-        export_directory = Path(temporary).resolve() / "中文 导出验收"
-        export_directory.mkdir()
-        exported_paths: list[str] = []
-        for format_name, artifact_kind in (
-            ("excel", "report_excel"),
-            ("html", "report_html"),
-            ("model", "model_package"),
-            ("html", "report_html"),
-        ):
-            saved = request_json(
+    if not legacy_fixture:
+        with tempfile.TemporaryDirectory(prefix="risk-export-") as temporary:
+            export_directory = Path(temporary).resolve() / "中文 导出验收"
+            export_directory.mkdir()
+            exported_paths: list[str] = []
+            for format_name, artifact_kind in (
+                ("excel", "report_excel"),
+                ("html", "report_html"),
+                ("model", "model_package"),
+                ("html", "report_html"),
+            ):
+                saved = request_json(
+                    base_url,
+                    "POST",
+                    f"/api/v1/reports/{run['id']}/export",
+                    {"format": format_name, "directory": str(export_directory)},
+                )
+                output = Path(saved["path"])
+                assert output.parent == export_directory
+                assert output.stat().st_size == saved["size_bytes"]
+                digest = hashlib.sha256(output.read_bytes()).hexdigest()
+                assert digest == saved["sha256"] == artifacts[artifact_kind]["checksum"]
+                assert saved["path"] not in exported_paths
+                exported_paths.append(saved["path"])
+            saved_score = request_json(
                 base_url,
                 "POST",
-                f"/api/v1/reports/{run['id']}/export",
-                {"format": format_name, "directory": str(export_directory)},
+                f"/api/v1/score-jobs/{job['id']}/export",
+                {"directory": str(export_directory)},
             )
-            output = Path(saved["path"])
-            assert output.parent == export_directory
-            assert output.stat().st_size == saved["size_bytes"]
-            digest = hashlib.sha256(output.read_bytes()).hexdigest()
-            assert digest == saved["sha256"] == artifacts[artifact_kind]["checksum"]
-            assert saved["path"] not in exported_paths
-            exported_paths.append(saved["path"])
-        saved_score = request_json(
-            base_url,
-            "POST",
-            f"/api/v1/score-jobs/{job['id']}/export",
-            {"directory": str(export_directory)},
-        )
-        assert (
-            hashlib.sha256(Path(saved_score["path"]).read_bytes()).hexdigest()
-            == job["metadata"]["output_sha256"]
-        )
-        preview_request = Request(
-            f"{base_url}/api/v1/reports/{run['id']}/preview",
-            headers=_desktop_session_headers(),
-        )
-        with urlopen(preview_request, timeout=30) as response:  # noqa: S310
-            assert response.headers["Content-Disposition"] == "inline"
-            assert "sandbox" in response.headers["Content-Security-Policy"]
-            assert "风控模型报告" in response.read().decode("utf-8")
+            assert (
+                hashlib.sha256(Path(saved_score["path"]).read_bytes()).hexdigest()
+                == job["metadata"]["output_sha256"]
+            )
+            preview_request = Request(
+                f"{base_url}/api/v1/reports/{run['id']}/preview",
+                headers=_desktop_session_headers(),
+            )
+            with urlopen(preview_request, timeout=30) as response:  # noqa: S310
+                assert response.headers["Content-Disposition"] == "inline"
+                assert "sandbox" in response.headers["Content-Security-Policy"]
+                assert "风控模型报告" in response.read().decode("utf-8")
 
     evidence: dict[str, Any] | None = None
     if args.evidence_output:
@@ -297,10 +310,11 @@ def main() -> None:
                 "artifact_kinds": sorted(required),
                 "score_rows": job["rows"],
                 "score_column": job["metadata"]["score_column"],
-                "export_to_chinese_directory": True,
-                "export_non_overwrite": True,
-                "html_preview": True,
+                "export_to_chinese_directory": not legacy_fixture,
+                "export_non_overwrite": not legacy_fixture,
+                "html_preview": not legacy_fixture,
                 "migration_evidence": bool(evidence),
+                "legacy_inno_112_fixture": legacy_fixture,
             },
             # 结果可能包含中文质检结论，ASCII 转义可兼容 Windows 旧代码页。
             ensure_ascii=True,

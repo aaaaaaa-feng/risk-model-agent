@@ -12,6 +12,34 @@ COOKIE_NAME = "risk_agent_desktop_session"
 VALID_COOKIE = "a" * 64
 
 
+def test_normal_smoke_never_implicitly_downgrades_export_checks() -> None:
+    assert not smoke_packaged_service.is_legacy_migration_fixture(
+        False, {"version": "1.1.2"}, "migration.json"
+    )
+
+
+def test_explicit_legacy_fixture_keeps_migration_evidence() -> None:
+    assert smoke_packaged_service.is_legacy_migration_fixture(
+        True, {"version": "1.1.2"}, "migration.json"
+    )
+
+
+@pytest.mark.parametrize(
+    ("version", "desktop", "output"),
+    [
+        ("1.2.3", False, "migration.json"),
+        ("", False, "migration.json"),
+        ("1.1.2", True, "migration.json"),
+        ("1.1.2", False, ""),
+    ],
+)
+def test_legacy_profile_rejects_current_desktop_or_missing_evidence(version, desktop, output):
+    with pytest.raises(AssertionError):
+        smoke_packaged_service.is_legacy_migration_fixture(
+            True, {"version": version, "desktop": desktop}, output
+        )
+
+
 def test_cookie_reader_accepts_only_explicit_ipv4_loopback_backend() -> None:
     assert (
         read_webview_cookie._normalise_backend_url("http://127.0.0.1:49152/")

@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$DataDirectory,
     [string]$EvidenceOutputPath = "",
+    [switch]$LegacyInno112,
     [string]$RepositoryRoot = ""
 )
 
@@ -108,6 +109,9 @@ try {
     $PythonExecutable = (Get-Command "python.exe" -ErrorAction Stop).Source
     $SmokeScript = Join-Path $RepositoryRoot "scripts\smoke_packaged_service.py"
     $SmokeArguments = @("`"$SmokeScript`"", "--url", $BaseUrl)
+    if ($LegacyInno112) {
+        $SmokeArguments += "--legacy-inno-112"
+    }
     if (-not [string]::IsNullOrWhiteSpace($EvidenceOutputPath)) {
         $SmokeArguments += @("--evidence-output", "`"$EvidenceOutputPath`"")
     }

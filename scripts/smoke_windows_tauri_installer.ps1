@@ -1362,6 +1362,7 @@ try {
     Write-Host "[迁移冒烟] 运行真实 1.1.2 冻结服务、建模与评分基线…"
     & (Join-Path $RepositoryRoot "scripts\smoke_windows_service.ps1") `
         -ExecutablePath $LegacyExecutable `
+        -LegacyInno112 `
         -DataDirectory $LegacyRuntimeDataDirectory `
         -EvidenceOutputPath $MigrationEvidencePath `
         -RepositoryRoot $RepositoryRoot
