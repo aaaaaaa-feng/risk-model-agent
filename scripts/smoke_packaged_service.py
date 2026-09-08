@@ -8,10 +8,12 @@ All data is fixed-seed synthetic data and all HTTP traffic stays on localhost.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import time
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -191,6 +193,48 @@ def main() -> None:
     assert job["metadata"]["score_column"].startswith("FPD0_")
     assert_sha256(job["metadata"]["output_sha256"], "score output")
 
+    with tempfile.TemporaryDirectory(prefix="risk-export-") as temporary:
+        export_directory = Path(temporary).resolve() / "中文 导出验收"
+        export_directory.mkdir()
+        exported_paths: list[str] = []
+        for format_name, artifact_kind in (
+            ("excel", "report_excel"),
+            ("html", "report_html"),
+            ("model", "model_package"),
+            ("html", "report_html"),
+        ):
+            saved = request_json(
+                base_url,
+                "POST",
+                f"/api/v1/reports/{run['id']}/export",
+                {"format": format_name, "directory": str(export_directory)},
+            )
+            output = Path(saved["path"])
+            assert output.parent == export_directory
+            assert output.stat().st_size == saved["size_bytes"]
+            digest = hashlib.sha256(output.read_bytes()).hexdigest()
+            assert digest == saved["sha256"] == artifacts[artifact_kind]["checksum"]
+            assert saved["path"] not in exported_paths
+            exported_paths.append(saved["path"])
+        saved_score = request_json(
+            base_url,
+            "POST",
+            f"/api/v1/score-jobs/{job['id']}/export",
+            {"directory": str(export_directory)},
+        )
+        assert (
+            hashlib.sha256(Path(saved_score["path"]).read_bytes()).hexdigest()
+            == job["metadata"]["output_sha256"]
+        )
+        preview_request = Request(
+            f"{base_url}/api/v1/reports/{run['id']}/preview",
+            headers=_desktop_session_headers(),
+        )
+        with urlopen(preview_request, timeout=30) as response:  # noqa: S310
+            assert response.headers["Content-Disposition"] == "inline"
+            assert "sandbox" in response.headers["Content-Security-Policy"]
+            assert "风控模型报告" in response.read().decode("utf-8")
+
     evidence: dict[str, Any] | None = None
     if args.evidence_output:
         evidence_token = uuid.uuid4().hex
@@ -253,6 +297,9 @@ def main() -> None:
                 "artifact_kinds": sorted(required),
                 "score_rows": job["rows"],
                 "score_column": job["metadata"]["score_column"],
+                "export_to_chinese_directory": True,
+                "export_non_overwrite": True,
+                "html_preview": True,
                 "migration_evidence": bool(evidence),
             },
             # 结果可能包含中文质检结论，ASCII 转义可兼容 Windows 旧代码页。

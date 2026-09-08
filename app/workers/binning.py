@@ -47,6 +47,15 @@ def _is_monotonic(values: Sequence[float]) -> bool:
     return bool(np.all(differences >= -1e-12) or np.all(differences <= 1e-12))
 
 
+def _numeric_order(table: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # pandas groupby sorts string labels lexically: (100, inf] precedes (2, 10].
+    # These labels are produced by pd.cut, so numeric interval bounds are authoritative.
+    def lower_bound(row: dict[str, Any]) -> float:
+        return math.inf if row["bin"] == "<MISSING>" else float(row["bin"][1:].split(",")[0])
+
+    return sorted(table, key=lower_bound)
+
+
 def monotonic_merge_suggestions(spec: dict[str, Any]) -> list[dict[str, Any]]:
     """Return explainable adjacent merge candidates without mutating the spec."""
 
@@ -101,6 +110,7 @@ def fit_numeric_bins(
     while True:
         labels = labels_for(inner)
         table, iv = _woe_table(labels, target)
+        table = _numeric_order(table)
         ordered = [row for row in table if row["bin"] != "<MISSING>"]
         rates = [row["bad_rate"] for row in ordered]
         too_small = [row for row in ordered if row["count"] / len(series) < min_bin_fraction]
@@ -196,6 +206,8 @@ def apply_manual_binning(
     validate_manual_spec(spec)
     labels = apply_bin(frame[column], spec)
     table, iv = _woe_table(labels, frame[target])
+    if spec["kind"] == "numeric":
+        table = _numeric_order(table)
     monotonic = _is_monotonic([row["bad_rate"] for row in table if row["bin"] != "<MISSING>"])
     business_exception = str(spec.get("business_exception") or "").strip()
     if not monotonic and len(business_exception) < 8:

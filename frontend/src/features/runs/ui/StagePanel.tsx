@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { reviewLabel, statusLabel } from "../lib/labels";
 import { eventSummary } from "@/shared/lib/errors";
 import { Badge, statusVariant } from "@/shared/ui/badge";
@@ -15,7 +15,7 @@ import type { Decision, Run, RunEvent } from "../types";
  * 统一的阶段详情面板，位于工作区正上方：
  * 默认紧凑展示 RUN STATUS / 当前业务阶段 / 当前技术子阶段 / NEXT ACTION；
  * 展开后包含最新事件、Audit 列表、业务阶段内子步骤进度与完整事件历史。
- * 待确认（awaiting_decision）时强制展开并高亮，同时由 DecisionWorkbench 打开确认弹窗。
+ * 待确认时高亮；详情仅按用户操作展开，避免挤占工作区。
  */
 export function StagePanel({
   run,
@@ -27,12 +27,8 @@ export function StagePanel({
   events: RunEvent[];
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [eventLimit, setEventLimit] = useState(30);
   const awaiting = run?.status === "awaiting_decision";
-
-  // 进入待确认状态时自动展开，提示用户“需要你确认”
-  useEffect(() => {
-    if (awaiting) setExpanded(true);
-  }, [awaiting]);
 
   if (!run)
     return (
@@ -41,9 +37,7 @@ export function StagePanel({
           <span className="panel-label">RUN STATUS</span>
           <Badge variant="muted">未启动</Badge>
         </div>
-        <p className="panel-hint">
-          导入本地表、完成关联并创建 Y 任务后，这里会持续显示 Agent、工具与 Reviewer 状态。
-        </p>
+        <p className="panel-hint">导入本地数据并选择建模目标后即可开始；多表关联按需使用。</p>
       </section>
     );
 
@@ -93,7 +87,7 @@ export function StagePanel({
       </div>
       {awaiting && (
         <p className="panel-attention" role="status">
-          当前方案等待你的确认，已打开 Human in the Loop 弹窗；确认后 Agent 才会继续。
+          当前方案等待确认。返回工作台可查看并确认，任务不会自动跳过此步骤。
         </p>
       )}
       {expanded && (
@@ -146,7 +140,7 @@ export function StagePanel({
           {events.length > 0 && (
             <div className="rail-history">
               {events
-                .slice()
+                .slice(-eventLimit)
                 .reverse()
                 .map((event) => (
                   <div key={event.id}>
@@ -157,6 +151,14 @@ export function StagePanel({
                     <p>{eventSummary(event.status, event.summary, eventErrorCode(event))}</p>
                   </div>
                 ))}
+              {events.length > eventLimit && (
+                <button
+                  className="panel-toggle"
+                  onClick={() => setEventLimit((limit) => limit + 100)}
+                >
+                  加载更早事件（还剩 {events.length - eventLimit} 条）
+                </button>
+              )}
             </div>
           )}
         </div>

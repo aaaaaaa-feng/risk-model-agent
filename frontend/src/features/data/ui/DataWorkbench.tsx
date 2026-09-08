@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useMemo, useRef, useState } from "react";
 import { dataApi } from "../api/dataApi";
 import { errorMessage } from "@/shared/lib/format";
 import { statusLabel } from "@/features/runs";
@@ -15,6 +15,7 @@ import type { ProjectDetail } from "@/features/projects";
 import type { DataAsset } from "../types";
 
 import { AssetTable } from "./DataSections";
+import { initialDatasetId, runnableSelection } from "../lib/workflow";
 
 interface Props {
   detail: ProjectDetail;
@@ -31,39 +32,47 @@ interface JoinStepDraft {
 type DataSection = "upload" | "join" | "target";
 const dataSections: ReadonlyArray<readonly [DataSection, string]> = [
   ["upload", "1 导入"],
-  ["join", "2 关联"],
-  ["target", "3 Y 任务"],
+  ["join", "2 关联（可选）"],
+  ["target", "3 目标与启动"],
 ];
 
 export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
-  const [section, setSection] = useState<DataSection>("upload");
-  const [uploadKind, setUploadKind] = useState("feature");
+  const [section, setSection] = useState<DataSection>(
+    detail.dataset_versions.length ? "target" : "upload",
+  );
+  const [uploadKind, setUploadKind] = useState("base");
   const [busy, setBusy] = useState("");
-  const [baseId, setBaseId] = useState("");
+  const [baseId, setBaseId] = useState(
+    detail.assets.find((asset) => asset.kind === "base" && asset.status === "ready")?.id || "",
+  );
   const [steps, setSteps] = useState<JoinStepDraft[]>([]);
   const [recommendation, setRecommendation] = useState<unknown>(null);
-  const [datasetId, setDatasetId] = useState("");
+  const [datasetId, setDatasetId] = useState(() =>
+    initialDatasetId(detail.dataset_versions, detail.target_tasks),
+  );
   const [targets, setTargets] = useState<string[]>([]);
-  const [selectedTasks, setSelectedTasks] = useState<string[]>([]);
-  const assets = detail.assets.filter((item) => item.status !== "sheet_selection_required");
+  const [selectedTasks, setSelectedTasks] = useState<string[]>(() =>
+    detail.target_tasks.filter((task) => task.status === "queued").map((task) => task.id),
+  );
+  const queueRef = useRef<HTMLDivElement>(null);
+  const assets = detail.assets.filter(
+    (item) => item.status === "ready" && ["base", "feature"].includes(item.kind),
+  );
+  const activeDatasetId =
+    datasetId || initialDatasetId(detail.dataset_versions, detail.target_tasks);
+  const activeBaseId =
+    baseId || assets.find((asset) => asset.kind === "base")?.id || assets[0]?.id || "";
+  const currentTasks = detail.target_tasks.filter(
+    (task) => task.dataset_version_id === activeDatasetId,
+  );
+  const selectedTaskIds = runnableSelection(selectedTasks, detail.target_tasks, activeDatasetId);
+  const existingTargets = new Set(currentTasks.map((task) => task.target_column));
   const binaryCandidates = useMemo(
     () =>
-      detail.dataset_versions.find((item) => item.id === datasetId)?.profile?.binary_candidates ||
-      [],
-    [detail.dataset_versions, datasetId],
+      detail.dataset_versions.find((item) => item.id === activeDatasetId)?.profile
+        ?.binary_candidates || [],
+    [detail.dataset_versions, activeDatasetId],
   );
-  /* eslint-disable react-hooks/exhaustive-deps */
-  // Initialize defaults once when the detail shape changes; full deps would restart selection logic.
-  useEffect(() => {
-    if (!baseId && assets.length)
-      setBaseId((assets.find((item) => item.kind === "base") || assets[0]).id);
-    if (!datasetId && detail.dataset_versions.length) setDatasetId(detail.dataset_versions[0].id);
-    if (!selectedTasks.length && detail.target_tasks.length)
-      setSelectedTasks(
-        detail.target_tasks.filter((item) => item.status === "queued").map((item) => item.id),
-      );
-  }, [assets.length, detail.dataset_versions.length, detail.target_tasks.length]);
-  /* eslint-enable react-hooks/exhaustive-deps */
 
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
@@ -76,26 +85,33 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
         form.append("kind", uploadKind);
         await dataApi.uploadAsset(detail.project.id, form);
       }
-      await onRefresh();
+      notify("文件已导入。可直接使用单表建模，或先关联特征表。");
     } catch (error) {
       notify(errorMessage(error), true);
     } finally {
       setBusy("");
       event.target.value = "";
+      await onRefresh();
     }
   };
   const chooseSheet = async (asset: DataAsset, sheet: string) => {
+    setBusy(asset.id);
     try {
       await dataApi.selectSheet(asset.id, sheet);
       await onRefresh();
     } catch (error) {
       notify(errorMessage(error), true);
+    } finally {
+      setBusy("");
     }
   };
   const materialize = async (assetId: string) => {
     setBusy(assetId);
     try {
-      await dataApi.materialize(assetId);
+      const result = await dataApi.materialize(assetId);
+      setDatasetId(result.dataset_version.id);
+      setTargets([]);
+      setSelectedTasks([]);
       await onRefresh();
       setSection("target");
     } catch (error) {
@@ -105,7 +121,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
     }
   };
   const addStep = () => {
-    const right = assets.find((item) => item.id !== baseId);
+    const right = assets.find((item) => item.id !== activeBaseId);
     setSteps((current) => [
       ...current,
       { id: crypto.randomUUID(), right_asset_id: right?.id || "", leftKeys: "", rightKeys: "" },
@@ -113,10 +129,10 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
     setRecommendation(null);
   };
   const recommend = async (step: JoinStepDraft) => {
-    if (!baseId || !step.right_asset_id) return;
+    if (!activeBaseId || !step.right_asset_id) return;
     setBusy(`recommend-${step.id}`);
     try {
-      const result = await dataApi.recommendJoin(baseId, step.right_asset_id);
+      const result = await dataApi.recommendJoin(activeBaseId, step.right_asset_id);
       const best = result.recommendations?.[0];
       setRecommendation({ stepId: step.id, ...result });
       if (best)
@@ -138,7 +154,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
     }
   };
   const executeJoin = async () => {
-    if (!baseId || !steps.length) return;
+    if (!activeBaseId || !steps.length) return;
     setBusy("join");
     try {
       const payloadSteps = steps.map((step) => ({
@@ -152,10 +168,13 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
       const created = await dataApi.createJoinPlan({
         project_id: detail.project.id,
         name: `关联方案 ${new Date().toLocaleTimeString()}`,
-        base_asset_id: baseId,
+        base_asset_id: activeBaseId,
         steps: payloadSteps,
       });
-      await dataApi.executeJoinPlan(created.join_plan.id);
+      const result = await dataApi.executeJoinPlan(created.join_plan.id);
+      setDatasetId(result.dataset_version.id);
+      setTargets([]);
+      setSelectedTasks([]);
       await onRefresh();
       setSection("target");
     } catch (error) {
@@ -165,16 +184,19 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
     }
   };
   const createTargets = async () => {
-    if (!datasetId || !targets.length) return;
+    if (!activeDatasetId || !targets.length) return;
     setBusy("targets");
     try {
-      await dataApi.createTargets({
+      const result = await dataApi.createTargets({
         project_id: detail.project.id,
-        dataset_version_id: datasetId,
+        dataset_version_id: activeDatasetId,
         target_columns: targets,
       });
       setTargets([]);
+      setSelectedTasks(result.target_tasks.map((task) => task.id));
       await onRefresh();
+      window.requestAnimationFrame(() => queueRef.current?.scrollIntoView({ block: "nearest" }));
+      notify("目标任务已创建并选中，可以开始建模。");
     } catch (error) {
       notify(errorMessage(error), true);
     } finally {
@@ -185,19 +207,20 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
     setBusy("runs");
     let first = "";
     try {
-      for (const taskId of selectedTasks) {
+      for (const taskId of selectedTaskIds) {
         const result = await dataApi.createRun({
           project_id: detail.project.id,
           target_task_id: taskId,
           mode: detail.project.mode,
         });
         first ||= result.run.id;
+        setSelectedTasks((current) => current.filter((id) => id !== taskId));
       }
-      await onRefresh();
-      if (first) onRunsStarted(first);
     } catch (error) {
       notify(errorMessage(error), true);
     } finally {
+      await onRefresh();
+      if (first) onRunsStarted(first);
       setBusy("");
     }
   };
@@ -210,6 +233,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
             准备本地建模数据
             <Hint text="支持直接建模和多表关联；每个关联结果都会重新校验。" />
           </h2>
+          <p className="stage-description">导入数据 → 选择建模目标 → 确认样本与方案 → 建模和导出</p>
         </div>
         <div className="run-meta">
           PROJECT <b>{detail.project.id.slice(-8)}</b>
@@ -281,6 +305,29 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
             onSheet={chooseSheet}
             onMaterialize={materialize}
           />
+          {assets.length > 0 && (
+            <div className="workflow-next">
+              <p>
+                单表已包含目标和特征时，点击对应文件的“用此表建模”。只有多张表需要合并时才进入关联。
+              </p>
+              <div className="inline-actions">
+                {assets.length > 1 && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setSection("join")}
+                    disabled={Boolean(busy)}
+                  >
+                    关联多张表
+                  </Button>
+                )}
+                {detail.dataset_versions.length > 0 && (
+                  <Button onClick={() => setSection("target")} disabled={Boolean(busy)}>
+                    继续选择建模目标
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
         </section>
       )}
       {section === "join" && (
@@ -297,14 +344,19 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                 <Hint text="先由 Agent 推荐关联键，再由用户核对或修改，最后执行完整校验。" />
               </h3>
             </div>
-            <Button variant="outline" onClick={addStep} disabled={assets.length < 2}>
+            <Button
+              variant="outline"
+              onClick={addStep}
+              disabled={assets.length < 2 || Boolean(busy)}
+            >
               ＋ 添加特征表
             </Button>
           </div>
           <label className="field-inline">
             基准表
             <Select
-              value={baseId}
+              value={activeBaseId}
+              disabled={Boolean(busy)}
               onValueChange={(value) => {
                 setBaseId(value);
                 setSteps([]);
@@ -332,6 +384,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                   右表
                   <Select
                     value={step.right_asset_id}
+                    disabled={Boolean(busy)}
                     onValueChange={(value) =>
                       setSteps((current) =>
                         current.map((v) =>
@@ -345,7 +398,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                     </SelectTrigger>
                     <SelectContent>
                       {assets
-                        .filter((a) => a.id !== baseId && a.kind !== "dictionary")
+                        .filter((a) => a.id !== activeBaseId)
                         .map((a) => (
                           <SelectItem key={a.id} value={a.id}>
                             {a.name}
@@ -358,6 +411,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                   左键（逗号分隔）
                   <Input
                     value={step.leftKeys}
+                    disabled={Boolean(busy)}
                     onChange={(e) =>
                       setSteps((current) =>
                         current.map((v) =>
@@ -372,6 +426,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                   右键（逗号分隔）
                   <Input
                     value={step.rightKeys}
+                    disabled={Boolean(busy)}
                     onChange={(e) =>
                       setSteps((current) =>
                         current.map((v) =>
@@ -386,7 +441,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                   variant="outline"
                   className="join-step-recommend"
                   onClick={() => recommend(step)}
-                  disabled={busy === `recommend-${step.id}`}
+                  disabled={Boolean(busy)}
                 >
                   {busy === `recommend-${step.id}` ? "分析中…" : "Agent 推荐"}
                 </Button>
@@ -394,6 +449,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                   variant="ghost"
                   size="icon"
                   aria-label="删除步骤"
+                  disabled={Boolean(busy)}
                   onClick={() => setSteps((current) => current.filter((v) => v.id !== step.id))}
                 >
                   ×
@@ -414,10 +470,22 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
           <div className="inline-actions">
             <Button
               onClick={executeJoin}
-              disabled={!steps.length || busy === "join"}
+              disabled={
+                !steps.length ||
+                Boolean(busy) ||
+                steps.some(
+                  (step) =>
+                    !step.right_asset_id ||
+                    !splitKeys(step.leftKeys).length ||
+                    splitKeys(step.leftKeys).length !== splitKeys(step.rightKeys).length,
+                )
+              }
               title="按当前关联键执行多表关联并运行粒度与样本膨胀校验"
             >
               {busy === "join" ? "关联校验中…" : "执行关联并校验"}
+            </Button>
+            <Button variant="outline" onClick={() => setSection("upload")} disabled={Boolean(busy)}>
+              返回导入
             </Button>
           </div>
         </section>
@@ -432,22 +500,33 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
           <div className="section-heading">
             <div>
               <h3>
-                创建多个 Y 任务
+                选择建模目标（Y）
                 <Hint text="-1 和空值会按每个 Y 独立排除；一个 Y 阻断不影响其他任务。" />
               </h3>
             </div>
           </div>
           {detail.dataset_versions.length === 0 ? (
-            <Empty text="请先把原始表物化，或完成多表关联。" />
+            <div className="workflow-next">
+              <Empty text="先在导入页选择一张表用于建模，或完成多表关联。" />
+              <Button onClick={() => setSection("upload")}>返回导入数据</Button>
+            </div>
           ) : (
             <>
               <label>
                 建模数据版本
                 <Select
-                  value={datasetId}
+                  value={activeDatasetId}
+                  disabled={Boolean(busy)}
                   onValueChange={(value) => {
                     setDatasetId(value);
                     setTargets([]);
+                    setSelectedTasks(
+                      detail.target_tasks
+                        .filter(
+                          (task) => task.dataset_version_id === value && task.status === "queued",
+                        )
+                        .map((task) => task.id),
+                    );
                   }}
                 >
                   <SelectTrigger>
@@ -467,6 +546,7 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                   binaryCandidates.map((column) => (
                     <label key={column}>
                       <Checkbox
+                        disabled={Boolean(busy) || existingTargets.has(column)}
                         checked={targets.includes(column)}
                         onCheckedChange={(checked) =>
                           setTargets((current) =>
@@ -477,32 +557,39 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                         }
                       />
                       {column}
+                      {existingTargets.has(column) ? "（已有任务）" : ""}
                     </label>
                   ))
                 ) : (
                   <p>该版本没有识别到同时包含 0/1 的候选 Y。</p>
                 )}
               </div>
-              <Button disabled={!targets.length || busy === "targets"} onClick={createTargets}>
-                {busy === "targets" ? "创建中…" : `创建 ${targets.length || ""} 个 Y 任务`}
+              <Button disabled={!targets.length || Boolean(busy)} onClick={createTargets}>
+                {busy === "targets"
+                  ? "创建中…"
+                  : targets.length
+                    ? `创建 ${targets.length} 个目标任务`
+                    : "先选择建模目标"}
               </Button>
             </>
           )}
-          {detail.target_tasks.length > 0 && (
-            <div className="task-queue">
+          {currentTasks.length > 0 && (
+            <div className="task-queue" ref={queueRef}>
               <div className="section-heading">
                 <div>
                   <h3>
-                    Y 任务队列
+                    当前数据版本的建模任务
                     <Hint text="可一次启动多个任务，本地 Worker 按顺序执行。" />
                   </h3>
                 </div>
               </div>
-              {detail.target_tasks.map((task) => (
+              {currentTasks.map((task) => (
                 <label className="task-row" key={task.id}>
                   <Checkbox
-                    disabled={!["queued", "failed", "blocked"].includes(task.status)}
-                    checked={selectedTasks.includes(task.id)}
+                    disabled={
+                      Boolean(busy) || !["queued", "failed", "blocked"].includes(task.status)
+                    }
+                    checked={selectedTaskIds.includes(task.id)}
                     onCheckedChange={(checked) =>
                       setSelectedTasks((current) =>
                         checked === true
@@ -516,8 +603,13 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                   <Badge variant={statusVariant(task.status)}>{statusLabel(task.status)}</Badge>
                 </label>
               ))}
-              <Button disabled={!selectedTasks.length || busy === "runs"} onClick={startRuns}>
-                {busy === "runs" ? "入队中…" : `启动 ${selectedTasks.length} 个 Run`}
+              <p className="section-copy">
+                {detail.project.mode === "semi_trusted"
+                  ? "开始后会依次请你确认目标、样本、特征与模型方案。"
+                  : "开始后，审核通过的步骤会自动继续。"}
+              </p>
+              <Button disabled={!selectedTaskIds.length || Boolean(busy)} onClick={startRuns}>
+                {busy === "runs" ? "正在启动…" : `开始建模（${selectedTaskIds.length} 个目标）`}
               </Button>
             </div>
           )}

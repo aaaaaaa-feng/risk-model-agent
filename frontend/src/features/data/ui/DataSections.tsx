@@ -41,7 +41,14 @@ export function AssetTable({
         <TableBody>
           {assets.map((asset) => (
             <TableRow key={asset.id}>
-              <TableCell>{asset.kind}</TableCell>
+              <TableCell>
+                {{
+                  base: "基准样本",
+                  feature: "特征表",
+                  dictionary: "数据字典",
+                  score_input: "待评分样本",
+                }[asset.kind] || asset.kind}
+              </TableCell>
               <TableCell>
                 <strong>{asset.name}</strong>
               </TableCell>
@@ -53,7 +60,7 @@ export function AssetTable({
               </TableCell>
               <TableCell>
                 {asset.status === "sheet_selection_required" ? (
-                  <Select onValueChange={(value) => onSheet(asset, value)}>
+                  <Select disabled={Boolean(busy)} onValueChange={(value) => onSheet(asset, value)}>
                     <SelectTrigger className="h-[34px]">
                       <SelectValue placeholder="选择 Sheet" />
                     </SelectTrigger>
@@ -66,7 +73,9 @@ export function AssetTable({
                     </SelectContent>
                   </Select>
                 ) : (
-                  <Badge variant="ok">ready</Badge>
+                  <Badge variant={asset.status === "ready" ? "ok" : "muted"}>
+                    {asset.status === "ready" ? "已就绪" : asset.status}
+                  </Badge>
                 )}
               </TableCell>
               <TableCell>
@@ -74,11 +83,13 @@ export function AssetTable({
                   variant="link"
                   size="sm"
                   disabled={
-                    asset.status !== "ready" || busy === asset.id || asset.kind === "dictionary"
+                    asset.status !== "ready" ||
+                    Boolean(busy) ||
+                    !["base", "feature"].includes(asset.kind)
                   }
                   onClick={() => onMaterialize(asset.id)}
                 >
-                  {busy === asset.id ? "生成中…" : "生成数据版本"}
+                  {busy === asset.id ? "准备中…" : "用此表建模"}
                 </Button>
               </TableCell>
             </TableRow>

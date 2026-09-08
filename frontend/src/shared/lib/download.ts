@@ -13,12 +13,7 @@ export function saveDownloadedFile(file: DownloadedFile, fallbackName: string): 
   window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
-/** 在用户点击时预先打开窗口，待 HTML 安全下载后再导航到 Blob URL。 */
-export function openDownloadedHtml(file: DownloadedFile, preview: Window): void {
-  const url = URL.createObjectURL(file.blob);
-  preview.opener = null;
-  preview.location.href = url;
-  // 只要主工作台仍打开，就保留预览 URL，避免报告页在固定时间后刷新失效。
-  // 主页面离开时统一释放；单个 HTML 报告通常很小，这一生命周期更可预测。
-  window.addEventListener("pagehide", () => URL.revokeObjectURL(url), { once: true });
+/** Reject error documents before opening the same-origin, script-free preview. */
+export function validateHtmlReport(file: DownloadedFile): void {
+  if (!/^text\/html(?:;|$)/i.test(file.contentType)) throw new Error("REPORT_PREVIEW_INVALID");
 }

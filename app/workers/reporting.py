@@ -498,7 +498,13 @@ def write_report_html(report: dict[str, Any], path: Path) -> Path:
                     _metric(row["cumulative_capture"]),
                 ]
             )
-    serialized = html.escape(json.dumps(report, ensure_ascii=False), quote=False)
+    # A script element is raw text: HTML entities would silently alter embedded JSON.
+    serialized = (
+        json.dumps(report, ensure_ascii=False)
+        .replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+    )
     quality_note = "；".join(summary.get("quality_notes", [])) or "Reviewer 与确定性检查均已通过。"
     review_coverage = report["review"]["coverage"]
     coverage_note = (

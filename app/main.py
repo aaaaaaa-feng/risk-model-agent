@@ -33,7 +33,7 @@ from app.core.paths import AppPaths, get_paths, is_synced_path
 from app.workers.model_adapters import available_models
 
 
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 logger = logging.getLogger(__name__)
 
@@ -194,15 +194,18 @@ def create_app(
             )
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
+        response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; "
-            "object-src 'none'; connect-src 'self'; img-src 'self' data:; "
-            "style-src 'self' 'unsafe-inline'; script-src 'self'"
+        response.headers.setdefault(
+            "Content-Security-Policy",
+            (
+                "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; "
+                "object-src 'none'; frame-src 'self'; connect-src 'self'; img-src 'self' data:; "
+                "style-src 'self' 'unsafe-inline'; script-src 'self'"
+            ),
         )
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = response.headers.get("Cache-Control", "no-store")

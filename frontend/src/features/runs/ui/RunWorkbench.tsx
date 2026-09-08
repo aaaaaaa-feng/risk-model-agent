@@ -13,11 +13,27 @@ export function RunWorkbench({
   run,
   events,
   onRetry,
+  onOpenReport,
+  pendingTitle,
+  onReview,
 }: {
   run: Run;
   events: RunEvent[];
-  onRetry?: () => void;
+  onRetry?: () => void | Promise<void>;
+  onOpenReport?: () => void;
+  pendingTitle?: string;
+  onReview?: () => void;
 }) {
+  const [retrying, setRetrying] = useState(false);
+  const retry = async () => {
+    if (retrying || !onRetry) return;
+    setRetrying(true);
+    try {
+      await onRetry();
+    } finally {
+      setRetrying(false);
+    }
+  };
   const result = (run.state?.model_result as ModelResult) || {};
   const candidates = result.candidates || [];
   const champion = result.champion
@@ -40,13 +56,24 @@ export function RunWorkbench({
             {failure.summary}
           </strong>
           {failure.action && <p>{failure.action}</p>}
-          {onRetry && <Button onClick={onRetry}>基于同一 Y 新建 Run</Button>}
+          {onRetry && (
+            <Button disabled={retrying} onClick={retry}>
+              {retrying ? "正在新建…" : "基于同一 Y 新建 Run"}
+            </Button>
+          )}
         </div>
       </div>
     );
   }
   return (
     <div className="run-workbench">
+      {run.status === "awaiting_decision" && (
+        <div className="workflow-next" role="status">
+          <strong>{pendingTitle || "当前方案等待确认"}</strong>
+          <p>任务已暂停，确认后才会继续。你可以先查看数据、历史记录或向 Agent 提问。</p>
+          <Button onClick={onReview}>查看并确认方案</Button>
+        </div>
+      )}
       {run.status === "succeeded" && (
         <div className="run-complete">
           <strong>{conditional ? "模型已完成质检，需关注排序" : "模型已通过最终质检"}</strong>
@@ -55,6 +82,14 @@ export function RunWorkbench({
               ? "产物已生成；Test 等频分箱未达到绝对排序，报告已标记条件通过。"
               : "报告、模型包与独立评分入口已生成。"}
           </p>
+          <div className="inline-actions">
+            {onOpenReport && <Button onClick={onOpenReport}>查看报告与导出</Button>}
+            {onRetry && (
+              <Button variant="outline" disabled={retrying} onClick={retry}>
+                {retrying ? "正在新建…" : "基于同一 Y 新建 Run"}
+              </Button>
+            )}
+          </div>
         </div>
       )}
       <div className="progress-block">
@@ -116,7 +151,7 @@ export function RunWorkbench({
         </>
       ) : (
         <div className="live-node">
-          <div className="pulse" />
+          {run.status !== "awaiting_decision" && <div className="pulse" />}
           <div>
             <strong>
               {runStageLabel[run.stage] || run.stage}
@@ -155,3 +190,4 @@ function Metric({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+import { useState } from "react";

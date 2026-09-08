@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { formatMetric, formatNumber, formatPercent } from "@/shared/lib/format";
 import { monotonicLabel } from "../lib/labels";
 import { Badge } from "@/shared/ui/badge";
@@ -194,12 +194,15 @@ export function ScreeningDecision({
   summary,
   edits,
   setEdits,
+  reasons,
+  setReasons,
 }: {
   summary: import("../types").ScreeningSummary;
   edits: Record<string, unknown>;
   setEdits: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
+  reasons: Record<string, string>;
+  setReasons: React.Dispatch<React.SetStateAction<Record<string, string>>>;
 }) {
-  const [reasons, setReasons] = useState<Record<string, string>>({});
   const recoverable = (summary.excluded || []).filter((item) => item.recoverable);
   const selected = new Set(
     ((edits.restore_features as RestoreFeature[]) || []).map((item) => item.column),
@@ -244,6 +247,7 @@ export function ScreeningDecision({
               <TableRow key={item.column}>
                 <TableCell>
                   <Checkbox
+                    aria-label={`恢复变量 ${item.column}`}
                     checked={selected.has(item.column)}
                     disabled={(reasons[item.column] || "").trim().length < 8}
                     title="请先填写至少 8 个字符的业务理由"
@@ -256,6 +260,7 @@ export function ScreeningDecision({
                 <TableCell>{formatMetric(item.iv)}</TableCell>
                 <TableCell>
                   <Input
+                    aria-label={`${item.column} 的恢复理由`}
                     value={reasons[item.column] || ""}
                     onChange={(e) => {
                       const value = e.target.value;

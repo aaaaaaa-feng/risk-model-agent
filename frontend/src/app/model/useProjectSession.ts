@@ -48,8 +48,12 @@ export function useProjectSession() {
     openProjectData,
     resetSelection,
   } = selection;
+  const activeProjectId =
+    projectsLoadState === "loaded" && projects.some((project) => project.id === selectedId)
+      ? selectedId
+      : null;
   const { detail, loadDetail, detailAbort, clearDetail } = useProjectData(
-    selectedId,
+    activeProjectId,
     selectedRef,
     setRunId,
   );
@@ -61,7 +65,7 @@ export function useProjectSession() {
     runAbort,
     streamStatus,
     clearRun,
-  } = useRunData(runId, selectedId, runRef, selectedRef, loadDetail);
+  } = useRunData(activeProjectId ? runId : null, activeProjectId, runRef, selectedRef, loadDetail);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {

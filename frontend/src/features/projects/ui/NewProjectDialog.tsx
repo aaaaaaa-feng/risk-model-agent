@@ -28,9 +28,6 @@ export function NewProjectDialog({ open, busy, onClose, onCreate, onCreateDemo }
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     await onCreate({ name, description, mode, metadata: organization ? { organization } : {} });
-    setName("");
-    setDescription("");
-    setOrganization("");
   };
 
   return (

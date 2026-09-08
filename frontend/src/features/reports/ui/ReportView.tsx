@@ -1,16 +1,17 @@
 import { ChangeEvent, useEffect, useState } from "react";
-import { reportsApi } from "../api/reportsApi";
+import { reportsApi, type SavedExport } from "../api/reportsApi";
+import { ExportDialog } from "./ExportDialog";
 import { errorMessage, formatMetric, formatPercent, isAbort } from "@/shared/lib/format";
 import { Button, buttonVariants } from "@/shared/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
 import { notify } from "@/shared/lib/notify";
 import { translateError, type FriendlyError } from "@/shared/lib/errors";
 import { statusLabel, type Run } from "@/features/runs";
-import { openDownloadedHtml, saveDownloadedFile } from "@/shared/lib/download";
+import { validateHtmlReport } from "@/shared/lib/download";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/shared/ui/dialog";
 import { Hint } from "@/shared/ui/hint";
 import { cn } from "@/shared/lib/utils";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table";
-import type { DownloadedFile } from "@/shared/api/client";
 import type { Project } from "@/features/projects";
 import type { ModelVersion, ReportData, ScoreJob } from "../types";
 
@@ -28,11 +29,20 @@ export function ReportView({ project, run }: Props) {
   const [reportError, setReportError] = useState<FriendlyError | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [exporting, setExporting] = useState("");
+  const [exportJob, setExportJob] = useState<{
+    label: string;
+    save: (directory: string) => Promise<SavedExport>;
+  } | null>(null);
+  const [saved, setSaved] = useState<SavedExport | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
     setReport(null);
+    setPreviewUrl("");
+    setSaved(null);
+    setExportJob(null);
     setReportError(null);
     setScoreJob(null);
     setModels([]);
@@ -84,37 +94,14 @@ export function ReportView({ project, run }: Props) {
     }
   };
 
-  const downloadFile = async (
-    task: () => Promise<DownloadedFile>,
-    fallbackName: string,
-    busyKey: string,
-  ) => {
-    setExporting(busyKey);
-    try {
-      const file = await task();
-      saveDownloadedFile(file, fallbackName);
-    } catch (error) {
-      notify(errorMessage(error), true);
-    } finally {
-      setExporting("");
-    }
-  };
-
   const openHtmlReport = async () => {
-    const preview = window.open("about:blank", "_blank");
-    if (!preview) {
-      notify(errorMessage({ code: "REPORT_PREVIEW_POPUP_BLOCKED" }), true);
-      return;
-    }
-    preview.document.title = "正在读取本地模型报告…";
-    preview.document.body.textContent = "正在读取本地模型报告…";
+    if (!run) return;
     setExporting("html");
     try {
-      if (!run) return;
       const file = await reportsApi.downloadHtml(run.id);
-      openDownloadedHtml(file, preview);
+      validateHtmlReport(file);
+      setPreviewUrl(reportsApi.previewUrl(run.id));
     } catch (error) {
-      preview.close();
       notify(errorMessage(error, { context: "model" }), true);
     } finally {
       setExporting("");
@@ -169,22 +156,77 @@ export function ReportView({ project, run }: Props) {
         <div className="report-actions">
           <Button
             variant="outline"
-            disabled={Boolean(exporting)}
+            disabled={Boolean(exporting || exportJob)}
             onClick={() =>
-              downloadFile(
-                () => reportsApi.downloadExcel(run.id),
-                `${project.name}-模型报告.xlsx`,
-                "excel",
-              )
+              setExportJob({
+                label: "Excel 报告",
+                save: (directory) => reportsApi.exportReport(run.id, "excel", directory),
+              })
             }
           >
-            {exporting === "excel" ? "导出中…" : "导出 Excel"}
+            导出 Excel…
           </Button>
-          <Button variant="outline" disabled={Boolean(exporting)} onClick={openHtmlReport}>
-            {exporting === "html" ? "读取中…" : "打开单页 HTML"}
+          <Button
+            variant="outline"
+            disabled={Boolean(exporting || exportJob)}
+            onClick={() =>
+              setExportJob({
+                label: "HTML 报告",
+                save: (directory) => reportsApi.exportReport(run.id, "html", directory),
+              })
+            }
+          >
+            导出 HTML…
+          </Button>
+          <Button
+            variant="outline"
+            disabled={Boolean(exporting || exportJob)}
+            onClick={openHtmlReport}
+          >
+            {exporting === "html" ? "读取中…" : "预览 HTML"}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={Boolean(exporting || exportJob)}
+            onClick={() =>
+              setExportJob({
+                label: "模型包",
+                save: (directory) => reportsApi.exportReport(run.id, "model", directory),
+              })
+            }
+          >
+            导出模型包…
           </Button>
         </div>
       </div>
+      {saved && (
+        <div className="export-saved" role="status">
+          <strong>已保存 {saved.filename}</strong>
+          <span>{saved.path}</span>
+        </div>
+      )}
+      {exportJob && (
+        <ExportDialog {...exportJob} onClose={() => setExportJob(null)} onSaved={setSaved} />
+      )}
+      <Dialog
+        open={Boolean(previewUrl)}
+        onOpenChange={(open) => {
+          if (!open) setPreviewUrl("");
+        }}
+      >
+        <DialogContent className="html-preview-dialog" aria-describedby="html-preview-description">
+          <div className="section-heading">
+            <DialogTitle>HTML 报告预览</DialogTitle>
+            <Button variant="outline" onClick={() => setPreviewUrl("")}>
+              关闭预览
+            </Button>
+          </div>
+          <DialogDescription id="html-preview-description">
+            可在本窗口阅读；导出后可直接用浏览器打开，无需启动建模服务。
+          </DialogDescription>
+          {previewUrl && <iframe title="独立 HTML 模型报告" src={previewUrl} sandbox="" />}
+        </DialogContent>
+      </Dialog>
       <div className="summary-grid five">
         <Metric label="Champion" value={summary.champion} />
         <Metric label="Test AUC" value={formatMetric(championMetrics("test").roc_auc)} />
@@ -412,18 +454,15 @@ export function ReportView({ project, run }: Props) {
         {scoreJob && (
           <Button
             variant="outline"
-            disabled={Boolean(exporting)}
+            disabled={Boolean(exporting || exportJob)}
             onClick={() =>
-              downloadFile(
-                () => reportsApi.downloadScores(scoreJob.id),
-                `${project.name}-评分结果.csv`,
-                "score",
-              )
+              setExportJob({
+                label: "评分结果",
+                save: (directory) => reportsApi.exportScores(scoreJob.id, directory),
+              })
             }
           >
-            {exporting === "score"
-              ? "下载中…"
-              : `下载 ${scoreJob.rows.toLocaleString()} 行评分结果`}
+            保存 {scoreJob.rows.toLocaleString()} 行评分结果…
           </Button>
         )}
       </section>

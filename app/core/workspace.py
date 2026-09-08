@@ -243,13 +243,15 @@ class WorkspaceManager:
             temporary.unlink(missing_ok=True)
 
 
-def pick_workspace_directory() -> str | None:
+def pick_workspace_directory(*, purpose: str = "workspace") -> str | None:
     """Open a native folder picker when the desktop platform provides one.
 
     The web UI keeps a typed-path fallback.  All commands use argument lists or
     fixed scripts; the user-selected path never becomes shell source.
     """
 
+    # Only fixed labels enter platform scripts; no user path is shell source.
+    title = "选择报告导出文件夹" if purpose == "export" else "选择风控建模 Agent 工作文件夹"
     if not _NATIVE_PICKER_LOCK.acquire(blocking=False):
         raise WorkspacePickerError("WORKSPACE_NATIVE_PICKER_BUSY")
 
@@ -278,7 +280,7 @@ def pick_workspace_directory() -> str | None:
                 "$owner.Size = New-Object System.Drawing.Size(1, 1); "
                 "$owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None; "
                 "$owner.ShowInTaskbar = $false; $owner.TopMost = $true; $owner.Opacity = 0.01; "
-                "$dialog.Description = '选择风控建模 Agent 工作文件夹'; "
+                f"$dialog.Description = '{title}'; "
                 "$dialog.ShowNewFolderButton = $true; "
                 "$null = $owner.Show(); $null = $owner.Activate(); "
                 "$choice = $dialog.ShowDialog($owner); "
@@ -323,7 +325,7 @@ def pick_workspace_directory() -> str | None:
                 [
                     executable,
                     "-e",
-                    'POSIX path of (choose folder with prompt "选择风控建模 Agent 工作文件夹")',
+                    f'POSIX path of (choose folder with prompt "{title}")',
                 ],
                 capture_output=True,
                 text=True,
@@ -340,7 +342,7 @@ def pick_workspace_directory() -> str | None:
                     executable,
                     "--file-selection",
                     "--directory",
-                    "--title=选择风控建模 Agent 工作文件夹",
+                    f"--title={title}",
                 ],
                 capture_output=True,
                 text=True,

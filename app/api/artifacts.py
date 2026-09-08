@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import MAX_ARCHIVE_BYTES
 from app.core.database import new_id
 from app.core.security import sha256_file
 from app.bootstrap import AppContext
+from app.core.workspace import WorkspacePickerError, pick_workspace_directory
+from app.services.exports import export_file
 
 from .dependencies import context
 
@@ -32,6 +35,48 @@ class BackupRestore(BaseModel):
     confirm: bool
 
 
+class ExportDestination(BaseModel):
+    directory: str = Field(min_length=1, max_length=4096)
+
+
+class ReportExport(ExportDestination):
+    format: Literal["excel", "html", "model"]
+
+
+@router.post("/exports/native-picker")
+async def export_picker() -> dict[str, Any]:
+    try:
+        selected = await run_in_threadpool(pick_workspace_directory, purpose="export")
+    except WorkspacePickerError as exc:
+        raise HTTPException(status_code=503, detail={"code": exc.code}) from exc
+    return {"path": selected, "cancelled": selected is None}
+
+
+@router.post("/reports/{run_id}/export")
+def export_report(
+    run_id: str, payload: ReportExport, ctx: AppContext = Depends(context)
+) -> dict[str, Any]:
+    kind = {"excel": "report_excel", "html": "report_html", "model": "model_package"}[
+        payload.format
+    ]
+    record = _artifact(ctx, run_id, kind)
+    return export_file(
+        _verified_path(record), record["name"], record["checksum"], payload.directory
+    )
+
+
+@router.post("/score-jobs/{job_id}/export")
+def export_score_job(
+    job_id: str, payload: ExportDestination, ctx: AppContext = Depends(context)
+) -> dict[str, Any]:
+    job = ctx.catalog.require("score_jobs", job_id)
+    source = Path(job["output_path"])
+    expected = (job.get("metadata") or {}).get("output_sha256")
+    if not expected:
+        raise ValueError("SCORE_OUTPUT_CHECKSUM_MISMATCH")
+    return export_file(source, source.name, expected, payload.directory)
+
+
 @router.get("/reports/{run_id}")
 def get_report(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
     artifact = _artifact(ctx, run_id, "report_json")
@@ -45,6 +90,23 @@ def get_report(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any
 @router.get("/reports/{run_id}/html")
 def report_html(run_id: str, ctx: AppContext = Depends(context)) -> FileResponse:
     return _file(_artifact(ctx, run_id, "report_html"))
+
+
+@router.get("/reports/{run_id}/preview")
+def preview_report(run_id: str, ctx: AppContext = Depends(context)) -> FileResponse:
+    record = _artifact(ctx, run_id, "report_html")
+    return FileResponse(
+        _verified_path(record),
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Content-Disposition": "inline",
+            "X-Frame-Options": "SAMEORIGIN",
+            "Content-Security-Policy": (
+                "default-src 'none'; base-uri 'none'; frame-ancestors 'self'; "
+                "sandbox; style-src 'unsafe-inline'; img-src data:"
+            ),
+        },
+    )
 
 
 @router.get("/reports/{run_id}/excel")

@@ -23,7 +23,10 @@ export function ProjectHeader({ session, settings, theme, onToggleTheme }: Props
   const status = providerStatus(settings);
   return (
     <>
-      <StageProgressBar run={session.run} />
+      <StageProgressBar
+        run={session.dataMode ? null : session.run}
+        preparing={session.dataMode || !session.run}
+      />
       <header className="app-header">
         <div className="head-title">
           <span>
@@ -43,6 +46,11 @@ export function ProjectHeader({ session, settings, theme, onToggleTheme }: Props
           {session.selectedProject && (
             <Button variant="outline" size="sm" onClick={session.showDataWorkbench}>
               数据 / 新 Y
+            </Button>
+          )}
+          {session.dataMode && session.run && (
+            <Button size="sm" onClick={() => session.selectRun(session.run!.id)}>
+              返回当前建模
             </Button>
           )}
           {session.decision && session.view === "workbench" && !session.dataMode && (
@@ -78,7 +86,12 @@ export function ProjectHeader({ session, settings, theme, onToggleTheme }: Props
           </TabsTrigger>
         </TabsList>
       </Tabs>
-      <StagePanel run={session.run} decision={session.decision} events={session.events} />
+      <StagePanel
+        key={`${session.selectedId}:${session.runId}:${session.dataMode}`}
+        run={session.dataMode ? null : session.run}
+        decision={session.dataMode ? null : session.decision}
+        events={session.dataMode ? [] : session.events}
+      />
     </>
   );
 }

@@ -522,6 +522,7 @@ class CatalogService:
         )
 
     def ensure_conversation(self, project_id: str) -> dict[str, Any]:
+        self.get_project(project_id)
         existing = self.database.list("conversations", {"project_id": project_id}, limit=1)
         if existing:
             return existing[0]

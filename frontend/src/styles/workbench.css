@@ -41,12 +41,13 @@
 
 /* Stage line / hero — 墨色面板,钴蓝只做点缀 */
 .stage-line {
-  min-height: 158px;
+  min-height: 96px;
   display: flex;
   justify-content: space-between;
   gap: var(--space-4);
-  align-items: flex-end;
-  padding: 25px 26px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 16px 20px;
   border-radius: var(--radius-xl);
   background: var(--black);
   color: var(--output-text);
@@ -56,10 +57,84 @@
   max-width: 760px;
   color: var(--output-text);
   font-family: var(--display);
-  font-size: clamp(24px, 3vw, 40px);
+  font-size: clamp(22px, 2vw, 28px);
   font-weight: 600;
   letter-spacing: -0.015em;
   margin: 6px 0 8px;
+}
+
+.stage-description {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-inverse-soft);
+}
+.workflow-next,
+.export-saved {
+  margin-block: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+}
+.workflow-next p {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.export-saved {
+  display: grid;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+.export-saved span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.export-dialog {
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+}
+.export-dialog h2,
+.html-preview-dialog h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.export-dialog p,
+.html-preview-dialog p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.export-directory {
+  display: grid;
+  gap: 8px;
+}
+.export-dialog-actions {
+  justify-content: flex-end;
+}
+.html-preview-dialog {
+  width: min(1160px, calc(100dvw - 40px));
+  height: calc(100dvh - 40px);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.html-preview-dialog iframe {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: white;
+}
+.report-actions,
+.inline-actions {
+  flex-wrap: wrap;
+}
+.run-complete button {
+  margin-top: 12px;
 }
 
 .stage-line .eyebrow {

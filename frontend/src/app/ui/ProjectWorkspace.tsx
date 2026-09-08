@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { ProjectSession } from "../model/useProjectSession";
 import { Button } from "@/shared/ui/button";
 
@@ -32,6 +32,7 @@ interface Props {
 }
 
 export function ProjectWorkspace({ session, onCreate }: Props) {
+  const [deferredDecisionId, setDeferredDecisionId] = useState("");
   return (
     <section
       id="main-workspace"
@@ -41,6 +42,16 @@ export function ProjectWorkspace({ session, onCreate }: Props) {
     >
       <Suspense fallback={<div className="loading-panel">正在加载当前视图…</div>}>
         {!session.selectedProject && <Welcome onCreate={onCreate} />}
+        {session.selectedProject &&
+          (!session.detail ||
+            (session.view === "workbench" &&
+              !session.dataMode &&
+              session.runId &&
+              !session.run)) && (
+            <div className="loading-panel" role="status">
+              正在读取当前建模任务…
+            </div>
+          )}
         {session.selectedProject &&
         session.detail &&
         session.view === "workbench" &&
@@ -61,6 +72,8 @@ export function ProjectWorkspace({ session, onCreate }: Props) {
             key={session.decision.id}
             run={session.run}
             decision={session.decision}
+            open={deferredDecisionId !== session.decision.id}
+            onDefer={() => setDeferredDecisionId(session.decision!.id)}
             onResolved={() => {
               void session.refreshRun();
               void session.refreshDetail();
@@ -70,9 +83,15 @@ export function ProjectWorkspace({ session, onCreate }: Props) {
         {session.selectedProject &&
         session.view === "workbench" &&
         !session.dataMode &&
-        session.run &&
-        !session.decision ? (
-          <RunWorkbench run={session.run} events={session.events} onRetry={session.retry} />
+        session.run ? (
+          <RunWorkbench
+            run={session.run}
+            events={session.events}
+            onRetry={session.retry}
+            onOpenReport={() => session.setView("report")}
+            pendingTitle={session.decision?.payload?.title}
+            onReview={() => setDeferredDecisionId("")}
+          />
         ) : null}
         {session.selectedProject && session.view === "report" && (
           <ReportView

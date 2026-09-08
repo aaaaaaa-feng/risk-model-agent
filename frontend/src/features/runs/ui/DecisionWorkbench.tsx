@@ -27,13 +27,16 @@ interface Props {
   run: Run;
   decision: Decision;
   onResolved: () => void;
+  open?: boolean;
+  onDefer?: () => void;
 }
 
-export function DecisionWorkbench({ run, decision, onResolved }: Props) {
+export function DecisionWorkbench({ run, decision, onResolved, open = true, onDefer }: Props) {
   const details = decision.payload;
   const summary = details.summary;
   const [busy, setBusy] = useState(false);
   const [edits, setEdits] = useState<Record<string, unknown>>({});
+  const [screeningReasons, setScreeningReasons] = useState<Record<string, string>>({});
   const [manualColumn, setManualColumn] = useState("");
   const [manualDrafts, setManualDrafts] = useState<Record<string, string>>({});
   const [manualDirtyColumns, setManualDirtyColumns] = useState<string[]>([]);
@@ -46,6 +49,7 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
     if (initializedDecision.current === decisionKey) return;
     initializedDecision.current = decisionKey;
     setEdits({});
+    setScreeningReasons({});
     if (decision.kind === "confirm_data") {
       const dataSummary = summary as import("../types").DataSummary;
       setEdits({
@@ -80,6 +84,14 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
   }, [decision.id, decision.kind, summary]);
 
   const review: import("../types").Review = summary.review || decision.review || {};
+  const defer = () => {
+    if (busy) return;
+    if (manualVisualError) {
+      notify(manualVisualError, true);
+      return;
+    }
+    onDefer?.();
+  };
 
   const confirm = async (approved: boolean) => {
     const payloadEdits = { ...edits };
@@ -111,18 +123,28 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
   };
 
   return (
-    <Dialog open>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) defer();
+      }}
+    >
       <DialogContent
         className="hitl-dialog"
         aria-describedby="hitl-confirmation-description"
-        onEscapeKeyDown={(event) => event.preventDefault()}
+        onEscapeKeyDown={(event) => {
+          event.preventDefault();
+          defer();
+        }}
         onPointerDownOutside={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
       >
         <div className="decision-workbench" data-testid="hitl-confirmation-dialog">
           <div className="stage-line">
             <div>
-              <span className="eyebrow">HUMAN IN THE LOOP · {decision.stage}</span>
+              <span className="eyebrow">
+                待确认 · {decisionStageName[decision.stage] || decision.stage}
+              </span>
               <DialogTitle id="hitl-confirmation-title">
                 {details.title || decisionStageName[decision.stage] || decision.stage}
                 <Hint text="Reviewer 已先完成审核；你只需确认业务选择，不需要阅读长代码。" />
@@ -131,7 +153,7 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
                 id="hitl-confirmation-description"
                 className="hitl-dialog-description"
               >
-                这是必须完成的阶段确认。请检查摘要与 Reviewer 证据，确认后 Agent 才会继续运行。
+                检查本阶段方案，确认后继续。可稍后确认，任务会停留在这里等待。
               </DialogDescription>
             </div>
             <div className="run-meta">
@@ -179,6 +201,8 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
               summary={summary as import("../types").ScreeningSummary}
               edits={edits}
               setEdits={setEdits}
+              reasons={screeningReasons}
+              setReasons={setScreeningReasons}
             />
           )}
           {decision.kind === "confirm_binning" && (
@@ -246,6 +270,11 @@ export function DecisionWorkbench({ run, decision, onResolved }: Props) {
             <Button variant="destructiveOutline" disabled={busy} onClick={() => confirm(false)}>
               不批准并停止本 Run
             </Button>
+            {onDefer && (
+              <Button variant="outline" disabled={busy} onClick={defer}>
+                稍后确认
+              </Button>
+            )}
             <Button disabled={busy} onClick={() => confirm(true)}>
               {busy ? "提交中…" : confirmLabel[decision.kind] || "确认并继续"}
             </Button>

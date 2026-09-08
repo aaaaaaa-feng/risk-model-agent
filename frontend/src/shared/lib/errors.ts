@@ -109,6 +109,19 @@ function ruleFor(
 ): Pick<FriendlyError, "summary" | "action"> {
   const code = facts.code || "";
   const message = (facts.message || "").toLowerCase();
+  if (code.startsWith("EXPORT_"))
+    return {
+      summary: code === "EXPORT_DIRECTORY_INVALID" ? "保存文件夹无效。" : "文件未能保存。",
+      action:
+        code === "EXPORT_DIRECTORY_INVALID"
+          ? "请选择已存在的文件夹，或输入完整的本机文件夹路径。"
+          : "请检查目录权限和磁盘空间，或选择其他文件夹后重试。",
+    };
+  if (code === "REPORT_PREVIEW_INVALID")
+    return {
+      summary: "报告内容不是有效的 HTML 文件。",
+      action: "请重新生成报告后重试。",
+    };
 
   if (
     facts.status === 0 ||

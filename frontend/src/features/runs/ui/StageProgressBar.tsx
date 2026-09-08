@@ -5,21 +5,29 @@ import type { Run } from "../types";
  * 顶部业务流程条：只展示 4 个业务阶段，当前阶段高亮并带传导动画；
  * 具体技术子阶段由 StagePanel 展示，这里通过 tooltip 提示。
  */
-export function StageProgressBar({ run }: { run: Run | null }) {
-  const current = businessStageIndex(run?.stage);
+export function StageProgressBar({
+  run,
+  preparing = false,
+}: {
+  run: Run | null;
+  preparing?: boolean;
+}) {
+  const current = preparing ? 0 : businessStageIndex(run?.stage);
   const awaiting = run?.status === "awaiting_decision";
   return (
     <nav className="stage-progress" aria-label="业务流程阶段">
       <ol>
         {BUSINESS_STAGES.map((group, index) => {
           const state =
-            current < 0
-              ? "todo"
-              : index < current
-                ? "done"
-                : index === current
-                  ? "current"
-                  : "todo";
+            run?.status === "succeeded"
+              ? "done"
+              : current < 0
+                ? "todo"
+                : index < current
+                  ? "done"
+                  : index === current
+                    ? "current"
+                    : "todo";
           const subTip = group.substages.map(stageLabel).join(" / ");
           return (
             <li

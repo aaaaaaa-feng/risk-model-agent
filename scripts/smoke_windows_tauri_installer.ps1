@@ -514,13 +514,19 @@ function Invoke-NativePickerCancelSmoke {
     param(
         [Parameter(Mandatory = $true)][System.Diagnostics.Process]$BackendProcess,
         [Parameter(Mandatory = $true)][string]$BaseUrl,
-        [Parameter(Mandatory = $true)][string]$BackendLogPath
+        [Parameter(Mandatory = $true)][string]$BackendLogPath,
+        [ValidateSet("workspace", "exports")][string]$PickerPurpose = "workspace"
     )
 
     # 请求必须在后台等待，因为被测 API 会一直阻塞到真实 Windows Forms
     # 文件夹对话框返回。FolderBrowserDialog 是带透明 owner 的模态顶层窗口，
     # 进程的主窗口句柄可能始终为 0；因此按后端派生 PID 枚举 Win32 顶层窗口。
     # 只关闭明确属于该 PowerShell 进程的标准对话框，不触碰 runner 其他窗口。
+    $PickerUrl = if ($PickerPurpose -eq "exports") {
+        "$BaseUrl/api/v1/exports/native-picker"
+    } else {
+        "$BaseUrl/api/v1/workspace/native-picker"
+    }
     $PickerJob = Start-Job -ScriptBlock {
         param([string]$TargetUrl)
         $Response = Invoke-RestMethod `
@@ -530,7 +536,7 @@ function Invoke-NativePickerCancelSmoke {
             -Body "{}" `
             -TimeoutSec 45
         $Response | ConvertTo-Json -Depth 4 -Compress
-    } -ArgumentList "$BaseUrl/api/v1/workspace/native-picker"
+    } -ArgumentList $PickerUrl
 
     try {
         $Deadline = [DateTime]::UtcNow.AddSeconds(20)
@@ -635,6 +641,7 @@ function Invoke-NativePickerCancelSmoke {
                 -BackendLogPath $BackendLogPath
             throw "系统文件夹选择器取消后没有返回 cancelled=true。$Diagnostics"
         }
+        Write-Host "Native picker passed: $PickerPurpose (real dialog and cancellation)."
     } finally {
         if ($PickerJob.State -notin @("Completed", "Failed", "Stopped")) {
             Stop-Job -Job $PickerJob -ErrorAction SilentlyContinue
@@ -1452,6 +1459,11 @@ try {
     if ($WorkspaceSelected.workspace.configured -ne $true -or $WorkspaceSelected.workspace.needs_setup -ne $false) {
         throw "首次工作区 API 选择后仍显示未配置。"
     }
+    Invoke-NativePickerCancelSmoke `
+        -BackendProcess $WorkspaceBackendProcess `
+        -BaseUrl $WorkspaceBaseUrl `
+        -BackendLogPath $env:RISK_AGENT_BACKEND_LOG_PATH `
+        -PickerPurpose "exports"
     if (-not [string]::Equals($WorkspaceSelected.workspace.path, $WorkspaceSelectionDirectory, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "首次工作区 API 返回的路径与中文空格目标目录不一致。"
     }
