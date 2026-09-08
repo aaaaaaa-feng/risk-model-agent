@@ -19,3 +19,5 @@
 AgentEval实施50c14b61947d1c581dd56963b707e99c8e9df89c，合同agent-eval/1.0.0，当前domain-graders/3；历史两版重评分实际为domain-graders/2。报告reports/dual-domain/2026-09-09-risk.md已核实读取，五题旧2/5通过另3缺证据，新5/5规则通过，不是模型效果改善。bf3a5ac实际Worker MOB30固定/优化各一次目标均未达，开发指标0.7099/0.7157，26.69/45.08秒。对方回报最终4e9bc54 Worker单题通过47.61秒。
 
 补齐risk-eval-budget/v1能力入口和输出：Token单位，Planner/Reviewer共享Run账本，usage未知保持null及预留；对方调度器以max_total_tokens/max_trial_tokens预留，不假设美元价格。共享账本、输入输出预算、未知usage保守阻断由OpenAI/Anthropic无网络夹具验证。真实调用授权仍未获得。
+
+最终回执：AgentEval dfdb083132f63ed909af49b657377289686e7460已推送，CI34253136990 success；独立risk报告远程可读。根handover已替换待推送状态并加入最终报告和预算证据链接。未新增真实调用授权。

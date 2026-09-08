@@ -11,6 +11,8 @@
 - 未测/条件：真实Provider多次运行需要有限Token总额及每次分配；真实数据/用户/专家/安装器实机需要各自授权材料与设备。不用Mock或测试通过率冒充这些证据。
 - 服务：临时8876验收服务已停止并确认端口释放，合成数据保留；默认启动方法见根handover.md。
 - Git：origin已核实为aaaaaaa-feng/risk-model-agent，PUBLIC可见性保持；交接6c38e43已push，远程SHA和handover文件哈希一致；CI34252340892五项全部success。补充CI验收文档后继续核对最新HEAD，不合并main、不强推。
-- 下一步：核对CI记录文档的最终HEAD；后续真实模型/专业/设备验证的具体动作见handover.md，当前无相关效果结论。
+- 本次研发实现和本地验收已完成；文档补充提交的实时CI以分支链接为准。后续真实模型/专业/设备验证具体动作见handover.md，当前无相关效果结论。
 
 索引：[根交接](../../handover.md)、[逐题验收](../evidence/2026-09-09-acceptance.md)、[审查](../audits/2026-09-09-full-code-review.md)、[协作回执](HANDOFF.md)。
+
+AgentEval最终dfdb083已push，报告远程可读、CI34253136990成功；最终链接与历史评分版本均已更新根handover。本项目实现仍c1abbf5，后续仅交接证据文档变化。

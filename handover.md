@@ -49,9 +49,9 @@
 - 真实配置轨provider对象必须包含 `base_url`、`model`、`api_key` 和正整数 `run_token_budget`，可选项见适配器。密钥不写入公共state或输出；不要把provider对象打印到日志。完成后exports/artifacts含可离线核验字节、relative_path与sha256。
 - Token预算能力：`app.evaluation.adapter.evaluation_budget_capabilities()` 返回 `risk-eval-budget/v1`，scope为run_planner_and_reviewer。每次输入UTF8字节+输出上限+256预留，所有Planner/Reviewer共用Run账本，429重试另预留；usage.total_tokens未知为null，budget_tokens_used按实际/预留最大值累计。外部调度器必须按trial预留Token总额，不能换算为未知美元。真实Profile拒绝0、负数、非整数（包括布尔值）预算；能力声明需与固定源码和回归一起核验。
 - 产品HTTP均在 `/api/v1` 下：`POST /runs/preflight`、`POST /runs`、`GET /runs/compare?left=...&right=...`、`POST /runs/{id}/cancel`，聊天 `POST /projects/{id}/conversation/actions/{action_id}`；请求与返回以对应Pydantic/API实现为准。
-- AgentEval外部合同 `agent-eval/1.0.0`（联调期）；对方当前实现 `50c14b61947d1c581dd56963b707e99c8e9df89c`、当前评分器 `domain-graders/3`。旧新版独立报告中的历史重评分实际版本为 `domain-graders/2`，不可改写为3。
-- 对方报告位于 AgentEval仓库 `reports/dual-domain/2026-09-09-risk.md`，索引 `risk-evidence-summary.json`，失败草稿 `risk-failure-drafts.jsonl`。已核实读取，报告尚待对方最终提交/推送；对方已回报4e9bc54生产Worker单题实际通过（47.61秒），仍非真实LLM；本项目不修改或代发其源码。
-- 已完成联合证据覆盖旧86c8014/新bf3a5ac，各risk-dev/3五题×1；旧2/5规则通过、3/5缺证据，新5/5规则通过，属于历史证据重评分，不能换算质量提升。MOB30产品Worker0/3优化各1次，开发选择值0.7099→0.7157、26.69→45.08秒，目标均unmet；并非真实LLM收益。最终审计提交ba21194/预检4e9bc54已同步，对方最终复跑如未回报则记未测。
+- AgentEval外部合同 `agent-eval/1.0.0`（联调期）；对方联调阶段实现 `50c14b61947d1c581dd56963b707e99c8e9df89c`，最终已推送 `dfdb083132f63ed909af49b657377289686e7460`；当前评分器 `domain-graders/3`。旧新版独立报告中的历史重评分实际版本为 `domain-graders/2`，不可改写为3。
+- 对方报告位于 AgentEval仓库 `reports/dual-domain/2026-09-09-risk.md`，索引 `risk-evidence-summary.json`，失败草稿 `risk-failure-drafts.jsonl`。已核实读取，最终[独立报告](https://github.com/aaaaaaa-feng/agent-eval-lab/blob/codex/dual-domain-evaluation/reports/dual-domain/2026-09-09-risk.md)已核实远程可读；对方[CI34253136990](https://github.com/aaaaaaa-feng/agent-eval-lab/actions/runs/34253136990)已成功，提交dfdb083。对方已回报4e9bc54生产Worker单题实际通过（47.61秒），仍非真实LLM；本项目不修改或代发其源码。
+- 已完成联合证据覆盖旧86c8014/新bf3a5ac，各risk-dev/3五题×1；旧2/5规则通过、3/5缺证据，新5/5规则通过，属于历史证据重评分，不能换算质量提升。MOB30产品Worker0/3优化各1次，开发选择值0.7099→0.7157、26.69→45.08秒，目标均unmet；并非真实LLM收益。最终审计提交ba21194/预检4e9bc54已同步，已回报4e9bc54 Worker单题及c1abbf5机器能力、两项独立无网络共享预算回归；c1abbf5的完整五题真实重跑仍未完成。[预算证据](https://github.com/aaaaaaa-feng/agent-eval-lab/blob/codex/dual-domain-evaluation/reports/dual-domain/budget-evidence-summary.json)另存，不宣称真实LLM验证。
 
 ## 启动、停止与测试
 
