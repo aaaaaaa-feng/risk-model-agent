@@ -18,7 +18,9 @@ interface Readiness {
   warnings: string[];
   mode: string;
   provider: { configured: boolean; connectivity: string };
-  sample: unknown;
+  sample: { valid_count?: number; positive_count?: number; negative_count?: number };
+  split: { method?: string; summary?: Record<string, { rows: number }>; time_cutoff?: string };
+  resources: { memory_budget_mb: number; models: string[]; run_token_budget: number };
 }
 export function RunPreflight({
   projectId,
@@ -98,7 +100,7 @@ export function RunPreflight({
         />
       </label>
       <label>
-        建模优化时间上限（秒）
+        工具计算总时间上限（秒）
         <Input
           type="number"
           min={1}
@@ -149,10 +151,27 @@ export function RunPreflight({
           {value.warnings.map((item) => (
             <p key={item}>{item}</p>
           ))}
-          <details>
-            <summary>查看样本诊断</summary>
-            <pre>{JSON.stringify(value.sample, null, 2)}</pre>
-          </details>
+          <p>
+            有效样本 {value.sample.valid_count ?? "未知"} 行，正样本{" "}
+            {value.sample.positive_count ?? "未知"} 行， 负样本{" "}
+            {value.sample.negative_count ?? "未知"} 行。
+          </p>
+          <p>
+            建议划分：
+            {value.split.method === "time_holdout"
+              ? "时间留出"
+              : value.split.method
+                ? "分层随机"
+                : "待修正"}
+            ； 训练 {value.split.summary?.train?.rows ?? "未知"} 行、开发验证{" "}
+            {value.split.summary?.test?.rows ?? "未知"} 行、 最终留出{" "}
+            {value.split.summary?.oot?.rows ?? "未知"} 行。运行中仍需确认划分。
+          </p>
+          <p>
+            内存预算 {value.resources.memory_budget_mb} MB；候选算法{" "}
+            {value.resources.models.join("、")}； 单次模型调用累计 Token 上限{" "}
+            {value.resources.run_token_budget || "未设置（本地模式不调用）"}。
+          </p>
         </div>
       ))}
     </section>

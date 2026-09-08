@@ -66,6 +66,25 @@ def preflight(
                     "action": "在模型设置中配置有限的单次 Token 预算",
                 }
             )
+        if settings.monthly_token_budget > 0:
+            from app.core.database import now_iso
+
+            month = now_iso()[:7]
+            used = sum(
+                max(
+                    int((item.get("usage") or {}).get("total_tokens") or 0),
+                    int((item.get("usage") or {}).get("reserved_tokens") or 0),
+                )
+                for item in ctx.database.list_all("provider_requests")
+                if str(item.get("created_at", ""))[:7] == month
+            )
+            if used >= settings.monthly_token_budget:
+                blockers.append(
+                    {
+                        "code": "MONTHLY_TOKEN_BUDGET_EXHAUSTED",
+                        "action": "检查本月用量，等待下月或明确调整月预算",
+                    }
+                )
     else:
         warnings.append("本次为确定性本地策略，不是真实 LLM Agent 效果验证")
     if connectivity == "not_tested" and settings.llm_enabled:
@@ -101,7 +120,9 @@ def preflight(
                 customer_key=_preferred_customer_key(profile),
                 oot_size=0.2 if time_column else 0,
             )
-            split_summary = {k: v for k, v in split.items() if k != "indices"}
+            split_summary = {
+                k: v for k, v in split.items() if k not in {"indices", "excluded_indices"}
+            }
             split_summary["status"] = "validated_proposal_requires_confirmation"
         except ValueError as error:
             blockers.append(
@@ -124,7 +145,7 @@ def preflight(
             "models": runnable,
             "run_token_budget": settings.run_token_budget,
         },
-        "split": {"status": "requires_confirmation", "final_holdout": "locked_after_split"},
+        "split": {**split_summary, "final_holdout": "locked_after_split"},
     }
 
 

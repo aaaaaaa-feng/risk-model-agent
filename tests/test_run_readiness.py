@@ -11,6 +11,8 @@ def test_preflight_never_claims_untested_provider_connected(context):
     demo = install_demo_project(context.catalog, rows=500)
     result = preflight(context, demo["project"]["id"], demo["target_tasks"][0]["id"])
     assert result["executable"]
+    assert result["split"]["status"] == "validated_proposal_requires_confirmation"
+    assert "indices" not in result["split"]
     assert result["provider"]["connectivity"] == "not_tested"
     assert result["mode"] == "deterministic_product"
     insufficient = preflight(
@@ -48,3 +50,25 @@ def test_missing_snapshot_is_not_comparable(context):
     )
     assert not result["directly_comparable"]
     assert "objective_snapshot_missing" in result["reasons"]
+
+
+def test_preflight_reports_exhausted_monthly_budget(context, monkeypatch):
+    from app.core.database import now_iso
+
+    SettingsStore(context.paths).save(
+        {"llm_enabled": True, "run_token_budget": 10000, "monthly_token_budget": 1}
+    )
+    demo = install_demo_project(context.catalog, rows=500)
+    original = context.database.list_all
+    monkeypatch.setattr(
+        context.database,
+        "list_all",
+        lambda table, *args, **kwargs: (
+            [{"created_at": now_iso(), "usage": {"reserved_tokens": 1}}]
+            if table == "provider_requests"
+            else original(table, *args, **kwargs)
+        ),
+    )
+    result = preflight(context, demo["project"]["id"], demo["target_tasks"][0]["id"])
+    assert not result["executable"]
+    assert any(item["code"] == "MONTHLY_TOKEN_BUDGET_EXHAUSTED" for item in result["blockers"])
