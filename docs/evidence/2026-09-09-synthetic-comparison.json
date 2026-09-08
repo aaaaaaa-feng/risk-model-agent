@@ -1,0 +1,890 @@
+{
+  "schema_version": "risk-demonstration/v1",
+  "git_sha": "ba2119431dc9433b2f664aefba7655c1761c4b7d",
+  "data": "synthetic_time_oot_v1",
+  "rows": 500,
+  "mode": "deterministic_product",
+  "executor": "WorkerProcessRunner",
+  "real_llm_calls": 0,
+  "evidence_kind": "actual_product_worker_synthetic_single_trial_per_strategy",
+  "source_summary_sha256": "4cd913838310c941c9e2e0088ef9bf0612a1c2779c7638a2b93b4d0753a78054",
+  "runs": [
+    {
+      "strategy": "fixed",
+      "run_id": "run_d09a66459a0f3972",
+      "status": "succeeded",
+      "duration_seconds": 23.943692958011525,
+      "max_event_gap_seconds": 2.8218265829782467,
+      "tool_calls": 16,
+      "best_round_id": 0,
+      "stop_reason": "baseline_strategy_complete",
+      "goal_status": "unmet",
+      "metrics": {
+        "oot": {
+          "bad_rate": 0.2894736842105263,
+          "brier": 0.20432449884965942,
+          "ks": 0.5387205387205387,
+          "ks_threshold": 0.1955024608667432,
+          "log_loss": 0.5957721895142294,
+          "negative_count": 27,
+          "positive_count": 11,
+          "pr_auc": 0.6673483525158166,
+          "roc_auc": 0.8013468013468014,
+          "rows": 38
+        },
+        "test": {
+          "bad_rate": 0.20754716981132076,
+          "brier": 0.1609607784461715,
+          "ks": 0.4653679653679654,
+          "ks_threshold": 0.19624537698615127,
+          "log_loss": 0.4993490209937033,
+          "negative_count": 42,
+          "positive_count": 11,
+          "pr_auc": 0.3546580662733113,
+          "roc_auc": 0.6926406926406926,
+          "rows": 53
+        },
+        "train": {
+          "bad_rate": 0.19607843137254902,
+          "brier": 0.153755216949717,
+          "ks": 0.348780487804878,
+          "ks_threshold": 0.18704452820924114,
+          "log_loss": 0.4826026097834981,
+          "negative_count": 205,
+          "positive_count": 50,
+          "pr_auc": 0.3367932722226858,
+          "roc_auc": 0.6917073170731707,
+          "rows": 255
+        }
+      },
+      "delivery_check": {
+        "contract_matches": true,
+        "max_probability_difference": 0.0,
+        "missing_values": "verified",
+        "new_categories": "verified",
+        "package_sha256": "4f97aa4a839b8f1d4ddb72a79c61b1e68b836eac842dce7a0710061cec87eba4",
+        "reload_consistent": true,
+        "sample_rows": 32,
+        "schema_version": "risk-model-delivery/v1",
+        "scope": "本地同版本依赖；仅验证评分可用性，不代表业务目标达成或线上审批能力",
+        "status": "passed"
+      },
+      "objective_snapshot": {
+        "allowed_features": [
+          "age",
+          "monthly_income",
+          "employment_type",
+          "region_group",
+          "prior_delinquencies",
+          "bureau_inquiries_30d",
+          "debt_ratio",
+          "device_risk_index",
+          "account_age_days",
+          "contact_stability"
+        ],
+        "dataset_version_id": "dsv_4ae619b0555e0d80",
+        "forbidden": [
+          "label",
+          "split",
+          "oot",
+          "metric",
+          "code",
+          "external_data"
+        ],
+        "objective": {
+          "max_candidate_fits": 300,
+          "max_features": 1000,
+          "max_optimizations": 3,
+          "max_overfit_gap": 1.0,
+          "max_psi": 100.0,
+          "max_seconds": 300,
+          "min_improvement": 0.001,
+          "min_ks": 0.0,
+          "patience": 2,
+          "primary_metric": "roc_auc",
+          "schema_version": "risk-objective/v1",
+          "strategy": "fixed",
+          "target_value": 1.0
+        },
+        "schema_version": "risk-objective-snapshot/v1",
+        "score": {
+          "base_odds": 20,
+          "base_score": 600,
+          "maximum": 900,
+          "minimum": 300,
+          "pdo": 50
+        },
+        "split_hash": "aa078a16025009f463b79fad8fb61c1e7d27a7a4583a6d8e1b8388582961fd86",
+        "target": "FPD0",
+        "version": "7c8ac2a118c82ebfe5b5de1cc38196baa83f2dd8df220c61b40613dcf6e4ff22",
+        "working_data_sha256": "c221eb4897a39c8175af04629b843056779e98bf8a224af98526aaa1c336d14f"
+      },
+      "candidate_fits": 9,
+      "rounds": [
+        {
+          "round_id": 0,
+          "parent_hash": null,
+          "plan_hash": "48abecd8b7fcbdf0b5f71748ecd08b96c8c1f1532ffd6e70fcb545016e617ba4",
+          "plan": {
+            "features": [
+              "age",
+              "monthly_income",
+              "employment_type",
+              "region_group",
+              "prior_delinquencies",
+              "bureau_inquiries_30d",
+              "debt_ratio",
+              "device_risk_index",
+              "account_age_days",
+              "contact_stability"
+            ],
+            "models": [
+              "regularized_logistic"
+            ],
+            "parameters": {},
+            "search_budget": 0
+          },
+          "patch": null,
+          "replaced_best": true,
+          "meaningful_improvement": true,
+          "rank": [
+            true,
+            0.6926406926406926
+          ],
+          "previous_delta": null,
+          "best_delta": null,
+          "candidate_fits": 9,
+          "candidate_fits_reserved": 12,
+          "duration_seconds": 1.2505629062652588,
+          "bundle_manifest_sha256": "95af033bd1c9e00ab011477256c61e849f64984e0e8a15faf2feb224afa61ba5"
+        }
+      ]
+    },
+    {
+      "strategy": "parameter_search",
+      "run_id": "run_6425ff3de279a13a",
+      "status": "succeeded",
+      "duration_seconds": 22.10022387499339,
+      "max_event_gap_seconds": 2.39657979097683,
+      "tool_calls": 16,
+      "best_round_id": 0,
+      "stop_reason": "baseline_strategy_complete",
+      "goal_status": "unmet",
+      "metrics": {
+        "oot": {
+          "bad_rate": 0.2894736842105263,
+          "brier": 0.20352878225004298,
+          "ks": 0.521885521885522,
+          "ks_threshold": 0.1982120056830338,
+          "log_loss": 0.593478308870322,
+          "negative_count": 27,
+          "positive_count": 11,
+          "pr_auc": 0.6986874487612087,
+          "roc_auc": 0.8181818181818181,
+          "rows": 38
+        },
+        "test": {
+          "bad_rate": 0.20754716981132076,
+          "brier": 0.16101517475621793,
+          "ks": 0.41774891774891776,
+          "ks_threshold": 0.19527377335664198,
+          "log_loss": 0.4994562218359249,
+          "negative_count": 42,
+          "positive_count": 11,
+          "pr_auc": 0.3482377837216547,
+          "roc_auc": 0.683982683982684,
+          "rows": 53
+        },
+        "train": {
+          "bad_rate": 0.19607843137254902,
+          "brier": 0.15368027450612642,
+          "ks": 0.3385365853658536,
+          "ks_threshold": 0.18637960497526182,
+          "log_loss": 0.4823649492616116,
+          "negative_count": 205,
+          "positive_count": 50,
+          "pr_auc": 0.34359431014774344,
+          "roc_auc": 0.6894634146341463,
+          "rows": 255
+        }
+      },
+      "delivery_check": {
+        "contract_matches": true,
+        "max_probability_difference": 0.0,
+        "missing_values": "verified",
+        "new_categories": "verified",
+        "package_sha256": "154b807838416e9656eddcca76dfeedfbaa8e93ba331a9c614d8e2274b1e03bf",
+        "reload_consistent": true,
+        "sample_rows": 32,
+        "schema_version": "risk-model-delivery/v1",
+        "scope": "本地同版本依赖；仅验证评分可用性，不代表业务目标达成或线上审批能力",
+        "status": "passed"
+      },
+      "objective_snapshot": {
+        "allowed_features": [
+          "age",
+          "monthly_income",
+          "employment_type",
+          "region_group",
+          "prior_delinquencies",
+          "bureau_inquiries_30d",
+          "debt_ratio",
+          "device_risk_index",
+          "account_age_days",
+          "contact_stability"
+        ],
+        "dataset_version_id": "dsv_4ae619b0555e0d80",
+        "forbidden": [
+          "label",
+          "split",
+          "oot",
+          "metric",
+          "code",
+          "external_data"
+        ],
+        "objective": {
+          "max_candidate_fits": 300,
+          "max_features": 1000,
+          "max_optimizations": 3,
+          "max_overfit_gap": 1.0,
+          "max_psi": 100.0,
+          "max_seconds": 300,
+          "min_improvement": 0.001,
+          "min_ks": 0.0,
+          "patience": 2,
+          "primary_metric": "roc_auc",
+          "schema_version": "risk-objective/v1",
+          "strategy": "parameter_search",
+          "target_value": 1.0
+        },
+        "schema_version": "risk-objective-snapshot/v1",
+        "score": {
+          "base_odds": 20,
+          "base_score": 600,
+          "maximum": 900,
+          "minimum": 300,
+          "pdo": 50
+        },
+        "split_hash": "aa078a16025009f463b79fad8fb61c1e7d27a7a4583a6d8e1b8388582961fd86",
+        "target": "FPD0",
+        "version": "ced08d92f8ef82d7a2b13f507f9cb936628e65f2f080462e514b32720bee821c",
+        "working_data_sha256": "c221eb4897a39c8175af04629b843056779e98bf8a224af98526aaa1c336d14f"
+      },
+      "candidate_fits": 14,
+      "rounds": [
+        {
+          "round_id": 0,
+          "parent_hash": null,
+          "plan_hash": "7af65be02a8ac9f3c30968d408f5395d59f613ece240585e5df199aa098741ca",
+          "plan": {
+            "features": [
+              "age",
+              "monthly_income",
+              "employment_type",
+              "region_group",
+              "prior_delinquencies",
+              "bureau_inquiries_30d",
+              "debt_ratio",
+              "device_risk_index",
+              "account_age_days",
+              "contact_stability"
+            ],
+            "models": [
+              "regularized_logistic"
+            ],
+            "parameters": {},
+            "search_budget": 1
+          },
+          "patch": null,
+          "replaced_best": true,
+          "meaningful_improvement": true,
+          "rank": [
+            true,
+            0.683982683982684
+          ],
+          "previous_delta": null,
+          "best_delta": null,
+          "candidate_fits": 14,
+          "candidate_fits_reserved": 17,
+          "duration_seconds": 1.1309750080108643,
+          "bundle_manifest_sha256": "fad771b97ac5e1b264edbb232000409db9068e5534521220e6aa4bb1864c1006"
+        }
+      ]
+    },
+    {
+      "strategy": "agent",
+      "run_id": "run_89f535f7a5510b09",
+      "status": "succeeded",
+      "duration_seconds": 34.05341445899103,
+      "max_event_gap_seconds": 3.8654817499918863,
+      "tool_calls": 22,
+      "best_round_id": 0,
+      "stop_reason": "no_improvement",
+      "goal_status": "unmet",
+      "metrics": {
+        "oot": {
+          "bad_rate": 0.2894736842105263,
+          "brier": 0.20432449884965942,
+          "ks": 0.5387205387205387,
+          "ks_threshold": 0.1955024608667432,
+          "log_loss": 0.5957721895142294,
+          "negative_count": 27,
+          "positive_count": 11,
+          "pr_auc": 0.6673483525158166,
+          "roc_auc": 0.8013468013468014,
+          "rows": 38
+        },
+        "test": {
+          "bad_rate": 0.20754716981132076,
+          "brier": 0.1609607784461715,
+          "ks": 0.4653679653679654,
+          "ks_threshold": 0.19624537698615127,
+          "log_loss": 0.4993490209937033,
+          "negative_count": 42,
+          "positive_count": 11,
+          "pr_auc": 0.3546580662733113,
+          "roc_auc": 0.6926406926406926,
+          "rows": 53
+        },
+        "train": {
+          "bad_rate": 0.19607843137254902,
+          "brier": 0.153755216949717,
+          "ks": 0.348780487804878,
+          "ks_threshold": 0.18704452820924114,
+          "log_loss": 0.4826026097834981,
+          "negative_count": 205,
+          "positive_count": 50,
+          "pr_auc": 0.3367932722226858,
+          "roc_auc": 0.6917073170731707,
+          "rows": 255
+        }
+      },
+      "delivery_check": {
+        "contract_matches": true,
+        "max_probability_difference": 0.0,
+        "missing_values": "verified",
+        "new_categories": "verified",
+        "package_sha256": "0ed60936abd71811f6ba2008dd9ad30270a5e091e2cc9754795ea0da7520ccfe",
+        "reload_consistent": true,
+        "sample_rows": 32,
+        "schema_version": "risk-model-delivery/v1",
+        "scope": "本地同版本依赖；仅验证评分可用性，不代表业务目标达成或线上审批能力",
+        "status": "passed"
+      },
+      "objective_snapshot": {
+        "allowed_features": [
+          "age",
+          "monthly_income",
+          "employment_type",
+          "region_group",
+          "prior_delinquencies",
+          "bureau_inquiries_30d",
+          "debt_ratio",
+          "device_risk_index",
+          "account_age_days",
+          "contact_stability"
+        ],
+        "dataset_version_id": "dsv_4ae619b0555e0d80",
+        "forbidden": [
+          "label",
+          "split",
+          "oot",
+          "metric",
+          "code",
+          "external_data"
+        ],
+        "objective": {
+          "max_candidate_fits": 300,
+          "max_features": 1000,
+          "max_optimizations": 3,
+          "max_overfit_gap": 1.0,
+          "max_psi": 100.0,
+          "max_seconds": 300,
+          "min_improvement": 0.001,
+          "min_ks": 0.0,
+          "patience": 2,
+          "primary_metric": "roc_auc",
+          "schema_version": "risk-objective/v1",
+          "strategy": "agent",
+          "target_value": 1.0
+        },
+        "schema_version": "risk-objective-snapshot/v1",
+        "score": {
+          "base_odds": 20,
+          "base_score": 600,
+          "maximum": 900,
+          "minimum": 300,
+          "pdo": 50
+        },
+        "split_hash": "aa078a16025009f463b79fad8fb61c1e7d27a7a4583a6d8e1b8388582961fd86",
+        "target": "FPD0",
+        "version": "8ce54f6430ee66f69513660a3e0a5cc202170c3292628197dea77416c5a3fc9e",
+        "working_data_sha256": "c221eb4897a39c8175af04629b843056779e98bf8a224af98526aaa1c336d14f"
+      },
+      "candidate_fits": 27,
+      "rounds": [
+        {
+          "round_id": 0,
+          "parent_hash": null,
+          "plan_hash": "48abecd8b7fcbdf0b5f71748ecd08b96c8c1f1532ffd6e70fcb545016e617ba4",
+          "plan": {
+            "features": [
+              "age",
+              "monthly_income",
+              "employment_type",
+              "region_group",
+              "prior_delinquencies",
+              "bureau_inquiries_30d",
+              "debt_ratio",
+              "device_risk_index",
+              "account_age_days",
+              "contact_stability"
+            ],
+            "models": [
+              "regularized_logistic"
+            ],
+            "parameters": {},
+            "search_budget": 0
+          },
+          "patch": null,
+          "replaced_best": true,
+          "meaningful_improvement": true,
+          "rank": [
+            true,
+            0.6926406926406926
+          ],
+          "previous_delta": null,
+          "best_delta": null,
+          "candidate_fits": 9,
+          "candidate_fits_reserved": 12,
+          "duration_seconds": 1.1243681907653809,
+          "bundle_manifest_sha256": "6ae7d94b9dd518c7c05e308fd728b5bd6aa28e9619cb25fd80fcb9379e627dbf"
+        },
+        {
+          "round_id": 1,
+          "parent_hash": "48abecd8b7fcbdf0b5f71748ecd08b96c8c1f1532ffd6e70fcb545016e617ba4",
+          "plan_hash": "fa23f3ddfa8132f5461abb80d5508aa01fbaa23cf2ba537729a9e318f00935d7",
+          "plan": {
+            "features": [
+              "age",
+              "monthly_income",
+              "employment_type",
+              "region_group",
+              "prior_delinquencies",
+              "bureau_inquiries_30d",
+              "debt_ratio",
+              "device_risk_index",
+              "account_age_days",
+              "contact_stability"
+            ],
+            "models": [
+              "extra_trees"
+            ],
+            "parameters": {
+              "extra_trees": {
+                "model__max_depth": 6,
+                "model__min_samples_leaf": 20
+              }
+            },
+            "search_budget": 0
+          },
+          "patch": {
+            "diagnosis": "weak_signal",
+            "evidence_refs": [
+              "rounds.0.validation",
+              "rounds.0.train"
+            ],
+            "expected_effect": "验证泛化是否改善；不保证指标提高",
+            "features": null,
+            "models": [
+              "extra_trees"
+            ],
+            "parameters": {
+              "extra_trees": {
+                "model__max_depth": 6,
+                "model__min_samples_leaf": 20
+              }
+            },
+            "parent_hash": "48abecd8b7fcbdf0b5f71748ecd08b96c8c1f1532ffd6e70fcb545016e617ba4",
+            "reason": "开发验证未达目标，尝试受限非线性候选",
+            "schema_version": "risk-patch-plan/v1",
+            "validation": "frozen_development_protocol"
+          },
+          "replaced_best": false,
+          "meaningful_improvement": false,
+          "rank": [
+            true,
+            0.6926406926406926
+          ],
+          "previous_delta": 0.0,
+          "best_delta": 0.0,
+          "candidate_fits": 9,
+          "candidate_fits_reserved": 12,
+          "duration_seconds": 2.8931660652160645,
+          "bundle_manifest_sha256": "8c266e8ffe7d22994a537774ccd96499cdad48062d9957c2aa00f1fe657cc529"
+        },
+        {
+          "round_id": 2,
+          "parent_hash": "fa23f3ddfa8132f5461abb80d5508aa01fbaa23cf2ba537729a9e318f00935d7",
+          "plan_hash": "284daf35e2e604a849f5a22022f5fdec8a4cfe686f672827483925e28761f2ef",
+          "plan": {
+            "features": [
+              "age",
+              "monthly_income",
+              "employment_type",
+              "region_group",
+              "prior_delinquencies",
+              "bureau_inquiries_30d",
+              "debt_ratio",
+              "device_risk_index",
+              "account_age_days",
+              "contact_stability"
+            ],
+            "models": [
+              "extra_trees"
+            ],
+            "parameters": {
+              "extra_trees": {
+                "model__max_depth": 9,
+                "model__min_samples_leaf": 20
+              }
+            },
+            "search_budget": 0
+          },
+          "patch": {
+            "diagnosis": "weak_signal",
+            "evidence_refs": [
+              "rounds.1.validation",
+              "rounds.1.train"
+            ],
+            "expected_effect": "验证泛化是否改善；不保证指标提高",
+            "features": null,
+            "models": [
+              "extra_trees"
+            ],
+            "parameters": {
+              "extra_trees": {
+                "model__max_depth": 9,
+                "model__min_samples_leaf": 20
+              }
+            },
+            "parent_hash": "fa23f3ddfa8132f5461abb80d5508aa01fbaa23cf2ba537729a9e318f00935d7",
+            "reason": "开发验证未达目标，尝试受限非线性候选",
+            "schema_version": "risk-patch-plan/v1",
+            "validation": "frozen_development_protocol"
+          },
+          "replaced_best": false,
+          "meaningful_improvement": false,
+          "rank": [
+            true,
+            0.6926406926406926
+          ],
+          "previous_delta": 0.0,
+          "best_delta": 0.0,
+          "candidate_fits": 9,
+          "candidate_fits_reserved": 12,
+          "duration_seconds": 2.7574269771575928,
+          "bundle_manifest_sha256": "16baa3045d46aee53ff335ca10db9c7202d9b9c123d1d7adc732967fdfa4a788"
+        }
+      ]
+    }
+  ],
+  "comparisons": [
+    {
+      "schema_version": "risk-comparison/v1",
+      "directly_comparable": true,
+      "reasons": [],
+      "runs": [
+        {
+          "run_id": "run_d09a66459a0f3972",
+          "status": "succeeded",
+          "plan": {
+            "features": [
+              "age",
+              "monthly_income",
+              "employment_type",
+              "region_group",
+              "prior_delinquencies",
+              "bureau_inquiries_30d",
+              "debt_ratio",
+              "device_risk_index",
+              "account_age_days",
+              "contact_stability"
+            ],
+            "models": [
+              "regularized_logistic"
+            ],
+            "parameters": {},
+            "search_budget": 0
+          },
+          "metrics": {
+            "oot": {
+              "bad_rate": 0.2894736842105263,
+              "brier": 0.20432449884965942,
+              "ks": 0.5387205387205387,
+              "ks_threshold": 0.1955024608667432,
+              "log_loss": 0.5957721895142294,
+              "negative_count": 27,
+              "positive_count": 11,
+              "pr_auc": 0.6673483525158166,
+              "roc_auc": 0.8013468013468014,
+              "rows": 38
+            },
+            "test": {
+              "bad_rate": 0.20754716981132076,
+              "brier": 0.1609607784461715,
+              "ks": 0.4653679653679654,
+              "ks_threshold": 0.19624537698615127,
+              "log_loss": 0.4993490209937033,
+              "negative_count": 42,
+              "positive_count": 11,
+              "pr_auc": 0.3546580662733113,
+              "roc_auc": 0.6926406926406926,
+              "rows": 53
+            },
+            "train": {
+              "bad_rate": 0.19607843137254902,
+              "brier": 0.153755216949717,
+              "ks": 0.348780487804878,
+              "ks_threshold": 0.18704452820924114,
+              "log_loss": 0.4826026097834981,
+              "negative_count": 205,
+              "positive_count": 50,
+              "pr_auc": 0.3367932722226858,
+              "roc_auc": 0.6917073170731707,
+              "rows": 255
+            }
+          },
+          "stop_reason": "baseline_strategy_complete",
+          "goal_status": "unmet",
+          "candidate_fits": 9,
+          "reserved_fits": 12,
+          "duration_seconds": 1.2505629062652588,
+          "total_compute_seconds": 23.36933462304296,
+          "model_calls": 0,
+          "cost_usd": null,
+          "total_tokens": 0
+        },
+        {
+          "run_id": "run_6425ff3de279a13a",
+          "status": "succeeded",
+          "plan": {
+            "features": [
+              "age",
+              "monthly_income",
+              "employment_type",
+              "region_group",
+              "prior_delinquencies",
+              "bureau_inquiries_30d",
+              "debt_ratio",
+              "device_risk_index",
+              "account_age_days",
+              "contact_stability"
+            ],
+            "models": [
+              "regularized_logistic"
+            ],
+            "parameters": {},
+            "search_budget": 1
+          },
+          "metrics": {
+            "oot": {
+              "bad_rate": 0.2894736842105263,
+              "brier": 0.20352878225004298,
+              "ks": 0.521885521885522,
+              "ks_threshold": 0.1982120056830338,
+              "log_loss": 0.593478308870322,
+              "negative_count": 27,
+              "positive_count": 11,
+              "pr_auc": 0.6986874487612087,
+              "roc_auc": 0.8181818181818181,
+              "rows": 38
+            },
+            "test": {
+              "bad_rate": 0.20754716981132076,
+              "brier": 0.16101517475621793,
+              "ks": 0.41774891774891776,
+              "ks_threshold": 0.19527377335664198,
+              "log_loss": 0.4994562218359249,
+              "negative_count": 42,
+              "positive_count": 11,
+              "pr_auc": 0.3482377837216547,
+              "roc_auc": 0.683982683982684,
+              "rows": 53
+            },
+            "train": {
+              "bad_rate": 0.19607843137254902,
+              "brier": 0.15368027450612642,
+              "ks": 0.3385365853658536,
+              "ks_threshold": 0.18637960497526182,
+              "log_loss": 0.4823649492616116,
+              "negative_count": 205,
+              "positive_count": 50,
+              "pr_auc": 0.34359431014774344,
+              "roc_auc": 0.6894634146341463,
+              "rows": 255
+            }
+          },
+          "stop_reason": "baseline_strategy_complete",
+          "goal_status": "unmet",
+          "candidate_fits": 14,
+          "reserved_fits": 17,
+          "duration_seconds": 1.1309750080108643,
+          "total_compute_seconds": 21.49494429002516,
+          "model_calls": 0,
+          "cost_usd": null,
+          "total_tokens": 0
+        }
+      ],
+      "note": "Test 为开发选择集；OOT 仅用于最终验证。成本未知显示 null，不按轮数推断资源相等。"
+    },
+    {
+      "schema_version": "risk-comparison/v1",
+      "directly_comparable": true,
+      "reasons": [],
+      "runs": [
+        {
+          "run_id": "run_d09a66459a0f3972",
+          "status": "succeeded",
+          "plan": {
+            "features": [
+              "age",
+              "monthly_income",
+              "employment_type",
+              "region_group",
+              "prior_delinquencies",
+              "bureau_inquiries_30d",
+              "debt_ratio",
+              "device_risk_index",
+              "account_age_days",
+              "contact_stability"
+            ],
+            "models": [
+              "regularized_logistic"
+            ],
+            "parameters": {},
+            "search_budget": 0
+          },
+          "metrics": {
+            "oot": {
+              "bad_rate": 0.2894736842105263,
+              "brier": 0.20432449884965942,
+              "ks": 0.5387205387205387,
+              "ks_threshold": 0.1955024608667432,
+              "log_loss": 0.5957721895142294,
+              "negative_count": 27,
+              "positive_count": 11,
+              "pr_auc": 0.6673483525158166,
+              "roc_auc": 0.8013468013468014,
+              "rows": 38
+            },
+            "test": {
+              "bad_rate": 0.20754716981132076,
+              "brier": 0.1609607784461715,
+              "ks": 0.4653679653679654,
+              "ks_threshold": 0.19624537698615127,
+              "log_loss": 0.4993490209937033,
+              "negative_count": 42,
+              "positive_count": 11,
+              "pr_auc": 0.3546580662733113,
+              "roc_auc": 0.6926406926406926,
+              "rows": 53
+            },
+            "train": {
+              "bad_rate": 0.19607843137254902,
+              "brier": 0.153755216949717,
+              "ks": 0.348780487804878,
+              "ks_threshold": 0.18704452820924114,
+              "log_loss": 0.4826026097834981,
+              "negative_count": 205,
+              "positive_count": 50,
+              "pr_auc": 0.3367932722226858,
+              "roc_auc": 0.6917073170731707,
+              "rows": 255
+            }
+          },
+          "stop_reason": "baseline_strategy_complete",
+          "goal_status": "unmet",
+          "candidate_fits": 9,
+          "reserved_fits": 12,
+          "duration_seconds": 1.2505629062652588,
+          "total_compute_seconds": 23.36933462304296,
+          "model_calls": 0,
+          "cost_usd": null,
+          "total_tokens": 0
+        },
+        {
+          "run_id": "run_89f535f7a5510b09",
+          "status": "succeeded",
+          "plan": {
+            "features": [
+              "age",
+              "monthly_income",
+              "employment_type",
+              "region_group",
+              "prior_delinquencies",
+              "bureau_inquiries_30d",
+              "debt_ratio",
+              "device_risk_index",
+              "account_age_days",
+              "contact_stability"
+            ],
+            "models": [
+              "regularized_logistic"
+            ],
+            "parameters": {},
+            "search_budget": 0
+          },
+          "metrics": {
+            "oot": {
+              "bad_rate": 0.2894736842105263,
+              "brier": 0.20432449884965942,
+              "ks": 0.5387205387205387,
+              "ks_threshold": 0.1955024608667432,
+              "log_loss": 0.5957721895142294,
+              "negative_count": 27,
+              "positive_count": 11,
+              "pr_auc": 0.6673483525158166,
+              "roc_auc": 0.8013468013468014,
+              "rows": 38
+            },
+            "test": {
+              "bad_rate": 0.20754716981132076,
+              "brier": 0.1609607784461715,
+              "ks": 0.4653679653679654,
+              "ks_threshold": 0.19624537698615127,
+              "log_loss": 0.4993490209937033,
+              "negative_count": 42,
+              "positive_count": 11,
+              "pr_auc": 0.3546580662733113,
+              "roc_auc": 0.6926406926406926,
+              "rows": 53
+            },
+            "train": {
+              "bad_rate": 0.19607843137254902,
+              "brier": 0.153755216949717,
+              "ks": 0.348780487804878,
+              "ks_threshold": 0.18704452820924114,
+              "log_loss": 0.4826026097834981,
+              "negative_count": 205,
+              "positive_count": 50,
+              "pr_auc": 0.3367932722226858,
+              "roc_auc": 0.6917073170731707,
+              "rows": 255
+            }
+          },
+          "stop_reason": "no_improvement",
+          "goal_status": "unmet",
+          "candidate_fits": 27,
+          "reserved_fits": 36,
+          "duration_seconds": 6.774961233139038,
+          "total_compute_seconds": 33.2523958319216,
+          "model_calls": 0,
+          "cost_usd": null,
+          "total_tokens": 0
+        }
+      ],
+      "note": "Test 为开发选择集；OOT 仅用于最终验证。成本未知显示 null，不按轮数推断资源相等。"
+    }
+  ]
+}
