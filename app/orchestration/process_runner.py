@@ -28,6 +28,7 @@ def _pipeline_process_entry(
     tool: str,
     run_id: str,
     state: dict[str, Any],
+    provider_api_key: str | None,
     output_path: str,
 ) -> None:
     """子进程入口：只组装一次应用服务，不再创建编排引擎。"""
@@ -40,7 +41,7 @@ def _pipeline_process_entry(
     database = Database(paths=paths)
     catalog = CatalogService(database, paths)
     artifacts = ArtifactService(database, paths, catalog)
-    pipeline = RunPipeline(database, paths, catalog, artifacts)
+    pipeline = RunPipeline(database, paths, catalog, artifacts, provider_api_key=provider_api_key)
     destination = Path(output_path)
     temporary = destination.with_suffix(".tmp")
     try:
@@ -94,8 +95,9 @@ def _score_process_entry(
 class WorkerProcessRunner:
     """Hard timeout and RSS boundary for every LangGraph tool invocation."""
 
-    def __init__(self, paths: AppPaths):
+    def __init__(self, paths: AppPaths, provider_api_key: str | None = None):
         self.paths = paths
+        self._provider_api_key = provider_api_key
         self._lock = threading.RLock()
         self._active: set[multiprocessing.Process] = set()
         self._closed = False
@@ -103,10 +105,15 @@ class WorkerProcessRunner:
     def invoke(self, tool: str, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
         return self._run(
             _pipeline_process_entry,
-            (str(self.paths.root), tool, run_id, state),
+            (str(self.paths.root), tool, run_id, state, self._provider_api_key),
             f"tool-{tool}-{run_id[-6:]}",
             run_id=run_id,
-            deadline=state.get("optimization_deadline") if tool == "train_and_review" else None,
+            deadline=min(
+                time.time() + float(state.get("_remaining_seconds", WORKER_TIMEOUT_SECONDS)),
+                float(state.get("optimization_deadline", float("inf")))
+                if tool in {"train_and_review", "diagnose_optimization", "apply_optimization"}
+                else float("inf"),
+            ),
         )
 
     def score_file(
@@ -201,12 +208,39 @@ class WorkerProcessRunner:
 
     @staticmethod
     def _terminate(process: multiprocessing.Process) -> None:
+        import psutil
+
+        descendants = []
+        inspection_failed = False
+        if process.is_alive():
+            try:
+                descendants = psutil.Process(process.pid).children(recursive=True)
+            except psutil.NoSuchProcess:
+                pass
+            except (psutil.AccessDenied, OSError):
+                inspection_failed = True
+        for child in reversed(descendants):
+            try:
+                child.terminate()
+            except psutil.NoSuchProcess:
+                pass
         if process.is_alive():
             process.terminate()
-            process.join(5)
+            process.join(2)
+        _, alive = psutil.wait_procs(descendants, timeout=2)
+        for child in alive:
+            try:
+                child.kill()
+            except psutil.NoSuchProcess:
+                pass
         if process.is_alive() and hasattr(process, "kill"):
             process.kill()
-            process.join(5)
+            process.join(2)
+        _, remaining = psutil.wait_procs(alive, timeout=2)
+        if process.is_alive() or remaining:
+            raise RuntimeError("WORKER_PROCESS_TERMINATION_FAILED")
+        if inspection_failed:
+            raise RuntimeError("WORKER_PROCESS_TREE_INSPECTION_FAILED")
 
 
 def _process_tree_rss(pid: int | None) -> int | None:

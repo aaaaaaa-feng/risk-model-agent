@@ -90,7 +90,12 @@ def test_real_worker_optimizes_and_preserves_global_best(context):
     }
 
 
-def test_second_worse_round_does_not_overwrite_best(context, monkeypatch):
+@pytest.mark.parametrize(
+    "auc,replaced,meaningful", [(0.6, False, False), (0.8005, True, False), (0.82, True, True)]
+)
+def test_second_worse_round_does_not_overwrite_best(
+    context, monkeypatch, auc, replaced, meaningful
+):
     # Deterministic boundary test; synthetic metrics are not model-effect evidence.
     from app.services import pipeline as module
     from app.workers.modeling import ModelBundle
@@ -117,16 +122,22 @@ def test_second_worse_round_does_not_overwrite_best(context, monkeypatch):
 
     monkeypatch.setattr(pipeline, "_reviewer", lambda _: Reviewer())
 
+    class FixedEstimator:
+        def predict_proba(self, frame):
+            import numpy as np
+
+            return np.full((len(frame), 2), 0.5)
+
     def train(*args, **kwargs):
         c = {
             "candidate": "dummy",
             "status": "trained",
             "train_metrics": {"roc_auc": 0.6},
-            "test_metrics": {"roc_auc": 0.6, "ks": 0.2},
+            "test_metrics": {"roc_auc": auc, "ks": 0.2},
             "fit_count": 6,
         }
         return {"candidates": [c], "champion": "dummy"}, {
-            "dummy": ModelBundle("dummy", "dummy", None, ["x"], "none", {}, c)
+            "dummy": ModelBundle("dummy", "dummy", FixedEstimator(), ["x"], "none", {}, c)
         }
 
     monkeypatch.setattr(module, "train_candidates", train)
@@ -139,7 +150,7 @@ def test_second_worse_round_does_not_overwrite_best(context, monkeypatch):
             "search_budget": 0,
         },
         "model_plan": {"resource_plan": plan_resources(60, 2, 1536).as_dict(), "score": {}},
-        "split": {},
+        "split": {"indices": {"train": list(range(30)), "test": list(range(30, 60)), "oot": []}},
         "objective_snapshot": {"objective": Objective().model_dump()},
         "optimization_deadline": 10**12,
         "optimization_rounds": [{"rank": [True, 0.8]}],
@@ -150,8 +161,10 @@ def test_second_worse_round_does_not_overwrite_best(context, monkeypatch):
     }
     original = deepcopy(state)
     update = pipeline.train_and_review(new_id("run"), state)
-    assert "model_result" not in update
-    assert not update["optimization_rounds"][-1]["replaced_best"]
+    assert ("model_result" in update) == replaced
+    assert update["optimization_rounds"][-1]["replaced_best"] == replaced
+    assert update["optimization_rounds"][-1]["meaningful_improvement"] == meaningful
+    assert update["no_improvement_count"] == (0 if meaningful else 1)
     assert state == original
 
 

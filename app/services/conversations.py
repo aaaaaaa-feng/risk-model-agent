@@ -196,7 +196,9 @@ class ConversationService:
                     "target_task_id": run["target_task_id"],
                     "action": "retrain",
                     "status": "proposed",
-                    "objective": state.get("requested_objective") or {},
+                    "objective": (state.get("objective_snapshot") or {}).get("objective")
+                    or state.get("requested_objective")
+                    or {},
                 },
             )
         for chunk in _chunks(answer, 36):

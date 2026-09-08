@@ -120,7 +120,7 @@ def _run_eval_case_in_process(
         from app.orchestration.process_runner import WorkerProcessRunner
 
         runner = (
-            WorkerProcessRunner(paths)
+            WorkerProcessRunner(paths, provider_api_key=provider_payload["api_key"])
             if parsed.executor_track == "product_worker"
             else EvaluationToolRunner(pipeline, parsed.faults)
         )
@@ -279,7 +279,7 @@ def _provider_settings(profile: str, provider: dict[str, Any] | None) -> dict[st
         }
     raw = dict(provider or {})
     api_key = str(raw.pop("api_key", "")).strip()
-    allowed = {"provider", "api_format", "base_url", "model", "reviewer_model"}
+    allowed = {"provider", "api_format", "base_url", "model", "reviewer_model", "run_token_budget"}
     if (
         not api_key
         or not str(raw.get("base_url") or "").strip()
@@ -288,7 +288,10 @@ def _provider_settings(profile: str, provider: dict[str, Any] | None) -> dict[st
         raise ValueError("EVAL_PROVIDER_CONFIG_INCOMPLETE")
     if set(raw) - allowed:
         raise ValueError("EVAL_PROVIDER_CONFIG_FIELD_UNSUPPORTED")
+    if not isinstance(raw.get("run_token_budget"), int) or raw["run_token_budget"] <= 0:
+        raise ValueError("EVAL_PROVIDER_TOKEN_BUDGET_REQUIRED")
     settings = {
+        "run_token_budget": raw["run_token_budget"],
         "provider": str(raw.get("provider") or "custom"),
         "api_format": "anthropic" if raw.get("api_format") == "anthropic" else "openai",
         "base_url": str(raw["base_url"]),

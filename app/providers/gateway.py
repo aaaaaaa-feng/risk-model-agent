@@ -239,7 +239,9 @@ class ProviderGateway:
         )
         payload_hash = sha256_bytes(safe_serialized)
         if self._budget_guard:
-            reason = self._budget_guard(max_tokens)
+            reason = self._budget_guard(
+                max_tokens + len(system_prompt.encode("utf-8")) + len(safe_serialized) + 256
+            )
             if reason:
                 provider_request_id = ""
                 if self._request_callback:
@@ -364,6 +366,17 @@ class ProviderGateway:
             purpose=purpose,
             _defer_result_callback=True,
         )
+        if result.error_code == "PROVIDER_RATE_LIMITED":
+            # One explicit retry for a rejected request, with a fresh budget reservation.
+            # Timeouts have uncertain upstream side effects and are never retried here.
+            self._finalize_result(result, started, True)
+            result = self.complete(
+                system_prompt,
+                evidence,
+                model=model,
+                purpose=f"{purpose}_retry_1",
+                _defer_result_callback=True,
+            )
         if not result.ok:
             self._finalize_result(result, started, True)
             return None, result

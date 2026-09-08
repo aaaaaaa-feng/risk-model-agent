@@ -141,6 +141,7 @@ def test_configured_provider_secret_is_separated_and_invalid_trial_leaves_no_dir
             "model": "candidate-model",
             "reviewer_model": "reviewer-model",
             "api_key": "ephemeral-eval-secret",
+            "run_token_budget": 32000,
         },
     )
     SettingsStore(app_paths).save(provider["settings"])

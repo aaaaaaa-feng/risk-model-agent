@@ -477,6 +477,11 @@ class RunPipeline:
             "objective": objective,
             "target": state["target"],
             "dataset_version_id": state["working_dataset_version_id"],
+            "working_data_sha256": sha256_file(
+                self.catalog.verified_data_path(
+                    self.catalog.require("dataset_versions", state["working_dataset_version_id"])
+                )
+            ),
             "split_hash": canonical_hash(state["split"]),
             "score": plan["score"],
             "allowed_features": state["screening"]["included"],
@@ -522,6 +527,27 @@ class RunPipeline:
         successful = [c for c in result["candidates"] if c["status"] == "trained"]
         eligible = [c for c in successful if c["candidate"] != "dummy"] or successful
         champion = max(eligible, key=lambda c: candidate_rank(c, objective, len(plan["features"])))
+        from app.workers.scoring import probability_to_score
+
+        development = (
+            frame.iloc[state["split"]["indices"]["train"] + state["split"]["indices"]["test"]]
+            if isinstance(state["split"]["indices"]["train"], list)
+            else pd.concat(
+                [
+                    frame.iloc[state["split"]["indices"]["train"]],
+                    frame.iloc[state["split"]["indices"]["test"]],
+                ]
+            )
+        )
+        score = probability_to_score(
+            bundles[champion["candidate"]].predict_proba(development),
+            **state["model_plan"]["score"],
+        )
+        result["score"] = {
+            "config": score["config"],
+            "floor_rate": score["floor_rate"],
+            "cap_rate": score["cap_rate"],
+        }
         result["champion"] = champion["candidate"]
         result["champion_metrics"] = {
             "train": champion["train_metrics"],
@@ -540,7 +566,8 @@ class RunPipeline:
             raise ValueError("EXECUTION_REVIEW_BLOCKED")
         rank = candidate_rank(champion, objective, len(plan["features"]))
         previous_rank = tuple(state.get("best_rank", [False, -1]))
-        improved = (
+        improved = not rounds or rank > previous_rank
+        meaningful_improvement = (
             not rounds
             or rank[0] > previous_rank[0]
             or (
@@ -562,6 +589,7 @@ class RunPipeline:
             "execution_review": review,
             "result": result,
             "replaced_best": improved,
+            "meaningful_improvement": meaningful_improvement,
             "best_delta": None if not rounds else rank[1] - previous_rank[1],
             "previous_delta": None if not rounds else rank[1] - rounds[-1]["rank"][1],
             "rank": list(rank),
@@ -577,7 +605,9 @@ class RunPipeline:
             "execution_review": review,
             "candidate_fits_used": state.get("candidate_fits_used", 0) + fits,
             "candidate_fits_reserved": state.get("candidate_fits_reserved", 0) + reserved,
-            "no_improvement_count": 0 if improved else state.get("no_improvement_count", 0) + 1,
+            "no_improvement_count": 0
+            if meaningful_improvement
+            else state.get("no_improvement_count", 0) + 1,
         }
         if improved:
             update.update(
@@ -915,6 +945,8 @@ class RunPipeline:
             if hasattr(settings, key):
                 setattr(settings, key, value)
 
+        reserved_tokens = 0
+
         def request_callback(purpose: str, evidence: dict[str, Any], model: str) -> str:
             identifier = new_id("provider")
             digest = sha256_bytes(
@@ -951,7 +983,8 @@ class RunPipeline:
                     "usage_json": {
                         "purpose": purpose,
                         "span_id": span["id"],
-                        "attempt": 1,
+                        "attempt": 2 if purpose.endswith("_retry_1") else 1,
+                        "reserved_tokens": reserved_tokens,
                     },
                     "response_summary": "",
                     "created_at": now_iso(),
@@ -1015,20 +1048,32 @@ class RunPipeline:
                 )
 
         def budget_guard(requested: int) -> str | None:
+            nonlocal reserved_tokens
+            reserved_tokens = 0
             records = self.database.list_all("provider_requests", {"run_id": run_id})
-            used = sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in records)
+            used = sum(
+                max(
+                    int((item.get("usage") or {}).get("total_tokens") or 0),
+                    int((item.get("usage") or {}).get("reserved_tokens") or 0),
+                )
+                for item in records
+            )
             if settings.run_token_budget and used + requested > settings.run_token_budget:
                 return "本 Run 的 Token 预算不足。"
             if settings.monthly_token_budget:
                 current_month = now_iso()[:7]
                 monthly = self.database.list_all("provider_requests")
                 monthly_used = sum(
-                    int((item.get("usage") or {}).get("total_tokens") or 0)
+                    max(
+                        int((item.get("usage") or {}).get("total_tokens") or 0),
+                        int((item.get("usage") or {}).get("reserved_tokens") or 0),
+                    )
                     for item in monthly
                     if str(item.get("created_at", ""))[:7] == current_month
                 )
                 if monthly_used + requested > settings.monthly_token_budget:
                     return "本月 Token 预算不足。"
+            reserved_tokens = requested
             return None
 
         return ProviderGateway(

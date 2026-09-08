@@ -16,10 +16,18 @@
 - 支持 Dummy、WOE Logistic Scorecard、正则化 Logistic、Random Forest、Extra Trees、XGBoost、LightGBM、CatBoost；根据资源运行推荐组合，不默认全跑。
 - 默认评分范围 300—900，高分代表低风险；基准分 600、基准好坏比 20:1、PDO 50，均可在确认节点调整。
 - 由同一份结构化事实数据生成 Web、Excel、单文件 HTML 和模型包；评分结果列以模型版本名称命名。
-- 提供半信任与完全信任两种模式。Reviewer 在独立上下文审核方案、执行证据和报告，最多三轮修复后进入受控降级；安全阻断不能被自动批准。
+- 提供半信任与完全信任两种模式。Reviewer 在独立上下文审核方案、执行证据和报告；阻断即停止，不以重复审核覆盖阻断。默认初始建模一次、最多三次合法优化，保留历史最佳；安全阻断不能被自动批准。
 - SSE 持续输出阶段、节点、Agent、工具、状态、摘要、时间和证据引用；不输出隐藏思维链。
 - 每个 Run 冻结 Git/源码、Prompt、Tool、策略、Provider、数据和环境版本，并生成父子 Span 与脱敏 Trace Bundle；提供隔离 `run_eval_case()` 和单机评测 Harness（Suite/Case/Trial、Outcome/Trajectory/Risk/Efficiency、门禁与 Baseline/Candidate 可比性）。
 - 模型方案支持 0—12 次受控 Train/CV 小网格调参；报告记录每次试验，不使用 OOT 选参。
+
+## 本次自主优化候选版
+
+- 从开发期指标诊断，生成并验证 `risk-patch-plan/v1`，经现有授权节点执行真实重训；重复方案、连续无改善、目标满足和预算均有停止分支。
+- 目标／数据／划分／约束快照固定；最终 OOT 仅在选择并冻结最佳候选后评估一次，不能进入优化反馈。
+- 运行前诊断、聊天重训提议与真实回执、历史运行可比性检查、导出重载评分自检已接入工作台。
+- 无 LLM 时使用明确标识的本地确定性策略。真实 Provider 要求有限 Token 预算；当前合成运行不代表真实模型自主优化收益。
+- 实现、验证和未测范围见 [交接文档](handover.md)、[基线记录](docs/evidence/2026-09-08-baseline.md) 和 [全仓审查](docs/audits/2026-09-09-full-code-review.md)。
 
 ## 数据安全边界
 

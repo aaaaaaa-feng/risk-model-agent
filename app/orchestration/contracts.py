@@ -8,6 +8,7 @@ from app.domain.pipeline import PIPELINE_STEPS
 
 
 class RunState(TypedDict, total=False):
+    compute_seconds_used: float
     provider_snapshot: dict
     request_key: str | None
     requested_objective: dict

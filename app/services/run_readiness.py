@@ -132,9 +132,11 @@ def compare_runs(left: dict, right: dict, database: Any) -> dict:
     if left["project_id"] != right["project_id"]:
         raise ValueError("CROSS_PROJECT_COMPARISON_FORBIDDEN")
     states = [run.get("state") or {} for run in (left, right)]
-    keys = ("target", "split_hash", "score")
+    keys = ("target", "working_data_sha256", "split_hash", "score")
     reasons = []
     snapshots = [s.get("objective_snapshot") or {} for s in states]
+    if not all(snap.get("working_data_sha256") for snap in snapshots):
+        reasons.append("working_data_hash_missing")
     if not all(snapshots):
         reasons.append("objective_snapshot_missing")
     for key in keys:
@@ -174,6 +176,7 @@ def compare_runs(left: dict, right: dict, database: Any) -> dict:
                 "candidate_fits": state.get("candidate_fits_used"),
                 "reserved_fits": state.get("candidate_fits_reserved"),
                 "duration_seconds": sum(r.get("duration_seconds", 0) for r in rounds),
+                "total_compute_seconds": state.get("compute_seconds_used"),
                 "model_calls": len(requests),
                 "cost_usd": None,
                 "total_tokens": sum(

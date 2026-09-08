@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -534,11 +535,26 @@ class RunEngine:
                     "evidence": {"tool_contract": tool, **trace_evidence},
                 },
             )
+            tool_started = time.monotonic()
+            objective = (
+                (state.get("objective_snapshot") or {}).get("objective")
+                or state.get("requested_objective")
+                or {}
+            )
+            remaining_seconds = float(objective.get("max_seconds", 600)) - float(
+                state.get("compute_seconds_used", 0)
+            )
             try:
+                if remaining_seconds <= 0:
+                    raise TimeoutError("RUN_COMPUTE_BUDGET_EXCEEDED")
                 update = self.worker.invoke(
                     tool,
                     run_id,
-                    {**dict(state), "_trace_parent_span_id": span["id"]},
+                    {
+                        **dict(state),
+                        "_trace_parent_span_id": span["id"],
+                        "_remaining_seconds": remaining_seconds,
+                    },
                 )
             except Exception as exc:
                 self.traces.finish_span(
@@ -551,6 +567,9 @@ class RunEngine:
                 raise
             if self.catalog.require("runs", run_id).get("error") == "RUN_CANCELLED":
                 raise ValueError("RUN_CANCELLED")
+            update["compute_seconds_used"] = (
+                float(state.get("compute_seconds_used", 0)) + time.monotonic() - tool_started
+            )
             merged = _jsonable({**state, **update})
             progress = (node_position(node) + 1) / len(TOOL_NODES)
             completed_span = self.traces.finish_span(
