@@ -1,3 +1,4 @@
+import { RunPreflight, type RunObjective } from "./RunPreflight";
 import { ChangeEvent, useMemo, useRef, useState } from "react";
 import { dataApi } from "../api/dataApi";
 import { errorMessage } from "@/shared/lib/format";
@@ -203,6 +204,15 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
       setBusy("");
     }
   };
+  const [objective, setObjective] = useState<RunObjective>({
+    target_value: 0.75,
+    max_optimizations: 3,
+    max_candidate_fits: 300,
+    max_seconds: 600,
+    strategy: "agent",
+  });
+  const [readyKey, setReadyKey] = useState("");
+  const currentReadinessKey = JSON.stringify({ tasks: selectedTaskIds, objective });
   const startRuns = async () => {
     setBusy("runs");
     let first = "";
@@ -212,6 +222,8 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
           project_id: detail.project.id,
           target_task_id: taskId,
           mode: detail.project.mode,
+          objective,
+          request_key: crypto.randomUUID(),
         });
         first ||= result.run.id;
         setSelectedTasks((current) => current.filter((id) => id !== taskId));
@@ -608,7 +620,19 @@ export function DataWorkbench({ detail, onRefresh, onRunsStarted }: Props) {
                   ? "开始后会依次请你确认目标、样本、特征与模型方案。"
                   : "开始后，审核通过的步骤会自动继续。"}
               </p>
-              <Button disabled={!selectedTaskIds.length || Boolean(busy)} onClick={startRuns}>
+              <RunPreflight
+                projectId={detail.project.id}
+                taskIds={selectedTaskIds}
+                objective={objective}
+                onChange={setObjective}
+                onReady={(ready) => setReadyKey(ready ? currentReadinessKey : "")}
+              />
+              <Button
+                disabled={
+                  !selectedTaskIds.length || Boolean(busy) || readyKey !== currentReadinessKey
+                }
+                onClick={startRuns}
+              >
                 {busy === "runs" ? "正在启动…" : `开始建模（${selectedTaskIds.length} 个目标）`}
               </Button>
             </div>

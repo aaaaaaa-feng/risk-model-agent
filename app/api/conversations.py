@@ -43,7 +43,17 @@ def get_conversation(project_id: str, ctx: AppContext = Depends(context)) -> dic
         order_by="created_at ASC",
         limit=5000,
     )
-    return {"conversation": conversation, "messages": messages}
+    proposals = {
+        item["evidence"].get("message_id"): {"id": item["id"], **item["evidence"]}
+        for item in ctx.database.list_all(
+            "conversation_events", {"conversation_id": conversation["id"]}
+        )
+        if item["status"] == "action_proposed"
+    }
+    return {
+        "conversation": conversation,
+        "messages": [{**message, "action": proposals.get(message["id"])} for message in messages],
+    }
 
 
 @router.post("/projects/{project_id}/conversation/messages", status_code=202)
@@ -57,6 +67,57 @@ def send_message(
         payload.content,
         payload.context.model_dump() if payload.context else None,
     )
+
+
+class ActionResolve(BaseModel):
+    approved: bool
+
+
+@router.post("/projects/{project_id}/conversation/actions/{action_id}")
+def resolve_action(
+    project_id: str, action_id: str, payload: ActionResolve, ctx: AppContext = Depends(context)
+) -> dict[str, Any]:
+    with ctx.conversations._lock:
+        event = ctx.catalog.require("conversation_events", action_id)
+        action = event.get("evidence") or {}
+        conversation = ctx.catalog.require("conversations", event["conversation_id"])
+        if (
+            conversation["project_id"] != project_id
+            or action.get("project_id") != project_id
+            or event["status"] != "action_proposed"
+        ):
+            raise ValueError("CHAT_ACTION_SCOPE_INVALID")
+        if action.get("status") in {"executed", "rejected"}:
+            return {"action": action, "run_id": action.get("run_id")}
+        if not payload.approved:
+            action["status"] = "rejected"
+        else:
+            from app.services.run_readiness import preflight
+
+            readiness = preflight(
+                ctx, project_id, action["target_task_id"], action.get("objective")
+            )
+            if not readiness["executable"]:
+                return {"action": action, "preflight": readiness, "run_id": None}
+            source = ctx.catalog.require("runs", action["source_run_id"])
+            run = ctx.engine.create_run(
+                project_id,
+                action["target_task_id"],
+                source["mode"],
+                objective=action.get("objective"),
+                request_key=action_id,
+            )
+            action.update({"status": "executed", "run_id": run["id"]})
+        ctx.database.update("conversation_events", action_id, {"evidence_json": action})
+        ctx.catalog.add_message(
+            project_id,
+            "assistant",
+            "重训已创建，运行编号：" + action["run_id"]
+            if action.get("run_id")
+            else "已拒绝重训提议，未启动运行。",
+            agent="orchestrator",
+        )
+        return {"action": action, "run_id": action.get("run_id")}
 
 
 @router.post("/conversation-messages/{message_id}/feedback", status_code=201)

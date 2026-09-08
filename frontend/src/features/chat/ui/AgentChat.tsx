@@ -60,6 +60,21 @@ export function AgentChat({
   settings,
   onProviderChange,
 }: Props) {
+  const resolveAction = async (message: Message, approved: boolean) => {
+    if (!projectId || !message.action) return;
+    try {
+      const result = await chatApi.resolveAction(projectId, message.action.id, approved);
+      if (result.preflight) {
+        notify(result.preflight.blockers.map((item) => item.action).join("；"), true);
+        return;
+      }
+      setMessages((await chatApi.conversation(projectId)).messages);
+      if (result.run_id)
+        window.location.hash = `/workbench?project=${encodeURIComponent(projectId)}&run=${encodeURIComponent(result.run_id)}`;
+    } catch (error) {
+      notify(errorMessage(error), true);
+    }
+  };
   const contextKey = chatContextKey(context);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -460,6 +475,23 @@ export function AgentChat({
               <div className="chat-bubble">
                 <span className="chat-meta">{message.agent?.replace("_", " ") || "AGENT"}</span>
                 <Markdown>{message.content}</Markdown>
+                {message.action?.status === "proposed" && (
+                  <div className="inline-actions">
+                    <Button onClick={() => resolveAction(message, true)}>
+                      确认重训并进入工作台
+                    </Button>
+                    <Button variant="outline" onClick={() => resolveAction(message, false)}>
+                      拒绝提议
+                    </Button>
+                  </div>
+                )}
+                {message.action?.run_id && (
+                  <a
+                    href={`#/workbench?project=${encodeURIComponent(projectId || "")}&run=${encodeURIComponent(message.action.run_id)}`}
+                  >
+                    查看实际运行回执
+                  </a>
+                )}
                 <div className="message-feedback">
                   <button
                     onClick={() => feedback(message.id, "up")}

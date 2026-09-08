@@ -189,7 +189,22 @@ class RunEngine:
             trial_id=(evaluation_context or {}).get("trial_id"),
             manifest_hash=manifest["manifest_sha256"],
         )
+        settings = SettingsStore(self.paths).load()
+        provider_snapshot = {
+            key: getattr(settings, key)
+            for key in (
+                "provider",
+                "api_format",
+                "base_url",
+                "model",
+                "reviewer_model",
+                "llm_enabled",
+                "run_token_budget",
+                "monthly_token_budget",
+            )
+        }
         state: RunState = {
+            "provider_snapshot": provider_snapshot,
             "requested_objective": requested_objective,
             "request_key": request_key,
             "run_id": identifier,

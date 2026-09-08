@@ -31,7 +31,17 @@ CONVERSATION_PROMPT = PromptSpec(
     "credentials, or PII.",
 )
 
+OPTIMIZATION_PROMPT = PromptSpec(
+    "main-agent-optimization-patch",
+    "1.0.0",
+    "你是受控建模优化 Agent。只基于开发证据生成 risk-patch-plan/v1 JSON。"
+    "禁止改变标签、划分、目标、OOT、评分协议或执行代码。"
+    "输出 parent_hash、diagnosis、evidence_refs、reason、expected_effect、models、parameters；"
+    "diagnosis 只能为 weak_signal/overfit/feature_quality/model_constraint/computation_failure。只用提供的参数域。",
+)
+
 PROMPTS = (
+    OPTIMIZATION_PROMPT,
     MODEL_PLAN_PROMPT,
     REVIEWER_PROMPT,
     CONVERSATION_PROMPT,

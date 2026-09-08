@@ -83,6 +83,33 @@ def preflight(
                 "action": "减少初始候选算法或提高候选拟合预算",
             }
         )
+    from app.services.pipeline import _first_candidate, _preferred_customer_key
+    from app.workers.splitting import freeze_target_samples, split_dataset
+    from app.workers.profiling import diagnose_frame
+
+    profile = diagnose_frame(frame, task["target_column"])["profile"] if sample else {}
+    time_column = _first_candidate(profile, "time_candidate")
+    split_summary = {"status": "blocked"}
+    if sample and not any(item["code"] == "INSUFFICIENT_TARGET_SAMPLES" for item in blockers):
+        try:
+            frozen, _ = freeze_target_samples(frame, task["target_column"])
+            split = split_dataset(
+                frozen,
+                task["target_column"],
+                method="time_holdout" if time_column else "random_stratified",
+                time_column=time_column,
+                customer_key=_preferred_customer_key(profile),
+                oot_size=0.2 if time_column else 0,
+            )
+            split_summary = {k: v for k, v in split.items() if k != "indices"}
+            split_summary["status"] = "validated_proposal_requires_confirmation"
+        except ValueError as error:
+            blockers.append(
+                {
+                    "code": str(error).split(":")[0],
+                    "action": "检查时间／客户字段和各分区样本量，修正数据后重试",
+                }
+            )
     return {
         "schema_version": "risk-preflight/v1",
         "executable": not blockers,

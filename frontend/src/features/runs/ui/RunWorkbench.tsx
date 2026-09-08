@@ -1,3 +1,4 @@
+import { OptimizationProgress } from "./OptimizationProgress";
 import { formatMetric } from "@/shared/lib/format";
 import { runStageLabel, statusLabel } from "../lib/labels";
 import { eventSummary, translateError } from "@/shared/lib/errors";
@@ -48,6 +49,7 @@ export function RunWorkbench({
     );
     return (
       <div className="run-workbench">
+        <OptimizationProgress run={run} />
         <div className="error-panel">
           <span className="eyebrow">{run.status === "failed" ? "执行异常" : "安全停止"}</span>
           <h2>{run.status === "failed" ? "当前 Run 执行失败" : "当前 Run 已安全停止"}</h2>
@@ -67,6 +69,7 @@ export function RunWorkbench({
   }
   return (
     <div className="run-workbench">
+      <OptimizationProgress run={run} />
       {run.status === "awaiting_decision" && (
         <div className="workflow-next" role="status">
           <strong>{pendingTitle || "当前方案等待确认"}</strong>

@@ -600,3 +600,35 @@ def test_response_stream_bypasses_history_cap_and_recovers_completed_reconnect(a
         assert "event: stream_end" in reconnected.text
         assert '"recovered": true' in reconnected.text
         assert "event: conversation_event" not in reconnected.text
+
+
+def test_chat_retrain_proposal_receipt_and_duplicate_confirmation(app_paths):
+    from app.core.config import SettingsStore
+    from app.workers.demo import install_demo_project
+    from tests.conftest import wait_for_run
+
+    app = create_app(app_paths, auto_migrate=False)
+    with TestClient(app) as client:
+        ctx = app.state.context
+        SettingsStore(ctx.paths).save({"llm_enabled": False})
+        demo = install_demo_project(ctx.catalog, mode="semi_trusted", rows=500)
+        project_id = demo["project"]["id"]
+        first = ctx.engine.create_run(project_id, demo["target_tasks"][0]["id"], "semi_trusted")
+        wait_for_run(ctx, first["id"], {"awaiting_decision"}, 30)
+        ctx.engine.cancel(first["id"])
+        sent = client.post(
+            f"/api/v1/projects/{project_id}/conversation/messages",
+            json={"content": "请重新训练", "context": {"run_id": first["id"]}},
+        ).json()
+        _wait_for_response(ctx, sent["conversation_id"], sent["response_id"])
+        messages = client.get(f"/api/v1/projects/{project_id}/conversation").json()["messages"]
+        proposal = next(m["action"] for m in messages if m.get("action"))
+        assert proposal["status"] == "proposed"
+        assert len(ctx.database.list_all("runs", {"project_id": project_id})) == 1
+        url = f"/api/v1/projects/{project_id}/conversation/actions/{proposal['id']}"
+        receipt = client.post(url, json={"approved": True}).json()
+        repeated = client.post(url, json={"approved": True}).json()
+        assert receipt["run_id"] == repeated["run_id"] != first["id"]
+        wait_for_run(ctx, receipt["run_id"], {"awaiting_decision"}, 30)
+        ctx.engine.cancel(receipt["run_id"])
+        assert len(ctx.database.list_all("runs", {"project_id": project_id})) == 2

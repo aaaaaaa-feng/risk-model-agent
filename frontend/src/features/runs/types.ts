@@ -22,7 +22,8 @@ export type DecisionKind =
   | "confirm_split"
   | "confirm_screening"
   | "confirm_binning"
-  | "confirm_models";
+  | "confirm_models"
+  | "confirm_optimization";
 
 export interface Decision {
   id: string;

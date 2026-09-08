@@ -2,6 +2,15 @@ import { eventUrl, httpClient } from "@/shared/api/client";
 import type { ChatContext, ConversationResponse, MessagePostResponse } from "../types";
 
 export const chatApi = {
+  resolveAction: (projectId: string, actionId: string, approved: boolean) =>
+    httpClient.post<{
+      run_id?: string;
+      action: { status: string };
+      preflight?: { blockers: { action: string }[] };
+    }>(
+      `/projects/${encodeURIComponent(projectId)}/conversation/actions/${encodeURIComponent(actionId)}`,
+      { approved },
+    ),
   conversation: (projectId: string, signal?: AbortSignal) =>
     httpClient.get<ConversationResponse>(
       `/projects/${encodeURIComponent(projectId)}/conversation`,

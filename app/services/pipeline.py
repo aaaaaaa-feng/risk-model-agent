@@ -10,7 +10,7 @@ from typing import Any, Callable
 import pandas as pd
 
 from app.agents.evidence import build_safe_evidence
-from app.agents.prompts import MODEL_PLAN_PROMPT
+from app.agents.prompts import MODEL_PLAN_PROMPT, OPTIMIZATION_PROMPT
 from app.agents.reviewer import IndependentReviewer
 from app.core.config import SettingsStore
 from app.core.database import Database, new_id, now_iso
@@ -622,7 +622,7 @@ class RunPipeline:
             from app.domain.optimization import PARAMETERS
 
             payload, response = gateway.complete_json(
-                "你是受控建模优化 Agent。只基于开发证据生成 risk-patch-plan/v1 JSON。禁止改变标签、划分、目标、OOT、评分协议或执行代码。输出 parent_hash、diagnosis、evidence_refs、reason、expected_effect、models、parameters；只用提供的参数域。",
+                OPTIMIZATION_PROMPT.content,
                 {
                     "evidence": evidence,
                     "parent_hash": plan_hash(parent),
@@ -909,6 +909,11 @@ class RunPipeline:
 
     def _gateway(self, run_id: str) -> ProviderGateway:
         settings = SettingsStore(self.paths).load()
+        run = self.catalog.require("runs", run_id) if run_id else {}
+        frozen = (run.get("state") or {}).get("provider_snapshot") or {}
+        for key, value in frozen.items():
+            if hasattr(settings, key):
+                setattr(settings, key, value)
 
         def request_callback(purpose: str, evidence: dict[str, Any], model: str) -> str:
             identifier = new_id("provider")

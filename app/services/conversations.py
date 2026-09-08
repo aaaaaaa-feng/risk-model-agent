@@ -123,9 +123,14 @@ class ConversationService:
             provider_block = normalize_error_code(exc, "DLP_BLOCK")
         settings = SettingsStore(self.paths).load()
         gateway = ProviderGateway(settings=settings, paths=self.paths)
+        action_requested = bool(
+            run
+            and any(term in question for term in ("重训", "重新训练", "重新建模"))
+            and not any(term in question for term in ("不要", "如何", "怎么", "为什么", "解释"))
+        )
         answer = ""
         response_source = "local_fallback"
-        if gateway.enabled and not provider_block:
+        if gateway.enabled and not provider_block and not action_requested:
             history = self._safe_history(history_snapshot, aliases)
             result = gateway.complete(
                 CONVERSATION_PROMPT.content,
@@ -160,6 +165,9 @@ class ConversationService:
                 )
         elif not provider_block:
             provider_block = _provider_unavailable_reason(settings, gateway)
+        if action_requested:
+            answer = "已形成重训提议，尚未执行。确认后将基于同一目标任务创建新的 Run，保留原运行和目标约束，并按项目既有审批方式执行。"
+            response_source = "action_proposal"
         if not answer:
             answer = self._fallback_answer(run, state, provider_block)
         message = self.catalog.add_message(
@@ -173,6 +181,24 @@ class ConversationService:
                 else "API 未连接或不可用时生成的本地降级答复"
             ),
         )
+        if action_requested:
+            self._append_event(
+                conversation_id,
+                "action_proposed",
+                "main_agent",
+                "",
+                "重训提议待确认",
+                {
+                    "schema_version": "risk-chat-action/v1",
+                    "message_id": message["id"],
+                    "project_id": project_id,
+                    "source_run_id": run["id"],
+                    "target_task_id": run["target_task_id"],
+                    "action": "retrain",
+                    "status": "proposed",
+                    "objective": state.get("requested_objective") or {},
+                },
+            )
         for chunk in _chunks(answer, 36):
             self._append_event(
                 conversation_id,

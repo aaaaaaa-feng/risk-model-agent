@@ -243,6 +243,13 @@ export function DecisionWorkbench({ run, decision, onResolved, open = true, onDe
               setEdits={setEdits}
             />
           )}
+          {decision.kind === "confirm_optimization" && (
+            <section>
+              <h3>合法变更与证据</h3>
+              <pre>{JSON.stringify(summary, null, 2)}</pre>
+              <p>拒绝将停止本次运行，不继续训练。</p>
+            </section>
+          )}
           <details className="review-details">
             <summary>查看 Reviewer 结论与证据</summary>
             {review.issues?.length ? (

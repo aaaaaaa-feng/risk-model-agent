@@ -5,6 +5,7 @@ export interface Message {
   agent?: string | null;
   content: string;
   summary: string;
+  action?: { id: string; status: string; run_id?: string } | null;
   created_at: string;
 }
 

@@ -60,6 +60,11 @@ def run_compare(left: str, right: str, ctx: AppContext = Depends(context)) -> di
 
 @router.post("/runs", status_code=202)
 def create_run(payload: RunCreate, ctx: AppContext = Depends(context)) -> dict[str, Any]:
+    from app.services.run_readiness import preflight
+
+    readiness = preflight(ctx, payload.project_id, payload.target_task_id, payload.objective)
+    if not readiness["executable"]:
+        raise HTTPException(409, detail={"code": "RUN_PREFLIGHT_BLOCKED", "preflight": readiness})
     return {"run": _public_run(ctx.engine.create_run(**payload.model_dump()))}
 
 

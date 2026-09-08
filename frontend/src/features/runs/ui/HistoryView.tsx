@@ -1,3 +1,7 @@
+import { useState } from "react";
+import { httpClient } from "@/shared/api/client";
+import { errorMessage } from "@/shared/lib/format";
+import { notify } from "@/shared/lib/notify";
 import { runStageLabel, statusLabel } from "../lib/labels";
 import { Badge, statusVariant } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
@@ -17,6 +21,32 @@ export function HistoryView({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const [comparisonIds, setComparisonIds] = useState<string[]>([]);
+  const [comparison, setComparison] = useState<{
+    directly_comparable: boolean;
+    reasons: string[];
+    runs: {
+      run_id: string;
+      plan: unknown;
+      metrics: unknown;
+      duration_seconds: number;
+      model_calls: number;
+      candidate_fits: number;
+      cost_usd: number | null;
+      stop_reason: string;
+    }[];
+  } | null>(null);
+  const compare = async () => {
+    try {
+      setComparison(
+        await httpClient.get(
+          `/runs/compare?left=${encodeURIComponent(comparisonIds[0])}&right=${encodeURIComponent(comparisonIds[1])}`,
+        ),
+      );
+    } catch (error) {
+      notify(errorMessage(error), true);
+    }
+  };
   const target = new Map(tasks.map((item) => [item.id, item.target_column]));
   return (
     <div className="history-view">
@@ -31,6 +61,50 @@ export function HistoryView({
           TOTAL <b>{runs.length}</b>
         </div>
       </div>
+      <div className="inline-actions">
+        <Button disabled={comparisonIds.length !== 2} onClick={compare}>
+          比较所选两次运行
+        </Button>
+        <span>数据、划分、目标或预算不同会标记不可直接比较</span>
+      </div>
+      {comparison && (
+        <section>
+          <h3>{comparison.directly_comparable ? "符合直接比较条件" : "不可直接比较"}</h3>
+          <p>{comparison.reasons.join("、")}</p>
+          <div className="table-wrap">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>运行</TableHead>
+                  <TableHead>实际拟合 / 模型调用</TableHead>
+                  <TableHead>训练秒数 / 费用</TableHead>
+                  <TableHead>停止原因</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {comparison.runs.map((item) => (
+                  <TableRow key={item.run_id}>
+                    <TableCell>{item.run_id.slice(-10)}</TableCell>
+                    <TableCell>
+                      {item.candidate_fits ?? "未知"} / {item.model_calls}
+                    </TableCell>
+                    <TableCell>
+                      {item.duration_seconds.toFixed(1)} / {item.cost_usd ?? "未知"}
+                    </TableCell>
+                    <TableCell>{item.stop_reason}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          {comparison.runs.map((item) => (
+            <details key={item.run_id}>
+              <summary>{item.run_id.slice(-10)} 方案、变量与指标</summary>
+              <pre>{JSON.stringify({ plan: item.plan, metrics: item.metrics }, null, 2)}</pre>
+            </details>
+          ))}
+        </section>
+      )}
       {runs.length === 0 ? (
         <div className="empty-state">
           <span>EMPTY</span>
@@ -54,6 +128,20 @@ export function HistoryView({
               {runs.map((run) => (
                 <TableRow className={run.id === selectedId ? "selected" : ""} key={run.id}>
                   <TableCell>
+                    <input
+                      type="checkbox"
+                      aria-label={`选择比较 ${run.id}`}
+                      checked={comparisonIds.includes(run.id)}
+                      disabled={comparisonIds.length >= 2 && !comparisonIds.includes(run.id)}
+                      onChange={(event) => {
+                        setComparison(null);
+                        setComparisonIds((ids) =>
+                          event.target.checked
+                            ? [...ids, run.id]
+                            : ids.filter((id) => id !== run.id),
+                        );
+                      }}
+                    />
                     <code>{run.id.slice(-10)}</code>
                   </TableCell>
                   <TableCell>{target.get(run.target_task_id) || "—"}</TableCell>

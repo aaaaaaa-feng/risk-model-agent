@@ -7,6 +7,7 @@ export const runStageLabel: Record<string, string> = {
   screening: "变量筛选",
   binning: "变量分箱",
   model_plan: "建模方案",
+  optimization: "诊断与优化审批",
   // 仅用于展示升级前已被保留并阻断的历史 Run；新流程不再进入该阶段。
   code_review: "旧版代码质检（已停用）",
   training: "训练、调参与校准",
@@ -21,6 +22,7 @@ export const decisionStageName: Record<string, string> = {
   screening: "变量筛选",
   binning: "变量分箱",
   model_plan: "建模方案",
+  optimization: "诊断与优化审批",
 };
 
 export const reviewLabel: Record<string, string> = {
@@ -41,6 +43,7 @@ export const confirmLabel: Record<string, string> = {
   confirm_screening: "冻结变量并继续",
   confirm_binning: "冻结分箱并继续",
   confirm_models: "确认方案并开始训练",
+  confirm_optimization: "批准变更并真实重训",
 };
 
 export function statusLabel(status: string | undefined, fallback?: string): string {

@@ -99,6 +99,9 @@ def test_local_http_boundary_rejects_dns_rebinding_cross_origin_and_remote_bind(
 
 
 def test_semi_trusted_interrupt_resume_and_reject(app_paths):
+    from app.core.config import SettingsStore
+
+    SettingsStore(app_paths).save({"llm_enabled": False})
     app = create_app(app_paths, auto_migrate=False)
     with TestClient(app) as client:
         demo = client.post(

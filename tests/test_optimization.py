@@ -202,3 +202,51 @@ def test_cancel_pending_run_preserves_terminal_state(context):
     context.engine._mark_failure(run["id"], RuntimeError("late worker failure"))
     assert context.catalog.require("runs", run["id"])["error"] == "RUN_CANCELLED"
     assert context.engine.cancel(run["id"])["status"] == "blocked"
+
+
+def test_constructed_nonlinearity_has_real_improving_legal_change():
+    """R02 teaching fixture, not a claimed real-world Agent uplift."""
+    import numpy as np
+    import pandas as pd
+    from app.workers.modeling import train_candidates
+
+    rng = np.random.default_rng(918)
+    x = rng.normal(size=(600, 2))
+    frame = pd.DataFrame({"x1": x[:, 0], "x2": x[:, 1], "Y": (x[:, 0] * x[:, 1] > 0).astype(int)})
+    split = {
+        "indices": {
+            "train": list(range(400)),
+            "test": list(range(400, 500)),
+            "oot": list(range(500, 600)),
+        }
+    }
+    parent = {
+        "models": ["regularized_logistic"],
+        "parameters": {},
+        "features": ["x1", "x2"],
+        "search_budget": 0,
+    }
+    first, _ = train_candidates(
+        frame, "Y", parent["features"], split, models=parent["models"], evaluate_oot=False
+    )
+    from app.domain.optimization import diagnostic_evidence
+
+    evidence = diagnostic_evidence(first, 0)
+    patch = local_proposal(parent, evidence, 1)
+    _, updated = validate_patch(
+        patch, parent, parent["features"], ["regularized_logistic", "extra_trees"], list(evidence)
+    )
+    second, _ = train_candidates(
+        frame,
+        "Y",
+        updated["features"],
+        split,
+        models=updated["models"],
+        candidate_parameters=updated["parameters"],
+        evaluate_oot=False,
+    )
+    assert (
+        second["champion_metrics"]["test"]["roc_auc"]
+        > first["champion_metrics"]["test"]["roc_auc"] + 0.1
+    )
+    assert first["champion_metrics"]["oot"] is second["champion_metrics"]["oot"] is None
