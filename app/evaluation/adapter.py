@@ -117,7 +117,13 @@ def _run_eval_case_in_process(
             ),
             provider_api_key=provider_payload["api_key"],
         )
-        runner = EvaluationToolRunner(pipeline, parsed.faults)
+        from app.orchestration.process_runner import WorkerProcessRunner
+
+        runner = (
+            WorkerProcessRunner(paths)
+            if parsed.executor_track == "product_worker"
+            else EvaluationToolRunner(pipeline, parsed.faults)
+        )
         engine = RunEngine(database, paths, catalog, pipeline, worker=runner)
         demo = install_demo_project(
             catalog,
@@ -130,6 +136,7 @@ def _run_eval_case_in_process(
             demo["project"]["id"],
             task["id"],
             parsed.mode,
+            objective=parsed.objective,
             evaluation_context={
                 "case_id": parsed.case_id,
                 "trial_id": trial_id,
@@ -178,6 +185,17 @@ def _run_eval_case_in_process(
             }
         bundle = traces.bundle(run_id)
         usage = _aggregate_usage(bundle.get("provider_requests") or [])
+        state = catalog.require("runs", run_id).get("state") or {}
+        usage.update(
+            {
+                "executor_track": parsed.executor_track,
+                "execution_mode": parsed.provider_profile,
+                "candidate_fits": state.get("candidate_fits_used"),
+                "candidate_fits_reserved": state.get("candidate_fits_reserved"),
+                "goal_status": state.get("goal_status", "incomplete"),
+                "cost_usd": None,
+            }
+        )
         security_events = list(bundle.get("security_events") or [])
     except Exception as exc:
         terminal = "adapter_failed"
@@ -291,11 +309,16 @@ def _write_artifact_manifest(database: Database, run_id: str, root: Path) -> Pat
             raise ValueError("EVAL_ARTIFACT_PATH_OUTSIDE_WORKSPACE")
         if not path.is_file() or sha256_file(path) != item["checksum"]:
             raise ValueError("EVAL_ARTIFACT_CHECKSUM_MISMATCH")
+        exported = root / "artifacts" / (item["id"] + path.suffix)
+        exported.parent.mkdir(exist_ok=True)
+        shutil.copyfile(path, exported)
         verified_artifacts.append(
             {
                 "id": item["id"],
                 "kind": item["kind"],
                 "checksum": item["checksum"],
+                "sha256": sha256_file(exported),
+                "relative_path": exported.relative_to(root).as_posix(),
                 "size_bytes": path.stat().st_size,
                 "mime_type": item["mime_type"],
                 "verified": True,

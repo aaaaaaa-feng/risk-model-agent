@@ -99,7 +99,15 @@ class RunEngine:
         builder.add_edge("propose_models", "confirm_models")
         self._conditional(builder, "confirm_models", "finalize_models", END)
         builder.add_edge("finalize_models", "train_review")
-        builder.add_edge("train_review", "report_review")
+        builder.add_edge("train_review", "diagnose_optimization")
+        builder.add_conditional_edges(
+            "diagnose_optimization",
+            lambda state: "stop" if state.get("optimization_stop_reason") else "continue",
+            {"stop": "finalize_optimization", "continue": "confirm_optimization"},
+        )
+        self._conditional(builder, "confirm_optimization", "apply_optimization", END)
+        builder.add_edge("apply_optimization", "train_review")
+        builder.add_edge("finalize_optimization", "report_review")
         builder.add_edge("report_review", "write_artifacts")
         builder.add_edge("write_artifacts", "complete")
         builder.add_edge("complete", END)
@@ -119,6 +127,37 @@ class RunEngine:
         target_task_id: str,
         mode: str | None = None,
         evaluation_context: dict[str, Any] | None = None,
+        objective: dict[str, Any] | None = None,
+        request_key: str | None = None,
+    ) -> dict[str, Any]:
+        with self._submit_lock:
+            if request_key:
+                if len(request_key) > 160:
+                    raise ValueError("REQUEST_KEY_INVALID")
+                from app.domain.optimization import Objective
+
+                desired = Objective.model_validate(objective or {}).model_dump()
+                for run in self.database.list_all("runs", {"project_id": project_id}):
+                    state = run.get("state") or {}
+                    if state.get("request_key") == request_key:
+                        if (
+                            run["target_task_id"] != target_task_id
+                            or state.get("requested_objective") != desired
+                        ):
+                            raise ValueError("REQUEST_KEY_CONFLICT")
+                        return run
+            return self._create_run(
+                project_id, target_task_id, mode, evaluation_context, objective, request_key
+            )
+
+    def _create_run(
+        self,
+        project_id: str,
+        target_task_id: str,
+        mode: str | None = None,
+        evaluation_context: dict[str, Any] | None = None,
+        objective: dict[str, Any] | None = None,
+        request_key: str | None = None,
     ) -> dict[str, Any]:
         project = self.catalog.get_project(project_id)
         if project["status"] == "archived":
@@ -129,6 +168,9 @@ class RunEngine:
         selected_mode = mode or project["mode"]
         if selected_mode not in {"semi_trusted", "fully_trusted"}:
             raise ValueError("RUN_MODE_INVALID")
+        from app.domain.optimization import Objective
+
+        requested_objective = Objective.model_validate(objective or {}).model_dump()
         identifier = new_id("run")
         timestamp = now_iso()
         manifest = build_run_manifest(
@@ -148,6 +190,8 @@ class RunEngine:
             manifest_hash=manifest["manifest_sha256"],
         )
         state: RunState = {
+            "requested_objective": requested_objective,
+            "request_key": request_key,
             "run_id": identifier,
             "project_id": project_id,
             "target_task_id": target_task_id,
@@ -275,6 +319,16 @@ class RunEngine:
                 continue
             if run["status"] == "awaiting_decision":
                 continue
+            if run["status"] == "running" and run["node"] in {
+                "train_review",
+                "diagnose_optimization",
+                "finalize_optimization",
+                "write_artifacts",
+            }:
+                self._block_incompatible_graph_run(
+                    run, manifest_graph_version, error_code="RUN_INTERRUPTED_SIDE_EFFECT_UNCERTAIN"
+                )
+                continue
             state = run.get("state") or {
                 "run_id": run["id"],
                 "project_id": run["project_id"],
@@ -361,12 +415,43 @@ class RunEngine:
             trace_error_code=code,
         )
 
+    def cancel(self, run_id: str) -> dict[str, Any]:
+        run = self.catalog.require("runs", run_id)
+        if run["status"] in {"succeeded", "failed", "blocked"}:
+            return run
+        timestamp = now_iso()
+        self.database.transition_run_with_event(
+            run_id,
+            {
+                "status": "blocked",
+                "error": "RUN_CANCELLED",
+                "finished_at": timestamp,
+                "updated_at": timestamp,
+            },
+            {
+                "stage": run["stage"],
+                "node": run["node"],
+                "agent": "human_gate",
+                "tool": None,
+                "status": "blocked",
+                "summary": "用户取消；工作进程将终止，已完成检查点保留",
+                "evidence": {"error_code": "RUN_CANCELLED"},
+                "created_at": timestamp,
+            },
+            target_task_id=run.get("target_task_id"),
+            target_task_data={"status": "blocked", "updated_at": timestamp},
+            close_open_decisions_reason="RUN_CANCELLED",
+            finish_open_trace_status="blocked",
+            trace_error_code="RUN_CANCELLED",
+        )
+        return self.catalog.require("runs", run_id)
+
     def _submit(self, run_id: str, value: Any) -> None:
         with self._submit_lock:
             self._executor.submit(self._invoke, run_id, value)
 
     def _invoke(self, run_id: str, value: Any) -> None:
-        config = {"configurable": {"thread_id": run_id}}
+        config = {"configurable": {"thread_id": run_id}, "recursion_limit": 80}
         try:
             self.traces.mark_running(run_id)
             result = self.graph.invoke(value, config=config)
@@ -390,6 +475,8 @@ class RunEngine:
     ) -> Any:
         def execute(state: RunState) -> dict[str, Any]:
             run_id = state["run_id"]
+            if self.catalog.require("runs", run_id).get("error") == "RUN_CANCELLED":
+                raise ValueError("RUN_CANCELLED")
             span = self.traces.start_span(
                 run_id,
                 kind="tool",
@@ -447,6 +534,8 @@ class RunEngine:
                     evidence={"tool_result": "failed"},
                 )
                 raise
+            if self.catalog.require("runs", run_id).get("error") == "RUN_CANCELLED":
+                raise ValueError("RUN_CANCELLED")
             merged = _jsonable({**state, **update})
             progress = (node_position(node) + 1) / len(TOOL_NODES)
             completed_span = self.traces.finish_span(
@@ -728,6 +817,8 @@ class RunEngine:
         return {"halted": False}
 
     def _mark_success(self, run_id: str, state: dict[str, Any]) -> None:
+        if self.catalog.require("runs", run_id).get("error") == "RUN_CANCELLED":
+            return
         timestamp = now_iso()
         run = self.catalog.require("runs", run_id)
         merged = _jsonable({**(run.get("state") or {}), **state})
@@ -782,6 +873,8 @@ class RunEngine:
         try:
             run = self.catalog.require("runs", run_id)
         except KeyError:
+            return
+        if run.get("error") == "RUN_CANCELLED":
             return
         code = normalize_error_code(error, "RUN_EXECUTION_FAILED")
         if run.get("target_task_id"):
@@ -847,6 +940,7 @@ def _gate_review(state: RunState, stage: str) -> dict[str, Any]:
         "screening": "screening_review",
         "binning": "binning_review",
         "model_plan": "model_plan_review",
+        "optimization": "optimization_review",
     }.get(stage)
     value = state.get(key) if key else None  # type: ignore[literal-required]
     if isinstance(value, dict):

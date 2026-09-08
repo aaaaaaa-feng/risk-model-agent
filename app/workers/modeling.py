@@ -247,6 +247,9 @@ def _fit_one_candidate(
         "test_monotonicity": monotonic,
         "train_test_score_psi": stability,
         "selection_score": selection_score,
+        "fit_count": len(search_trials) * cv.get_n_splits()
+        + cv.get_n_splits()
+        + sum(1 if c["method"] == "uncalibrated" else 3 for c in calibration_candidates),
         "fit_scope": "train_cv_only",
         "selection_scope": "test",
         "resampling": "none",

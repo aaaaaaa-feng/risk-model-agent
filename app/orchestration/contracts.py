@@ -8,6 +8,28 @@ from app.domain.pipeline import PIPELINE_STEPS
 
 
 class RunState(TypedDict, total=False):
+    request_key: str | None
+    requested_objective: dict
+    objective_snapshot: dict
+    active_plan: dict
+    proposed_plan: dict
+    pending_patch: dict
+    optimization_rounds: list[dict]
+    last_model_result: dict
+    best_rank: list
+    best_round_id: int
+    best_manifest_sha256: str
+    candidate_fits_reserved: int
+    candidate_fits_used: int
+    no_improvement_count: int
+    optimization_deadline: float
+    optimization_stop_reason: str | None
+    optimization_evidence: dict
+    optimization_gate: dict
+    optimization_review: dict
+    optimization_decision: dict
+    patch_rejection: dict
+    goal_status: str
     run_id: str
     project_id: str
     target_task_id: str
@@ -61,6 +83,7 @@ class RunState(TypedDict, total=False):
 TOOL_NODES = PIPELINE_STEPS
 
 GATES = {
+    "confirm_optimization": ("optimization", "optimization_gate", "optimization_decision"),
     "confirm_target": ("target_confirmation", "target_gate", "target_decision"),
     "confirm_data": ("data_diagnosis", "data_gate", "data_decision"),
     "confirm_split": ("split", "split_gate", "split_decision"),

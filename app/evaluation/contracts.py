@@ -18,6 +18,8 @@ class EvalCase(BaseModel):
     case_id: str = Field(min_length=3, max_length=120, pattern=r"^[A-Za-z0-9_.-]+$")
     suite_version: str = "risk-agent-eval/v1"
     evaluator_version: str = "risk-agent-target-adapter/v1"
+    executor_track: Literal["evaluation", "product_worker"] = "evaluation"
+    objective: dict[str, Any] = Field(default_factory=dict)
     goal: str = "为给定目标变量完成受控建模流程"
     fixture: Literal["synthetic_time_oot_v1"] = "synthetic_time_oot_v1"
     mode: Literal["semi_trusted", "fully_trusted"] = "semi_trusted"
@@ -60,6 +62,10 @@ class EvalCase(BaseModel):
 
     @model_validator(mode="after")
     def validate_fault_profile(self) -> Self:
+        if self.executor_track == "product_worker" and (
+            self.provider_profile == "fake_provider" or self.faults
+        ):
+            raise ValueError("PRODUCT_WORKER_FAULT_INJECTION_FORBIDDEN")
         provider_faults = [
             value
             for value in self.faults

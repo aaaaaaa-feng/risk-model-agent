@@ -21,14 +21,41 @@ EVENT_BATCH_SIZE = 5000
 
 
 class RunCreate(BaseModel):
+    request_key: str | None = Field(default=None, max_length=160)
     project_id: str
     target_task_id: str
     mode: str | None = None
+    objective: dict[str, Any] | None = None
 
 
 class DecisionResolve(BaseModel):
     approved: bool
     edits: dict[str, Any] = Field(default_factory=dict)
+
+
+class PreflightRequest(BaseModel):
+    project_id: str
+    target_task_id: str
+    objective: dict[str, Any] | None = None
+    test_provider: bool = False
+
+
+@router.post("/runs/preflight")
+def run_preflight(payload: PreflightRequest, ctx: AppContext = Depends(context)) -> dict[str, Any]:
+    from app.services.run_readiness import preflight
+
+    return preflight(
+        ctx, payload.project_id, payload.target_task_id, payload.objective, payload.test_provider
+    )
+
+
+@router.get("/runs/compare")
+def run_compare(left: str, right: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
+    from app.services.run_readiness import compare_runs
+
+    return compare_runs(
+        ctx.catalog.require("runs", left), ctx.catalog.require("runs", right), ctx.database
+    )
 
 
 @router.post("/runs", status_code=202)
@@ -65,6 +92,11 @@ def get_run(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
         else []
     )
     return {"run": _public_run(run), "pending_decisions": pending}
+
+
+@router.post("/runs/{run_id}/cancel")
+def cancel_run(run_id: str, ctx: AppContext = Depends(context)) -> dict[str, Any]:
+    return {"run": _public_run(ctx.engine.cancel(run_id))}
 
 
 @router.get("/runs/{run_id}/decisions")

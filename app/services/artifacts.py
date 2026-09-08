@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import numpy as np
 
 from app.core.database import Database, new_id, now_iso
 from app.core.errors import normalize_error_code
@@ -80,7 +81,7 @@ class ArtifactService:
         reviews = self.database.list(
             "review_records", {"run_id": run["id"]}, order_by="round ASC", limit=100
         )
-        return build_report(
+        report = build_report(
             project=project,
             run=run,
             target_task=task,
@@ -94,6 +95,19 @@ class ArtifactService:
             reviews=reviews,
             lineage=dataset.get("lineage", {}),
         )
+        report["optimization"] = {
+            key: state.get(key)
+            for key in (
+                "objective_snapshot",
+                "optimization_rounds",
+                "best_round_id",
+                "goal_status",
+                "optimization_stop_reason",
+                "candidate_fits_used",
+                "candidate_fits_reserved",
+            )
+        }
+        return report
 
     def write_report_artifacts(
         self, run: dict[str, Any], report: dict[str, Any]
@@ -153,6 +167,39 @@ class ArtifactService:
             directory / f"model-{safe_file_name(model_name)}-model-package.zip",
             dependencies,
         )
+        # Reload exported bytes before advertising this model as ready.
+        sample = frame[bundle.features].head(32).copy()
+        with tempfile.TemporaryDirectory(prefix="risk-delivery-check-") as temporary:
+            root = safe_extract_model_package(package, Path(temporary) / "package")
+            reloaded, reloaded_contract, _, _ = score_package_directory(root, sample)
+            expected = bundle.predict_proba(sample)
+            if not np.allclose(reloaded, expected, atol=1e-10, rtol=1e-10):
+                raise ValueError("MODEL_DELIVERY_RELOAD_MISMATCH")
+            missing = sample.copy()
+            for column in bundle.features:
+                missing[column] = missing[column].astype(object)
+                missing.loc[missing.index[0], column] = np.nan
+            score_package_directory(root, missing)
+            categorical = [
+                c for c in bundle.features if contract["field_types"][c] == "categorical"
+            ]
+            novel = sample.copy()
+            for column in categorical:
+                novel[column] = novel[column].astype(object)
+                novel.loc[novel.index[0], column] = "__delivery_unseen_category__"
+            score_package_directory(root, novel)
+        manifest["delivery_check"] = {
+            "schema_version": "risk-model-delivery/v1",
+            "status": "passed",
+            "package_sha256": sha256_file(package),
+            "sample_rows": len(sample),
+            "max_probability_difference": float(np.max(np.abs(reloaded - expected))),
+            "contract_matches": reloaded_contract == contract,
+            "reload_consistent": True,
+            "missing_values": "verified",
+            "new_categories": "verified" if categorical else "not_applicable",
+            "scope": "本地同版本依赖；仅验证评分可用性，不代表业务目标达成或线上审批能力",
+        }
         model_version = self.database.insert(
             "model_versions",
             {

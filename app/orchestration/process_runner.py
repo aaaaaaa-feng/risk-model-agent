@@ -105,6 +105,8 @@ class WorkerProcessRunner:
             _pipeline_process_entry,
             (str(self.paths.root), tool, run_id, state),
             f"tool-{tool}-{run_id[-6:]}",
+            run_id=run_id,
+            deadline=state.get("optimization_deadline") if tool == "train_and_review" else None,
         )
 
     def score_file(
@@ -117,13 +119,25 @@ class WorkerProcessRunner:
         )
         return dict(result["job"]), dict(result["artifact"])
 
-    def _run(self, target: Any, arguments: tuple[Any, ...], label: str) -> dict[str, Any]:
+    def _run(
+        self,
+        target: Any,
+        arguments: tuple[Any, ...],
+        label: str,
+        run_id: str | None = None,
+        deadline: float | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
             if self._closed:
                 raise RuntimeError("WORKER_RUNNER_CLOSED")
         settings = SettingsStore(self.paths).load()
         memory_limit = max(512, int(settings.memory_budget_mb)) * 1024**2
         timeout = max(1, WORKER_TIMEOUT_SECONDS)
+        if deadline is not None:
+            timeout = min(timeout, max(0, deadline - time.time()))
+        from app.core.database import Database
+
+        database = Database(paths=self.paths) if run_id else None
         working = Path(tempfile.mkdtemp(prefix=f"risk-worker-{label}-", dir=self.paths.root))
         output = working / "result.json"
         process = multiprocessing.get_context("spawn").Process(
@@ -141,6 +155,11 @@ class WorkerProcessRunner:
                 self._active.add(process)
             while process.is_alive():
                 process.join(0.1)
+                if database:
+                    run = database.get("runs", run_id)
+                    if run and run.get("error") == "RUN_CANCELLED":
+                        self._terminate(process)
+                        raise RuntimeError("RUN_CANCELLED")
                 if time.monotonic() - started > timeout:
                     self._terminate(process)
                     raise TimeoutError(f"WORKER_TIMEOUT: {label}")

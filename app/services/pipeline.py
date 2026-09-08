@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -371,6 +372,7 @@ class RunPipeline:
         ]
         models = list(dict.fromkeys(configured or recommend_models(resource)))
         plan = {
+            "objective": state.get("requested_objective", {}),
             "models": models,
             "unavailable_models": unavailable_defaults,
             "search_budget": 0,
@@ -428,7 +430,7 @@ class RunPipeline:
             "model_gate": {
                 "title": "确认候选模型与评分参数",
                 "summary": {"plan": plan, "review": review},
-                "editable": ["models", "score", "search_budget"],
+                "editable": ["models", "score", "search_budget", "objective"],
             },
         }
 
@@ -456,77 +458,297 @@ class RunPipeline:
             run["target_task_id"],
             {"model_plan_json": plan, "updated_at": now_iso()},
         )
-        return {"model_plan": plan}
+        from app.domain.optimization import Objective
+        from app.governance.manifest import canonical_hash
+
+        objective = Objective.model_validate(
+            edits.get("objective", state.get("requested_objective")) or {}
+        ).model_dump()
+        active_plan = {
+            "models": plan["models"],
+            "features": state["screening"]["included"],
+            "parameters": {},
+            "search_budget": plan["search_budget"] if objective["strategy"] != "fixed" else 0,
+        }
+        if objective["strategy"] == "parameter_search":
+            active_plan["search_budget"] = max(1, active_plan["search_budget"])
+        snapshot = {
+            "schema_version": "risk-objective-snapshot/v1",
+            "objective": objective,
+            "target": state["target"],
+            "dataset_version_id": state["working_dataset_version_id"],
+            "split_hash": canonical_hash(state["split"]),
+            "score": plan["score"],
+            "allowed_features": state["screening"]["included"],
+            "forbidden": ["label", "split", "oot", "metric", "code", "external_data"],
+        }
+        snapshot["version"] = canonical_hash(snapshot)
+        if self._estimate_fits(state, active_plan) > objective["max_candidate_fits"]:
+            raise ValueError("INITIAL_FIT_BUDGET_INSUFFICIENT")
+        return {
+            "model_plan": plan,
+            "active_plan": active_plan,
+            "objective_snapshot": snapshot,
+            "optimization_deadline": time.time() + objective["max_seconds"],
+        }
 
     def train_and_review(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
-        frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
-        resource_dict = state["model_plan"]["resource_plan"]
+        from app.domain.optimization import candidate_rank, plan_hash
         from app.workers.io import ResourcePlan
 
-        resource = ResourcePlan(**resource_dict)
-        models = list(state["model_plan"]["models"])
+        frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
+        plan = state["active_plan"]
+        objective = state["objective_snapshot"]["objective"]
+        rounds = list(state.get("optimization_rounds", []))
+        round_id = len(rounds)
+        reserved = self._estimate_fits(state, plan)
+        if state.get("candidate_fits_reserved", 0) + reserved > objective["max_candidate_fits"]:
+            raise ValueError("FIT_BUDGET_EXCEEDED")
+        started = time.time()
+        if started >= state["optimization_deadline"]:
+            raise ValueError("OPTIMIZATION_TIME_BUDGET_EXCEEDED")
+        result, bundles = train_candidates(
+            frame,
+            state["target"],
+            plan["features"],
+            state["split"],
+            models=plan["models"],
+            resource=ResourcePlan(**state["model_plan"]["resource_plan"]),
+            score_config=state["model_plan"]["score"],
+            search_budget=plan["search_budget"],
+            evaluate_oot=False,
+            candidate_parameters=plan.get("parameters"),
+        )
+        successful = [c for c in result["candidates"] if c["status"] == "trained"]
+        eligible = [c for c in successful if c["candidate"] != "dummy"] or successful
+        champion = max(eligible, key=lambda c: candidate_rank(c, objective, len(plan["features"])))
+        result["champion"] = champion["candidate"]
+        result["champion_metrics"] = {
+            "train": champion["train_metrics"],
+            "test": champion["test_metrics"],
+            "oot": None,
+        }
         reviewer = self._reviewer(run_id)
-        final_review: dict[str, Any] = {}
-        result: dict[str, Any] = {}
-        bundles: dict[str, ModelBundle] = {}
-        for repair_round in range(1, 4):
-            result, bundles = train_candidates(
-                frame,
-                state["target"],
-                state["screening"]["included"],
-                state["split"],
-                models=models,
-                resource=resource,
-                score_config=state["model_plan"]["score"],
-                search_budget=int(state["model_plan"].get("search_budget", 0)),
+        safe, _ = build_safe_evidence(
+            state["profile"], state["target_evidence"], state["screening"], result
+        )
+        review = reviewer.combine(
+            "execution", reviewer.review_execution(result), reviewer.llm_review("execution", safe)
+        )
+        self._record_review(run_id, review)
+        if review_blocks_progress(review) or not review_is_approved(review):
+            raise ValueError("EXECUTION_REVIEW_BLOCKED")
+        rank = candidate_rank(champion, objective, len(plan["features"]))
+        previous_rank = tuple(state.get("best_rank", [False, -1]))
+        improved = (
+            not rounds
+            or rank[0] > previous_rank[0]
+            or (
+                rank[0] == previous_rank[0]
+                and rank[1] > previous_rank[1] + objective["min_improvement"]
             )
-            deterministic = reviewer.review_execution(result)
-            safe, _ = build_safe_evidence(
-                state["profile"], state["target_evidence"], state["screening"], result
-            )
-            llm = reviewer.llm_review(
-                "execution",
+        )
+        manifest_hash = self._persist_bundles(run_id, bundles, round_id)
+        fits = sum(c.get("fit_count", 0) for c in result["candidates"])
+        record = {
+            "round_id": round_id,
+            "parent_hash": (state.get("pending_patch") or {}).get("parent_hash"),
+            "plan_hash": plan_hash(plan),
+            "plan": plan,
+            "patch": state.get("pending_patch"),
+            "approval": state.get("optimization_decision")
+            if round_id
+            else state.get("model_decision"),
+            "execution_review": review,
+            "result": result,
+            "replaced_best": improved,
+            "best_delta": None if not rounds else rank[1] - previous_rank[1],
+            "previous_delta": None if not rounds else rank[1] - rounds[-1]["rank"][1],
+            "rank": list(rank),
+            "duration_seconds": time.time() - started,
+            "candidate_fits": fits,
+            "candidate_fits_reserved": reserved,
+            "bundle_manifest_sha256": manifest_hash,
+        }
+        rounds.append(record)
+        update = {
+            "optimization_rounds": rounds,
+            "last_model_result": result,
+            "execution_review": review,
+            "candidate_fits_used": state.get("candidate_fits_used", 0) + fits,
+            "candidate_fits_reserved": state.get("candidate_fits_reserved", 0) + reserved,
+            "no_improvement_count": 0 if improved else state.get("no_improvement_count", 0) + 1,
+        }
+        if improved:
+            update.update(
                 {
-                    **safe,
-                    "repair_round": repair_round,
-                    "prior_review_issues": final_review.get("issues", []),
-                },
+                    "best_rank": list(rank),
+                    "best_round_id": round_id,
+                    "model_result": result,
+                    "best_manifest_sha256": manifest_hash,
+                    "effective_models": list(bundles),
+                }
             )
-            final_review = reviewer.combine("execution", deterministic, llm)
-            final_review["repair_round"] = repair_round
-            self._record_review(run_id, final_review)
-            if review_is_approved(final_review):
-                break
-            trained = [
-                item["candidate"] for item in result["candidates"] if item["status"] == "trained"
-            ]
-            safe_core = [
-                name
-                for name in ("dummy", "scorecard", "regularized_logistic", "extra_trees")
-                if name in trained or available_models().get(name)
-            ]
-            models = list(dict.fromkeys(safe_core))
-        if not review_is_approved(final_review):
-            deterministic = reviewer.review_execution(result)
-            if review_blocks_progress(final_review) or not review_is_approved(deterministic):
-                raise ValueError("EXECUTION_REVIEW_BLOCKED")
-            final_review = {
-                "scope": "execution",
-                "status": "fallback_pass",
-                "issues": final_review.get("issues", []),
-                "evidence": {
-                    "safe_downgrade": "locally_validated_model_after_three_reviewer_rounds"
+        return update
+
+    def diagnose_optimization(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        from app.domain.optimization import (
+            diagnostic_evidence,
+            local_proposal,
+            validate_patch,
+            plan_hash,
+        )
+
+        objective = state["objective_snapshot"]["objective"]
+        rounds = state["optimization_rounds"]
+        reason = None
+        if state["best_rank"][0] and state["best_rank"][1] >= objective["target_value"]:
+            reason = "target_met"
+        elif objective["strategy"] != "agent":
+            reason = "baseline_strategy_complete"
+        elif len(rounds) > objective["max_optimizations"]:
+            reason = "optimization_budget_exhausted"
+        elif state["no_improvement_count"] >= objective["patience"]:
+            reason = "no_improvement"
+        elif time.time() >= state["optimization_deadline"]:
+            reason = "time_budget_exhausted"
+        evidence = diagnostic_evidence(state["last_model_result"], len(rounds) - 1)
+        if reason:
+            return {"optimization_stop_reason": reason, "optimization_evidence": evidence}
+        parent = state["active_plan"]
+        gateway = self._gateway(run_id)
+        source = "deterministic_policy"
+        if gateway.enabled:
+            from app.domain.optimization import PARAMETERS
+
+            payload, response = gateway.complete_json(
+                "你是受控建模优化 Agent。只基于开发证据生成 risk-patch-plan/v1 JSON。禁止改变标签、划分、目标、OOT、评分协议或执行代码。输出 parent_hash、diagnosis、evidence_refs、reason、expected_effect、models、parameters；只用提供的参数域。",
+                {
+                    "evidence": evidence,
+                    "parent_hash": plan_hash(parent),
+                    "legal_parameters": PARAMETERS,
+                    "objective": objective,
+                    "prior_plan_hashes": [r["plan_hash"] for r in rounds],
                 },
+                purpose="main_agent_optimization_patch",
+            )
+            if not payload:
+                return {
+                    "optimization_stop_reason": "provider_unavailable",
+                    "optimization_evidence": evidence,
+                }
+            source = "configured_provider"
+        else:
+            payload = local_proposal(parent, evidence, len(rounds))
+        try:
+            patch, proposed = validate_patch(
+                payload,
+                parent,
+                state["screening"]["included"],
+                [m for m, ok in available_models().items() if ok],
+                list(evidence),
+            )
+            if plan_hash(proposed) in {r["plan_hash"] for r in rounds}:
+                return {
+                    "optimization_stop_reason": "repeated_plan",
+                    "optimization_evidence": evidence,
+                }
+            estimate = self._estimate_fits(state, proposed)
+            if state["candidate_fits_reserved"] + estimate > objective["max_candidate_fits"]:
+                return {
+                    "optimization_stop_reason": "fit_budget_exhausted",
+                    "optimization_evidence": evidence,
+                }
+        except (ValueError, TypeError, KeyError):
+            return {
+                "optimization_stop_reason": "illegal_patch",
+                "optimization_evidence": evidence,
+                "patch_rejection": {"code": "PATCH_VALIDATION_FAILED", "source": source},
             }
-            self._record_review(run_id, final_review)
+        reviewer = self._reviewer(run_id)
+        deterministic = reviewer.review_plan(
+            {"split": state["split_plan"], "models": proposed["models"]},
+            state["diagnostics"],
+            state["screening"],
+        )
+        review = reviewer.combine(
+            "optimization",
+            deterministic,
+            reviewer.llm_review(
+                "optimization",
+                {
+                    "development_evidence": evidence,
+                    "plan": {"models": proposed["models"], "parameters": proposed["parameters"]},
+                },
+            ),
+        )
+        self._record_review(run_id, review)
+        return {
+            "pending_patch": patch,
+            "proposed_plan": proposed,
+            "optimization_evidence": evidence,
+            "optimization_review": review,
+            "optimization_stop_reason": None,
+            "optimization_gate": {
+                "title": f"确认第 {len(rounds)} 次优化方案",
+                "editable": [],
+                "summary": {
+                    "patch": patch,
+                    "source": source,
+                    "evidence": evidence,
+                    "estimated_fits": estimate,
+                    "review": review,
+                },
+            },
+        }
+
+    def apply_optimization(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        from app.domain.optimization import validate_patch
+
+        decision = state.get("optimization_decision") or {}
+        if decision.get("approved") is not True or decision.get("edits"):
+            raise ValueError("OPTIMIZATION_APPROVAL_REQUIRED")
+        _, plan = validate_patch(
+            state["pending_patch"],
+            state["active_plan"],
+            state["screening"]["included"],
+            [m for m, ok in available_models().items() if ok],
+            list(state["optimization_evidence"]),
+        )
+        return {"active_plan": plan}
+
+    def finalize_optimization(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        from copy import deepcopy
+        from app.workers.modeling import evaluate_final_holdout
+
+        result = deepcopy(state["model_result"])
+        bundles = self._load_bundles(run_id, state["best_manifest_sha256"], state["best_round_id"])
+        if not bundles:
+            raise ValueError("BEST_MODEL_BUNDLE_MISSING")
+        frame, _ = freeze_target_samples(self._working_frame(state), state["target"])
+        evaluate_final_holdout(
+            frame, state["target"], state["split"], result, bundles[result["champion"]]
+        )
+        bundles[result["champion"]].metrics = next(
+            c for c in result["candidates"] if c["candidate"] == result["champion"]
+        )
         self._bundles[run_id] = bundles
-        bundle_manifest_sha256 = self._persist_bundles(run_id, bundles)
         return {
             "model_result": result,
-            "execution_review": final_review,
-            "effective_models": list(bundles),
-            "worker_bundle_manifest_sha256": bundle_manifest_sha256,
+            "worker_bundle_manifest_sha256": self._persist_bundles(run_id, bundles),
+            "goal_status": "met"
+            if state["best_rank"][0]
+            and state["best_rank"][1] >= state["objective_snapshot"]["objective"]["target_value"]
+            else "unmet",
         }
+
+    def _estimate_fits(self, state: dict, plan: dict) -> int:
+        # CV search + out-of-fold + up to three calibration variants (1/3/3 fits).
+        return sum(
+            (5 * min(plan.get("search_budget", 0), 12) if m not in {"dummy", "scorecard"} else 0)
+            + 12
+            for m in plan["models"]
+        )
 
     def build_and_review_report(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
         run = self.catalog.require("runs", run_id)
@@ -538,32 +760,12 @@ class RunPipeline:
         safe, _ = build_safe_evidence(
             state["profile"], state["target_evidence"], state["screening"], state["model_result"]
         )
-        final_review: dict[str, Any] = {}
-        for repair_round in range(1, 4):
-            llm = reviewer.llm_review(
-                "report",
-                {
-                    **safe,
-                    "report_schema": report["schema_version"],
-                    "repair_round": repair_round,
-                    "prior_review_issues": final_review.get("issues", []),
-                },
-            )
-            final_review = reviewer.combine("report", deterministic, llm)
-            final_review["repair_round"] = repair_round
-            self._record_review(run_id, final_review)
-            if review_is_approved(final_review):
-                break
-        if not review_is_approved(final_review):
-            if review_blocks_progress(final_review) or not review_is_approved(deterministic):
-                raise ValueError("REPORT_REVIEW_BLOCKED")
-            final_review = {
-                "scope": "report",
-                "status": "fallback_pass",
-                "issues": final_review.get("issues", []),
-                "evidence": {"safe_downgrade": "structured_report_after_three_reviewer_rounds"},
-            }
-            self._record_review(run_id, final_review)
+        final_review = reviewer.combine(
+            "report", deterministic, reviewer.llm_review("report", safe)
+        )
+        self._record_review(run_id, final_review)
+        if review_blocks_progress(final_review) or not review_is_approved(final_review):
+            raise ValueError("REPORT_REVIEW_BLOCKED")
         return {"report": report, "report_review": final_review}
 
     def write_artifacts(self, run_id: str, state: dict[str, Any]) -> dict[str, Any]:
@@ -576,9 +778,7 @@ class RunPipeline:
             if bundles:
                 self._bundles[run_id] = bundles
         if not bundles or state["model_result"]["champion"] not in bundles:
-            replay = self.train_and_review(run_id, state)
-            bundles = self._bundles[run_id]
-            state = {**state, **replay}
+            raise ValueError("BEST_MODEL_BUNDLE_MISSING")
         champion = state["model_result"]["champion"]
         model_version, package_manifest, model_artifact = self.artifacts.write_model_artifacts(
             run, task, bundles[champion], frame
@@ -615,16 +815,20 @@ class RunPipeline:
     def _reviewer(self, run_id: str) -> IndependentReviewer:
         return self.reviewer_factory(self._gateway(run_id))
 
-    def _bundle_dir(self, run_id: str) -> Path:
+    def _bundle_dir(self, run_id: str, round_id: int | None = None) -> Path:
         run = self.catalog.require("runs", run_id)
-        return self.artifacts.run_dir(run["project_id"], run_id) / ".worker-bundles"
+        return self.artifacts.run_dir(run["project_id"], run_id) / (
+            ".worker-bundles" if round_id is None else f".round-{round_id}-bundles"
+        )
 
-    def _persist_bundles(self, run_id: str, bundles: dict[str, ModelBundle]) -> str:
+    def _persist_bundles(
+        self, run_id: str, bundles: dict[str, ModelBundle], round_id: int | None = None
+    ) -> str:
         try:
             import skops.io as sio
         except ImportError as exc:  # pragma: no cover - dependency contract
             raise RuntimeError("SKOPS_DEPENDENCY_REQUIRED") from exc
-        destination = self._bundle_dir(run_id)
+        destination = self._bundle_dir(run_id, round_id)
         stage = Path(tempfile.mkdtemp(prefix=".worker-bundles-", dir=destination.parent))
         manifest: dict[str, Any] = {
             "schema_version": "risk-worker-bundles/v1",
@@ -659,9 +863,9 @@ class RunPipeline:
             shutil.rmtree(stage, ignore_errors=True)
 
     def _load_bundles(
-        self, run_id: str, expected_manifest_sha256: str | None
+        self, run_id: str, expected_manifest_sha256: str | None, round_id: int | None = None
     ) -> dict[str, ModelBundle]:
-        directory = self._bundle_dir(run_id)
+        directory = self._bundle_dir(run_id, round_id)
         manifest_path = directory / "manifest.json"
         if not expected_manifest_sha256 or not manifest_path.is_file():
             return {}
