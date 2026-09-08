@@ -10,7 +10,7 @@
 - 联调：AgentEval固定bf3a5ac五题及Worker对照已回报；4e9bc54 Worker单题47.61秒通过。c1abbf5明确Token单位预算已同步，真实调用未授权。
 - 未测/条件：真实Provider多次运行需要有限Token总额及每次分配；真实数据/用户/专家/安装器实机需要各自授权材料与设备。不用Mock或测试通过率冒充这些证据。
 - 服务：临时8876验收服务已停止并确认端口释放，合成数据保留；默认启动方法见根handover.md。
-- Git：origin已核实为aaaaaaa-feng/risk-model-agent，PUBLIC可见性保持；最终交接提交后push本工作分支并核对远程SHA、文件及CI，不合并main、不强推。
-- 下一步：远程交付验证；后续真实模型/专业/设备验证的具体动作见handover.md，当前无相关效果结论。
+- Git：origin已核实为aaaaaaa-feng/risk-model-agent，PUBLIC可见性保持；交接6c38e43已push，远程SHA和handover文件哈希一致；CI34252340892五项全部success。补充CI验收文档后继续核对最新HEAD，不合并main、不强推。
+- 下一步：核对CI记录文档的最终HEAD；后续真实模型/专业/设备验证的具体动作见handover.md，当前无相关效果结论。
 
 索引：[根交接](../../handover.md)、[逐题验收](../evidence/2026-09-09-acceptance.md)、[审查](../audits/2026-09-09-full-code-review.md)、[协作回执](HANDOFF.md)。

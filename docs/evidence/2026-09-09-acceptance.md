@@ -50,7 +50,7 @@
 - 评测Token预算契约与Provider边界：先10项通过，再补OpenAI/Anthropic未知usage检查及原安全用例16项通过；全部无真实网络调用。
 - 前端：19 文件、90 项通过；白天/黑夜消息对比度通过；typecheck、lint、format:check、build 通过。
 - Ruff 检查及131文件格式检查通过；打包与桌面契约静态检查 valid=true。
-- 最终 GitHub CI 结果另见根目录 handover.md 与 CI 链接。不同层级测试有重叠，不能相加为独立案例总数。
+- 远程6c38e43的 [CI34252340892](https://github.com/aaaaaaa-feng/risk-model-agent/actions/runs/34252340892) 五项全通过：前端、Python3.11/3.12/3.13、Windows桌面壳；最终文档提交状态见根目录handover.md的分支CI索引。不同层级测试有重叠，不能相加为独立案例总数。
 
 ## 三段演示与重现
 

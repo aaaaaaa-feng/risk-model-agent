@@ -121,7 +121,7 @@ npm run build
 - `c1abbf5`：Token预算能力协议、跨Planner/Reviewer账本与未知用量证明、R01/R09验收。
 - 后续验收与交接提交见 [分支历史](https://github.com/aaaaaaa-feng/risk-model-agent/commits/codex/risk-autonomous-optimization)。
 
-[交付分支](https://github.com/aaaaaaa-feng/risk-model-agent/tree/codex/risk-autonomous-optimization)；[本交接文档](https://github.com/aaaaaaa-feng/risk-model-agent/blob/codex/risk-autonomous-optimization/handover.md)；[本分支CI](https://github.com/aaaaaaa-feng/risk-model-agent/actions?query=branch%3Acodex%2Frisk-autonomous-optimization)。本段将随首次推送验证补充具体CI记录；未完成的CI不预先写通过。
+[交付分支](https://github.com/aaaaaaa-feng/risk-model-agent/tree/codex/risk-autonomous-optimization)；[本交接文档](https://github.com/aaaaaaa-feng/risk-model-agent/blob/codex/risk-autonomous-optimization/handover.md)；[本分支CI](https://github.com/aaaaaaa-feng/risk-model-agent/actions?query=branch%3Acodex%2Frisk-autonomous-optimization)。远程实现交付核对：`6c38e43eafaf2a1290dcdf78aca36f703b19756d` 本地与远程一致，根交接文档读取成功且Git blob哈希一致。该提交触发的 [CI 34252340892](https://github.com/aaaaaaa-feng/risk-model-agent/actions/runs/34252340892) 已完成且全部成功：前端、Python3.11/3.12/3.13、Windows desktop-shell，共5项。后续仅补充此验收记录；最终文档提交与实时CI状态见上方分支历史及本分支CI链接，不循环把文档自身提交SHA写入自身内容。
 
 ## 后续优先级与具体动作（计划，未完成）
 
