@@ -187,3 +187,59 @@ def test_product_worker_deadline_stops_real_writes(app_paths):
     time.sleep(0.2)
     assert marker.read_text() == last
     runner.shutdown()
+
+
+@pytest.mark.parametrize("api_format", ["openai", "anthropic"])
+def test_planner_and_reviewer_share_budget_when_usage_unknown(context, monkeypatch, api_format):
+    import httpx
+    from app.core.config import SettingsStore
+    from app.services.pipeline import RunPipeline
+    from app.workers.demo import install_demo_project
+    from app.evaluation.adapter import _aggregate_usage, evaluation_budget_capabilities
+
+    SettingsStore(context.paths).save(
+        {
+            "llm_enabled": True,
+            "run_token_budget": 600,
+            "base_url": "https://eval.invalid/v1",
+            "model": "fake-main",
+            "api_format": api_format,
+        }
+    )
+    demo = install_demo_project(context.catalog, rows=500)
+    monkeypatch.setattr(context.engine, "_submit", lambda *args: None)
+    run = context.engine.create_run(demo["project"]["id"], demo["target_tasks"][0]["id"])
+    bodies = []
+
+    def handle(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "{}"}}]}
+            if api_format == "openai"
+            else {"content": [{"type": "text", "text": "{}"}]},
+        )
+
+    pipeline = RunPipeline(
+        context.database,
+        context.paths,
+        context.catalog,
+        context.artifacts,
+        provider_api_key="fake-not-real",
+        provider_client_factory=lambda **kw: httpx.Client(transport=httpx.MockTransport(handle)),
+    )
+    first = pipeline._gateway(run["id"]).complete(
+        "plan", {}, max_tokens=100, purpose="main_agent_model_plan"
+    )
+    assert first.ok and bodies[0]["max_tokens"] == 100
+    # A fresh Reviewer gateway reads the same durable request ledger.
+    reviewer = pipeline._reviewer(run["id"])
+    second = reviewer.gateway.complete("review", {}, max_tokens=100, purpose="reviewer_plan")
+    assert second.error_code == "PROVIDER_BUDGET_EXCEEDED"
+    assert len(bodies) == 1
+    requests = context.database.list_all("provider_requests", {"run_id": run["id"]})
+    usage = _aggregate_usage(requests)
+    assert usage["total_tokens"] is None
+    assert 350 < usage["budget_tokens_used"] <= 600
+    assert usage["network_request_count"] == 1
+    assert evaluation_budget_capabilities()["unknown_usage"] == "retain_reservation"

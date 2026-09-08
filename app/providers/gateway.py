@@ -179,8 +179,10 @@ class ProviderGateway:
                 if isinstance(block, dict) and block.get("type") == "text"
             ).strip()
             usage = dict(payload.get("usage") or {})
-            usage["total_tokens"] = int(usage.get("input_tokens") or 0) + int(
-                usage.get("output_tokens") or 0
+            usage["total_tokens"] = (
+                int(usage["input_tokens"]) + int(usage["output_tokens"])
+                if usage.get("input_tokens") is not None and usage.get("output_tokens") is not None
+                else None
             )
         else:
             choices = payload.get("choices") or []

@@ -13,3 +13,9 @@
 - 已给评测授权的本次范围：零 LLM 费用，正常/拒批/worker_error 各一次、每次最多300秒、单进程顺序执行。基线固定 86c8014，核心新版固定 bf3a5ac；不得用工作区未提交状态宣称固定版本结果。
 - 评测回报：基线正常 succeeded、拒批 blocked；一次故障注入使用错误工具名，已记录为测试配置问题，不计为产品缺陷，待修正重跑。
 - 总协调补充：最终 handover.md 增加“可用于简历的事实与证据”，不沿用无来源的效率/完成率数字，不写私人简历。
+
+## 2026-09-09 最终联调回执
+
+AgentEval实施50c14b61947d1c581dd56963b707e99c8e9df89c，合同agent-eval/1.0.0，当前domain-graders/3；历史两版重评分实际为domain-graders/2。报告reports/dual-domain/2026-09-09-risk.md已核实读取，五题旧2/5通过另3缺证据，新5/5规则通过，不是模型效果改善。bf3a5ac实际Worker MOB30固定/优化各一次目标均未达，开发指标0.7099/0.7157，26.69/45.08秒。对方回报最终4e9bc54 Worker单题通过47.61秒。
+
+补齐risk-eval-budget/v1能力入口和输出：Token单位，Planner/Reviewer共享Run账本，usage未知保持null及预留；对方调度器以max_total_tokens/max_trial_tokens预留，不假设美元价格。共享账本、输入输出预算、未知usage保守阻断由OpenAI/Anthropic无网络夹具验证。真实调用授权仍未获得。

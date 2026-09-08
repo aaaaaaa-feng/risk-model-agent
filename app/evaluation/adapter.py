@@ -194,6 +194,10 @@ def _run_eval_case_in_process(
                 "candidate_fits_reserved": state.get("candidate_fits_reserved"),
                 "goal_status": state.get("goal_status", "incomplete"),
                 "cost_usd": None,
+                "budget": {
+                    **evaluation_budget_capabilities(),
+                    "run_token_budget": provider_payload["settings"].get("run_token_budget"),
+                },
             }
         )
         security_events = list(bundle.get("security_events") or [])
@@ -288,7 +292,7 @@ def _provider_settings(profile: str, provider: dict[str, Any] | None) -> dict[st
         raise ValueError("EVAL_PROVIDER_CONFIG_INCOMPLETE")
     if set(raw) - allowed:
         raise ValueError("EVAL_PROVIDER_CONFIG_FIELD_UNSUPPORTED")
-    if not isinstance(raw.get("run_token_budget"), int) or raw["run_token_budget"] <= 0:
+    if type(raw.get("run_token_budget")) is not int or raw["run_token_budget"] <= 0:
         raise ValueError("EVAL_PROVIDER_TOKEN_BUDGET_REQUIRED")
     settings = {
         "run_token_budget": raw["run_token_budget"],
@@ -349,11 +353,35 @@ def _write_artifact_manifest(database: Database, run_id: str, root: Path) -> Pat
     return destination
 
 
+def evaluation_budget_capabilities() -> dict[str, Any]:
+    """Versioned implementation contract, to be verified against the pinned source/tests."""
+    return {
+        "schema_version": "risk-eval-budget/v1",
+        "unit": "tokens",
+        "scope": "run_planner_and_reviewer",
+        "reservation": "input_utf8_bytes_plus_output_cap_plus_256",
+        "unknown_usage": "retain_reservation",
+        "network_retries": "one_429_retry_with_new_reservation",
+        "monetary_cost": "unknown",
+        "evidence": "provider_requests[].usage.reserved_tokens",
+    }
+
+
 def _aggregate_usage(requests: list[dict[str, Any]]) -> dict[str, Any]:
+    sent = [item for item in requests if item.get("status") not in {"blocked", "cancelled"}]
+    complete = all((item.get("usage") or {}).get("total_tokens") is not None for item in sent)
     return {
         "provider_request_count": len(requests),
-        "total_tokens": sum(
-            int((item.get("usage") or {}).get("total_tokens") or 0) for item in requests
+        "network_request_count": len(sent),
+        "total_tokens": sum(int(item["usage"]["total_tokens"]) for item in sent)
+        if complete
+        else None,
+        "budget_tokens_used": sum(
+            max(
+                int((item.get("usage") or {}).get("total_tokens") or 0),
+                int((item.get("usage") or {}).get("reserved_tokens") or 0),
+            )
+            for item in requests
         ),
         "status_counts": {
             status: sum(1 for item in requests if item.get("status") == status)

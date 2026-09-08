@@ -263,3 +263,41 @@ def test_constructed_nonlinearity_has_real_improving_legal_change():
         > first["champion_metrics"]["test"]["roc_auc"] + 0.1
     )
     assert first["champion_metrics"]["oot"] is second["champion_metrics"]["oot"] is None
+
+
+def test_initial_target_met_stops_after_one_real_round(context):
+    SettingsStore(context.paths).save(
+        {"llm_enabled": False, "default_models": ["regularized_logistic"]}
+    )
+    demo = install_demo_project(context.catalog, mode="fully_trusted", rows=500)
+    created = context.engine.create_run(
+        demo["project"]["id"],
+        demo["target_tasks"][0]["id"],
+        "fully_trusted",
+        objective={"target_value": 0.5},
+    )
+    run = wait_for_run(context, created["id"], {"succeeded", "failed", "blocked"}, 180)
+    assert run["status"] == "succeeded", run.get("error")
+    state = run["state"]
+    assert state["optimization_stop_reason"] == "target_met"
+    assert state["goal_status"] == "met"
+    assert len(state["optimization_rounds"]) == 1
+    assert state["candidate_fits_used"] == state["optimization_rounds"][0]["candidate_fits"]
+
+
+def test_recovery_blocks_uncertain_training_without_replaying(context, monkeypatch):
+    SettingsStore(context.paths).save({"llm_enabled": False})
+    demo = install_demo_project(context.catalog, mode="semi_trusted", rows=500)
+    # Build a genuine run manifest and trace, but simulate interruption before execution.
+    monkeypatch.setattr(context.engine, "_submit", lambda *args: None)
+    run = context.engine.create_run(
+        demo["project"]["id"], demo["target_tasks"][0]["id"], "semi_trusted"
+    )
+    context.database.update("runs", run["id"], {"status": "running", "node": "train_review"})
+    submitted = []
+    monkeypatch.setattr(context.engine, "_submit", lambda *args: submitted.append(args))
+    assert context.engine.recover_incomplete() == []
+    final = context.catalog.require("runs", run["id"])
+    assert final["status"] == "blocked"
+    assert final["error"] == "RUN_INTERRUPTED_SIDE_EFFECT_UNCERTAIN"
+    assert not submitted
